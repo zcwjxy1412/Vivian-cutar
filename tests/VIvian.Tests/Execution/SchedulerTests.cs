@@ -378,6 +378,20 @@ public sealed class SchedulerTests
     }
 
     [Fact]
+    public async Task EventsAreFullyStoredBeforeTheRunIsReportedFinished()
+    {
+        _journal.EventDelay = TimeSpan.FromSeconds(3);
+        var a = Adapter(GameId.Genshin, run =>
+        {
+            run.Emit("one"); run.Emit("two"); run.Emit("three");
+            run.End(EvidenceKind.CompletionReported);
+            return Task.CompletedTask;
+        });
+        await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(new[] { "one", "two", "three" }, _journal.EventsSnapshot().Select(e => e.Message));
+    }
+
+    [Fact]
     public async Task JournalRecordsEveryPhaseInLegalOrder()
     {
         var a = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));

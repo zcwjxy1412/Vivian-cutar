@@ -102,10 +102,13 @@ public sealed class InMemoryJournal : IRunJournal
         lock (_gate) Updates.Add(update);
     }
 
-    public Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct)
+    /// <summary>When set, each event batch takes this long to store (simulates slow disks).</summary>
+    public TimeSpan EventDelay { get; set; }
+
+    public async Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct)
     {
+        if (EventDelay > TimeSpan.Zero) await Task.Delay(EventDelay, ct);
         lock (_gate) Events.AddRange(events);
-        return Task.CompletedTask;
     }
 
     public int EventCount

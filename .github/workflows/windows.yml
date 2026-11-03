@@ -1,4 +1,4 @@
-name: Windows M1 validation
+name: Windows validation
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
@@ -18,9 +18,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: VIvian-M1-evidence
+          name: VIvian-evidence
           path: |
             artifacts/logs
             artifacts/tests
             artifacts/smoke
-            artifacts/VIvian-M1-win-x64.zip
+            artifacts/VIvian-win-x64.zip

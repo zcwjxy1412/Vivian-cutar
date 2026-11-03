@@ -55,7 +55,7 @@ jobs:
         shell: pwsh
         run: |
           $zip = "artifacts/VIvian-$env:TAG-win-x64.zip"
-          Move-Item 'artifacts/VIvian-M1-win-x64.zip' $zip
+          Move-Item 'artifacts/VIvian-win-x64.zip' $zip
           Compress-Archive -Path 'artifacts/logs','artifacts/tests','artifacts/smoke' -DestinationPath "artifacts/VIvian-$env:TAG-evidence.zip"
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
           $sha = $env:GITHUB_SHA.Substring(0, 7)
@@ -78,6 +78,12 @@ jobs:
 
           便携版 SHA-256：``$hash``
           "@ | Out-File -Encoding utf8 'artifacts/release-notes.md'
+          # Version-specific notes (e.g. the simulation-only warning) go first when present.
+          $specific = "docs/RELEASE_NOTES/$env:TAG.md"
+          if (Test-Path $specific) {
+            (Get-Content -Raw -Encoding utf8 $specific) + "`n---`n`n" + (Get-Content -Raw -Encoding utf8 'artifacts/release-notes.md') |
+              Out-File -Encoding utf8 'artifacts/release-notes.md'
+          }
 
       - name: Create GitHub Release
         shell: pwsh

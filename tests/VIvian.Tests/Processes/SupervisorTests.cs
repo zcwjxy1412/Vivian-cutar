@@ -1,4 +1,6 @@
 using System.Runtime.Versioning;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Processes;
 using Xunit;
@@ -27,6 +29,22 @@ public sealed class SupervisorTests : IAsyncLifetime
         await foreach (var line in group.OutputLines.WithCancellation(cts.Token)) lines.Add(line);
         return lines;
     }
+
+    [WindowsFact]
+    public async Task UnrelatedInheritableHandleIsNotVisibleInChild()
+    {
+        using var unrelated = new EventWaitHandle(false, EventResetMode.ManualReset);
+        Assert.True(SetHandleInformation(unrelated.SafeWaitHandle, 1, 1));
+        await using var group = await StartAsync("probe-handle", "--probe-handle",
+            unrelated.SafeWaitHandle.DangerousGetHandle().ToInt64().ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var lines = await ReadAllAsync(group);
+        Assert.Contains(lines, line => line.EndsWith("|info|unrelated-handle-inherited=False", StringComparison.Ordinal));
+        Assert.Equal(0, await group.WaitForRootExitAsync(default));
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetHandleInformation(SafeWaitHandle handle, uint mask, uint flags);
 
     [WindowsFact]
     public async Task ArgumentsReachTheEngineExactly()

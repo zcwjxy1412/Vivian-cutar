@@ -11,6 +11,8 @@ internal static class NativeMethods
     public const uint CREATE_NO_WINDOW = 0x08000000;
     public const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
     public const uint CREATE_NEW_PROCESS_GROUP = 0x00000200;
+    public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
+    public const int PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002;
     public const int STARTF_USESTDHANDLES = 0x00000100;
     public const uint HANDLE_FLAG_INHERIT = 0x00000001;
     public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -30,6 +32,13 @@ internal static class NativeMethods
         public short wShowWindow, cbReserved2;
         public IntPtr lpReserved2;
         public IntPtr hStdInput, hStdOutput, hStdError;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct STARTUPINFOEX
+    {
+        public STARTUPINFO StartupInfo;
+        public IntPtr AttributeList;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -113,6 +122,25 @@ internal static class NativeMethods
         IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
         uint dwCreationFlags, IntPtr lpEnvironment, string? lpCurrentDirectory,
         ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateProcessW", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CreateProcessExtended(string? lpApplicationName, char[] lpCommandLine,
+        IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
+        uint dwCreationFlags, IntPtr lpEnvironment, string? lpCurrentDirectory,
+        ref STARTUPINFOEX lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool InitializeProcThreadAttributeList(IntPtr list, int count, int flags, ref IntPtr size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool UpdateProcThreadAttribute(IntPtr list, uint flags, IntPtr attribute,
+        IntPtr value, IntPtr size, IntPtr previous, IntPtr returnSize);
+
+    [DllImport("kernel32.dll")]
+    public static extern void DeleteProcThreadAttributeList(IntPtr list);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern uint ResumeThread(IntPtr hThread);

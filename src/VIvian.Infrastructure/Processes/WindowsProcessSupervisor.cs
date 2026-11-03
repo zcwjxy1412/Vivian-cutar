@@ -18,7 +18,7 @@ namespace VIvian.Infrastructure.Processes;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsProcessSupervisor : IProcessSupervisor
 {
-    // Handle inheritance is process-wide: serialize our own launches so pipe ends do not leak into each other.
+    // Keep our launches serialized while inheritable pipe ends exist in this process.
     private static readonly Lock LaunchLock = new();
 
     public Task<ISupervisedProcessGroup> StartAsync(ProcessLaunchSpec spec, Guid runId, CancellationToken ct)
@@ -47,26 +47,33 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
             if (!CreatePipe(out stdoutRead, out stdoutWrite, ref inherit, 0) || !CreatePipe(out stdinRead, out stdinWrite, ref inherit, 0))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "CreatePipe failed");
             // Only the child's ends are inheritable.
-            SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0);
-            SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT, 0);
+            if (!SetHandleInformation(stdoutRead, HANDLE_FLAG_INHERIT, 0) ||
+                !SetHandleInformation(stdinWrite, HANDLE_FLAG_INHERIT, 0))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "SetHandleInformation failed");
 
-            var startup = new STARTUPINFO
+            using var inherited = new InheritedHandleList(stdinRead, stdoutWrite);
+            var startup = new STARTUPINFOEX
             {
-                cb = Marshal.SizeOf<STARTUPINFO>(),
-                dwFlags = STARTF_USESTDHANDLES,
-                hStdInput = stdinRead.DangerousGetHandle(),
-                hStdOutput = stdoutWrite.DangerousGetHandle(),
-                hStdError = stdoutWrite.DangerousGetHandle(),
+                StartupInfo = new STARTUPINFO
+                {
+                    cb = Marshal.SizeOf<STARTUPINFOEX>(),
+                    dwFlags = STARTF_USESTDHANDLES,
+                    hStdInput = stdinRead.DangerousGetHandle(),
+                    hStdOutput = stdoutWrite.DangerousGetHandle(),
+                    hStdError = stdoutWrite.DangerousGetHandle(),
+                },
+                AttributeList = inherited.Pointer,
             };
             PROCESS_INFORMATION info;
             var envHandle = environment is null ? default : GCHandle.Alloc(environment, GCHandleType.Pinned);
             try
             {
-                var flags = CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_NEW_PROCESS_GROUP;
+                var flags = CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT |
+                    CREATE_NEW_PROCESS_GROUP | EXTENDED_STARTUPINFO_PRESENT;
                 bool created;
                 lock (LaunchLock)
                 {
-                    created = CreateProcess(spec.FileName, commandLine, IntPtr.Zero, IntPtr.Zero, true, flags,
+                    created = CreateProcessExtended(spec.FileName, commandLine, IntPtr.Zero, IntPtr.Zero, true, flags,
                         environment is null ? IntPtr.Zero : envHandle.AddrOfPinnedObject(), spec.WorkingDirectory,
                         ref startup, out info);
                 }

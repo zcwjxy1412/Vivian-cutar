@@ -2,9 +2,13 @@
 <Application.Resources>
 <SolidColorBrush x:Key="Surface" Color="#1A2435" />
 <SolidColorBrush x:Key="Muted" Color="#B6C3D5" />
-<Style TargetType="TextBlock"><Setter Property="Foreground" Value="#EEF3FB"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+<!-- No implicit TextBlock style here: Application-level implicit TextBlock styles reach inside control templates and
+     turned button, tab and combo box text light-on-light. Page text gets its style from MainWindow.Resources. -->
 <Style TargetType="Button"><Setter Property="Padding" Value="16,10"/><Setter Property="Margin" Value="0,0,10,0"/><Setter Property="Background" Value="#B9CDFB"/><Setter Property="Foreground" Value="#101A2A"/><Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/></Style>
 <Style TargetType="TextBox"><Setter Property="Padding" Value="10"/><Setter Property="Background" Value="#101A2A"/><Setter Property="Foreground" Value="#EEF3FB"/><Setter Property="CaretBrush" Value="White"/><Setter Property="BorderBrush" Value="#52637D"/><Setter Property="VerticalContentAlignment" Value="Center"/></Style>
-<Style TargetType="TabItem"><Setter Property="Foreground" Value="#101A2A"/><Setter Property="Padding" Value="18,10"/><Setter Property="FontSize" Value="14"/></Style>
+<!-- Tab content inherits the TabItem's Foreground, so the TabItem keeps the light page colour and only the header
+     (on the light tab chrome) is drawn dark. -->
+<Style TargetType="TabItem"><Setter Property="Foreground" Value="#EEF3FB"/><Setter Property="Padding" Value="18,10"/><Setter Property="FontSize" Value="14"/>
+<Setter Property="HeaderTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding}" Foreground="#101A2A"/></DataTemplate></Setter.Value></Setter></Style>
 <Style TargetType="ListView"><Setter Property="Background" Value="#101A2A"/><Setter Property="Foreground" Value="#EEF3FB"/><Setter Property="BorderThickness" Value="0"/></Style>
 </Application.Resources></Application>

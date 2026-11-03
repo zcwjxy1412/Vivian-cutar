@@ -18,7 +18,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ISettingsStore _settings;
     private readonly IDiagnosticStore _history;
     private readonly SemaphoreSlim _operation = new(1, 1);
-    private string _status = "基础工程就绪。真实引擎尚未接入。";
+    private string _status = "就绪。真实引擎尚未接入，可在“模拟队列”中体验调度流程。";
     public string Status { get => _status; private set => Set(ref _status, value); }
     private bool _busy;
     public bool IsIdle => !_busy;
@@ -30,9 +30,10 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand SaveCommand { get; }
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand CheckCommand { get; }
-    public MainViewModel(ISettingsStore settings, IDiagnosticStore history)
+    public QueueViewModel Queue { get; }
+    public MainViewModel(ISettingsStore settings, IDiagnosticStore history, QueueViewModel queue)
     {
-        _settings = settings; _history = history;
+        _settings = settings; _history = history; Queue = queue;
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
@@ -46,6 +47,11 @@ public sealed class MainViewModel : ObservableObject
             card.InstallPath = value.InstallPath; card.Revision = value.Revision;
         }
         await RefreshHistoryAsync();
+        await Queue.InitializeAsync();
+    }
+    public void ReportReconciled(int count)
+    {
+        if (count > 0) Status = $"上次 VIvian 意外退出，{count} 条运行已标记为结果未知，请在“模拟队列”中查看并确认。";
     }
     private async Task RunAsync(Func<Task> action)
     {

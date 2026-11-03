@@ -45,6 +45,7 @@ public static class ReasonCodes
     public const string SuccessWithoutEvidence = "success_without_evidence";
     public const string JournalUnavailable = "journal_unavailable";
     public const string UnresolvedRuns = "unresolved_runs";
+    public const string InternalError = "internal_error";
 }
 
 public sealed record RunContext(Guid RunId, Guid QueueId, GameId Game, DateTimeOffset CreatedAt);

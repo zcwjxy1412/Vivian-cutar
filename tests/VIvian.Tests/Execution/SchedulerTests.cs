@@ -472,6 +472,57 @@ public sealed class SchedulerTests
         Assert.Equal(ReasonCodes.CleanupUnconfirmed, result.BlockReason);
     }
 
+    [Fact]
+    public async Task StopRequestedBeforeTheQueueBeginsStartsNothing()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel(); // e.g. the user pressed stop the instant after pressing start
+        var a = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+        var b = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var result = await NewScheduler().RunAsync([Item(a), Item(b)], cts.Token);
+        Assert.Equal(QueueStatus.Cancelled, result.Status);
+        Assert.Equal(new[] { GameId.Genshin, GameId.StarRail }, result.NotStarted);
+        Assert.Equal(0, a.StartCount + b.StartCount);
+    }
+
+    [Fact]
+    public async Task InternalErrorAfterStartClosesRunAsBlockedAndUnconfirmed()
+    {
+        // Fault injection: the clock fails once the engine is running, so the scheduler itself throws.
+        var time = new FailingTimers(VirtualStart);
+        var started = Adapter(GameId.Genshin, run => { run.Emit("x"); return Task.CompletedTask; });
+        var next = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var result = await new QueueScheduler(_journal, new NoProcessSupervisor(), Fast, time)
+            .RunAsync([Item(started), Item(next)]).WaitAsync(TimeSpan.FromSeconds(10));
+
+        var run = result.Runs.Single();
+        Assert.Equal(RunPhase.Blocked, run.Phase);
+        Assert.Equal(RunOutcome.Indeterminate, run.Outcome);
+        Assert.Equal(CleanupState.Unconfirmed, run.Cleanup);
+        Assert.Equal(ReasonCodes.InternalError, run.ReasonCode);
+        Assert.Equal(QueueStatus.Blocked, result.Status);
+        Assert.Equal(0, next.StartCount);
+        Assert.True(started.LastRun!.Disposed);
+        Assert.Equal(RunPhase.Blocked, _journal.PhaseOf(run.RunId));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(25 * 3600)]
+    public void InvalidLimitsAreRejected(int seconds)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new RunLimits(TimeSpan.FromSeconds(seconds), TimeSpan.FromMinutes(1)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new RunLimits(TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(seconds)));
+    }
+
+    /// <summary>A clock whose timers fail: the first timer the scheduler creates is the task timeout, right after Running.</summary>
+    private sealed class FailingTimers(DateTimeOffset start) : FakeTimeProvider(start)
+    {
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+            throw new InvalidOperationException("injected timer failure");
+    }
+
     private static readonly DateTimeOffset VirtualStart = new(2026, 11, 3, 4, 0, 0, TimeSpan.Zero);
 
     /// <summary>

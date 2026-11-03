@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VIvian.Core/VIvian.Core.csproj" />
+    <Project Path="src/VIvian.Infrastructure/VIvian.Infrastructure.csproj" />
+    <Project Path="src/VIvian.App/VIvian.App.csproj" />
+  </Folder>
+  <Folder Name="/tests/"><Project Path="tests/VIvian.Tests/VIvian.Tests.csproj" /></Folder>
+</Solution>

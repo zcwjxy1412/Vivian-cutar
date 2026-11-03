@@ -3,7 +3,23 @@ using System.Threading.Channels;
 namespace VIvian.Core.Execution;
 
 /// <summary>Per-run time limits. The stall timeout restarts whenever the run reports an event.</summary>
-public sealed record RunLimits(TimeSpan TaskTimeout, TimeSpan StallTimeout);
+public sealed record RunLimits
+{
+    public static readonly TimeSpan Maximum = TimeSpan.FromHours(24);
+
+    public RunLimits(TimeSpan TaskTimeout, TimeSpan StallTimeout)
+    {
+        this.TaskTimeout = Validate(TaskTimeout, nameof(TaskTimeout));
+        this.StallTimeout = Validate(StallTimeout, nameof(StallTimeout));
+    }
+
+    public TimeSpan TaskTimeout { get; }
+    public TimeSpan StallTimeout { get; }
+
+    private static TimeSpan Validate(TimeSpan value, string name) =>
+        value > TimeSpan.Zero && value <= Maximum ? value
+            : throw new ArgumentOutOfRangeException(name, value, "时限必须大于 0 且不超过 24 小时。");
+}
 
 public sealed record SchedulerOptions(
     TimeSpan GracefulStopTimeout, TimeSpan EmergencyStopTimeout, TimeSpan ReconcileTimeout, RunLimits DefaultLimits)
@@ -34,7 +50,12 @@ public sealed class QueueScheduler(
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
 
-    /// <summary>Requests an immediate stop of the running queue. No countdown; safe to call from any thread.</summary>
+    /// <summary>
+    /// Requests an immediate stop of the queue that is currently running. No countdown; safe from any thread.
+    /// A stop pressed just before <see cref="RunAsync"/> has begun may miss that queue; callers that start a queue
+    /// asynchronously (e.g. from a UI) should stop it by cancelling the token passed to <see cref="RunAsync"/>,
+    /// which also works when cancelled before the queue has started.
+    /// </summary>
     public void EmergencyStop() => Volatile.Read(ref _emergency).TrySetResult();
 
     public async Task<QueueResult> RunAsync(IReadOnlyList<QueueItem> items, CancellationToken ct = default)
@@ -76,7 +97,17 @@ public sealed class QueueScheduler(
                     break;
                 }
                 var execution = new RunExecution(this, queueId, items[i], emergency.Task, stopToken.Token);
-                var (last, blocksQueue) = await execution.ExecuteAsync().ConfigureAwait(false);
+                RunUpdate last;
+                bool blocksQueue;
+                try
+                {
+                    (last, blocksQueue) = await execution.ExecuteAsync().ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    // A bug must never leave a run open: close it as blocked with cleanup unconfirmed.
+                    (last, blocksQueue) = (await execution.AbortAsync().ConfigureAwait(false), true);
+                }
                 journalFaulted |= execution.JournalFaulted;
                 runs.Add(last);
                 var stop = blocksQueue ? QueueStatus.Blocked
@@ -177,10 +208,39 @@ public sealed class QueueScheduler(
                     userStop ? ReasonCodes.UserStop : ReasonCodes.AdapterError, CleanupState.Unconfirmed).ConfigureAwait(false);
             }
 
-            await using (run.ConfigureAwait(false))
+            try
             {
                 return await SuperviseAsync(run).ConfigureAwait(false);
             }
+            finally
+            {
+                // Disposal releases handles; whether processes are gone was already decided by reconciliation.
+                try { await run.DisposeAsync().ConfigureAwait(false); }
+                catch (Exception) { /* never let disposal change the recorded result */ }
+            }
+        }
+
+        /// <summary>Closes the run after an unexpected internal error, without depending on the clock or adapter.</summary>
+        public async Task<RunUpdate> AbortAsync()
+        {
+            var started = _sm.Phase is not (RunPhase.Pending or RunPhase.Preflight);
+            RunUpdate update;
+            try
+            {
+                update = new RunUpdate(_runId, queueId, item.Game, Adapter.RuleVersion, Adapter.IsSimulation,
+                    RunPhase.Blocked, _sm.Outcome ?? (started ? RunOutcome.Indeterminate : null),
+                    started ? CleanupState.Unconfirmed : CleanupState.NotRequired, ReasonCodes.InternalError, DateTimeOffset.UtcNow);
+            }
+            catch (Exception)
+            {
+                update = new RunUpdate(_runId, queueId, item.Game, "unknown", true, RunPhase.Blocked,
+                    started ? RunOutcome.Indeterminate : null, started ? CleanupState.Unconfirmed : CleanupState.NotRequired,
+                    ReasonCodes.InternalError, DateTimeOffset.UtcNow);
+            }
+            try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception) { JournalFaulted = true; }
+            owner.Raise(update);
+            return update;
         }
 
         private async Task<(RunUpdate, bool)> SuperviseAsync(IEngineRun run)

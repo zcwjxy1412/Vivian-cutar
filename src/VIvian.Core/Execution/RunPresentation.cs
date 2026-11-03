@@ -69,6 +69,7 @@ public static class RunPresentation
         ReasonCodes.SuccessWithoutEvidence => "适配器声称成功但没有证据",
         ReasonCodes.JournalUnavailable => "无法写入运行记录",
         ReasonCodes.UnresolvedRuns => "有待确认的未清理运行",
+        ReasonCodes.InternalError => "VIvian 内部错误，已保守处理",
         _ => "其他原因",
     };
 

@@ -49,6 +49,7 @@ public sealed class QueueViewModel : ObservableObject
     private readonly QueueScheduler _scheduler;
     private readonly IRunHistory _history;
     private readonly Dispatcher _dispatcher;
+    private CancellationTokenSource? _stop;
 
     public QueueViewModel(QueueScheduler scheduler, IRunHistory history)
     {
@@ -97,12 +98,15 @@ public sealed class QueueViewModel : ObservableObject
             Status = "请至少选择一款游戏。";
             return null;
         }
+        // Created on the UI thread before the queue starts, so a stop pressed at any moment after this is never lost.
+        using var stop = new CancellationTokenSource();
+        _stop = stop;
         IsRunning = true;
         LogLines.Clear();
         Status = "模拟队列运行中…（可随时紧急停止）";
         try
         {
-            var result = await Task.Run(() => _scheduler.RunAsync(items));
+            var result = await Task.Run(() => _scheduler.RunAsync(items, stop.Token));
             Status = RunPresentation.SimulationLabel + RunPresentation.QueueStatusText(result)
                 + (result.NotStarted.Count > 0 ? "；未启动：" + string.Join("、", result.NotStarted.Select(RunPresentation.GameName)) : "");
             Serilog.Log.Information("Simulation queue finished: {Status} {Reason}", result.Status, result.BlockReason);
@@ -110,6 +114,7 @@ public sealed class QueueViewModel : ObservableObject
         }
         finally
         {
+            _stop = null;
             IsRunning = false;
             Current = "空闲";
             await RefreshAsync();
@@ -118,9 +123,9 @@ public sealed class QueueViewModel : ObservableObject
 
     public void EmergencyStop()
     {
-        if (!IsRunning) return;
+        if (_stop is not { } stop) return;
         // Sent immediately, no confirmation dialog or countdown.
-        _scheduler.EmergencyStop();
+        stop.Cancel();
         Status = "已发出紧急停止…";
         Serilog.Log.Information("Emergency stop requested from UI");
     }

@@ -1,10 +1,19 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Time.Testing;
 using VIvian.Core;
 using VIvian.Core.Execution;
 using Xunit;
 
 namespace VIvian.Tests.Execution;
 
+/// <summary>Timing-sensitive tests run alone so disk-heavy tests cannot starve their timers.</summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class TimingCollection
+{
+    public const string Name = "Timing-sensitive scheduler tests";
+}
+
+[Collection(TimingCollection.Name)]
 public sealed class SchedulerTests
 {
     private static readonly SchedulerOptions Fast = new(
@@ -123,36 +132,52 @@ public sealed class SchedulerTests
     [Fact]
     public async Task TaskTimeoutStopsGracefullyAndIsIndeterminate()
     {
-        var a = Adapter(GameId.Genshin, run => { run.Emit("started"); return Task.CompletedTask; });
-        var limits = new RunLimits(TimeSpan.FromMilliseconds(200), TimeSpan.FromSeconds(10));
-        var run = (await NewScheduler().RunAsync([Item(a, limits)])).Runs.Single();
+        var a = Adapter(GameId.Genshin);
+        var limits = new RunLimits(TaskTimeout: TimeSpan.FromMinutes(45), StallTimeout: TimeSpan.FromHours(2));
+        var (result, time) = await RunOnVirtualClockAsync([Item(a, limits)]);
 
+        var run = result.Runs.Single();
         Assert.Equal(RunOutcome.Indeterminate, run.Outcome);
         Assert.Equal(ReasonCodes.TaskTimeout, run.ReasonCode);
-        Assert.Equal(StopMode.Graceful, a.LastRun!.StopRequests.First().Mode);
+        Assert.Equal(StopMode.Graceful, a.LastRun!.StopRequests.Single().Mode);
+        Assert.InRange(time.GetUtcNow() - VirtualStart, TimeSpan.FromMinutes(45), TimeSpan.FromMinutes(50));
     }
 
     [Fact]
     public async Task SilentEngineIsStoppedAsStalled()
     {
         var a = Adapter(GameId.Genshin);
-        var limits = new RunLimits(TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(200));
-        var run = (await NewScheduler().RunAsync([Item(a, limits)])).Runs.Single();
+        var limits = new RunLimits(TaskTimeout: TimeSpan.FromHours(2), StallTimeout: TimeSpan.FromMinutes(8));
+        var (result, time) = await RunOnVirtualClockAsync([Item(a, limits)]);
+
+        var run = result.Runs.Single();
         Assert.Equal(ReasonCodes.Stalled, run.ReasonCode);
         Assert.Equal(RunOutcome.Indeterminate, run.Outcome);
+        Assert.InRange(time.GetUtcNow() - VirtualStart, TimeSpan.FromMinutes(8), TimeSpan.FromMinutes(13));
     }
 
     [Fact]
     public async Task OutputKeepsTheStallWatchdogFromFiring()
     {
-        var a = Adapter(GameId.Genshin, async run =>
+        var time = new FakeTimeProvider(VirtualStart);
+        var a = Adapter(GameId.Genshin);
+        var limits = new RunLimits(TaskTimeout: TimeSpan.FromHours(2), StallTimeout: TimeSpan.FromMinutes(8));
+        var queue = new QueueScheduler(_journal, new NoProcessSupervisor(), Fast, time).RunAsync([Item(a, limits)]);
+        await WaitUntilAsync(() => a.LastRun is { } r && _journal.PhaseOf(r.RunId) == RunPhase.Running);
+
+        // 30 virtual minutes in total — far beyond the 8-minute stall limit — but never 8 minutes of silence.
+        for (var i = 0; i < 6; i++)
         {
-            for (var i = 0; i < 6; i++) { run.Emit("tick " + i); await Task.Delay(100); }
-            run.End(EvidenceKind.CompletionReported);
-        });
-        var limits = new RunLimits(TimeSpan.FromSeconds(10), TimeSpan.FromMilliseconds(350));
-        var run = (await NewScheduler().RunAsync([Item(a, limits)])).Runs.Single();
+            a.LastRun!.Emit("progress " + i);
+            await WaitUntilAsync(() => _journal.EventCount == i + 1);
+            time.Advance(TimeSpan.FromMinutes(5));
+            await Task.Yield();
+        }
+        a.LastRun!.End(EvidenceKind.CompletionReported);
+
+        var run = (await queue.WaitAsync(TimeSpan.FromSeconds(10))).Runs.Single();
         Assert.Equal(RunOutcome.Success, run.Outcome);
+        Assert.Empty(a.LastRun.StopRequests);
     }
 
     [Fact]
@@ -160,10 +185,11 @@ public sealed class SchedulerTests
     {
         var a = Adapter(GameId.Genshin);
         a.StopReaction = StopReaction.IgnoreGraceful;
-        var limits = new RunLimits(TimeSpan.FromMilliseconds(150), TimeSpan.FromSeconds(10));
-        var run = (await NewScheduler().RunAsync([Item(a, limits)])).Runs.Single();
+        var limits = new RunLimits(TaskTimeout: TimeSpan.FromMinutes(45), StallTimeout: TimeSpan.FromHours(2));
+        var (result, _) = await RunOnVirtualClockAsync([Item(a, limits)]);
 
-        Assert.Equal(new[] { StopMode.Graceful, StopMode.Emergency }, a.LastRun!.StopRequests.Select(s => s.Mode));
+        var run = result.Runs.Single();
+        Assert.Equal(new[] { StopMode.Graceful, StopMode.Emergency }, a.LastRun!.StopRequests.Select(x => x.Mode));
         Assert.Equal(RunOutcome.Indeterminate, run.Outcome);
         Assert.Equal(CleanupState.Confirmed, run.Cleanup);
     }
@@ -175,10 +201,11 @@ public sealed class SchedulerTests
         first.StopReaction = StopReaction.IgnoreAll;
         first.ReconcileResult = CleanupState.Unconfirmed;
         var second = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
-        var limits = new RunLimits(TimeSpan.FromMilliseconds(150), TimeSpan.FromSeconds(10));
-        var result = await NewScheduler().RunAsync([Item(first, limits), Item(second)]);
+        var limits = new RunLimits(TaskTimeout: TimeSpan.FromMinutes(45), StallTimeout: TimeSpan.FromHours(2));
+        var (result, _) = await RunOnVirtualClockAsync([Item(first, limits), Item(second)]);
 
         var run = result.Runs.Single();
+        Assert.Equal(new[] { StopMode.Graceful, StopMode.Emergency }, first.LastRun!.StopRequests.Select(x => x.Mode));
         Assert.Equal(RunOutcome.Indeterminate, run.Outcome);
         Assert.Equal(ReasonCodes.TaskTimeout, run.ReasonCode);
         Assert.Equal(RunPhase.Blocked, run.Phase);
@@ -213,7 +240,7 @@ public sealed class SchedulerTests
     [Fact]
     public async Task EmergencyStopIsSentBeforeSlowJournalWrites()
     {
-        _journal.SlowPhase = (RunPhase.Stopping, TimeSpan.FromMilliseconds(800));
+        _journal.SlowPhase = (RunPhase.Stopping, TimeSpan.FromSeconds(3));
         var started = new TaskCompletionSource();
         var a = Adapter(GameId.Genshin, run => { started.SetResult(); return Task.CompletedTask; });
         var scheduler = NewScheduler();
@@ -222,9 +249,9 @@ public sealed class SchedulerTests
 
         var pressedAt = DateTimeOffset.UtcNow;
         scheduler.EmergencyStop();
-        await queue.WaitAsync(TimeSpan.FromSeconds(5));
+        await queue.WaitAsync(TimeSpan.FromSeconds(10));
         var sentAt = a.LastRun!.StopRequests.First().At;
-        Assert.True(sentAt - pressedAt < TimeSpan.FromMilliseconds(400), $"stop sent after {sentAt - pressedAt}");
+        Assert.True(sentAt - pressedAt < TimeSpan.FromMilliseconds(1500), $"stop sent after {sentAt - pressedAt}");
     }
 
     [Fact]
@@ -395,5 +422,74 @@ public sealed class SchedulerTests
         var a = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
         var result = await scheduler.RunAsync([Item(a)]);
         Assert.Equal(RunOutcome.Success, result.Runs.Single().Outcome);
+    }
+
+    [Fact]
+    public async Task UnresolvedRunsFromEarlierQueuesBlockNewQueue()
+    {
+        _journal.Unresolved = 1;
+        var a = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+        var result = await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(QueueStatus.Blocked, result.Status);
+        Assert.Equal(ReasonCodes.UnresolvedRuns, result.BlockReason);
+        Assert.Empty(result.Runs);
+        Assert.Equal(new[] { GameId.Genshin }, result.NotStarted);
+        Assert.Equal(0, a.StartCount);
+    }
+
+    [Fact]
+    public async Task UnreadableJournalBlocksNewQueue()
+    {
+        _journal.FailCount = true;
+        var a = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+        var result = await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(QueueStatus.Blocked, result.Status);
+        Assert.Equal(ReasonCodes.JournalUnavailable, result.BlockReason);
+        Assert.True(result.JournalFaulted);
+        Assert.Equal(0, a.StartCount);
+    }
+
+    [Fact]
+    public async Task BlockedQueueReportsCleanupAsTheReason()
+    {
+        var a = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+        a.ReconcileResult = CleanupState.Unconfirmed;
+        var result = await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(ReasonCodes.CleanupUnconfirmed, result.BlockReason);
+    }
+
+    private static readonly DateTimeOffset VirtualStart = new(2026, 11, 3, 4, 0, 0, TimeSpan.Zero);
+
+    /// <summary>
+    /// Runs a queue on a virtual clock, advancing it in one-minute steps. Timeouts fire only when virtual time
+    /// passes their limit, so the results do not depend on how fast or busy the test machine is.
+    /// </summary>
+    private async Task<(QueueResult Result, FakeTimeProvider Time)> RunOnVirtualClockAsync(IReadOnlyList<QueueItem> items)
+    {
+        var time = new FakeTimeProvider(VirtualStart);
+        var queue = new QueueScheduler(_journal, new NoProcessSupervisor(), Fast, time).RunAsync(items);
+        // Time stays frozen until the first engine is running, so its limits are measured from a known instant.
+        await WaitUntilAsync(() => queue.IsCompleted || _journal.AnyInPhase(RunPhase.Running));
+        for (var step = 0; step < 24 * 60 && !queue.IsCompleted; step++)
+        {
+            time.Advance(TimeSpan.FromMinutes(1));
+            await Task.Delay(3); // let the scheduler react before time moves on
+        }
+        return (await queue.WaitAsync(TimeSpan.FromSeconds(10)), time);
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan? limit = null)
+    {
+        var clock = Stopwatch.StartNew();
+        var max = limit ?? TimeSpan.FromSeconds(10);
+        while (!condition())
+        {
+            if (clock.Elapsed > max)
+            {
+                if (limit is null) throw new TimeoutException("Condition was not reached.");
+                return;
+            }
+            await Task.Delay(5);
+        }
     }
 }

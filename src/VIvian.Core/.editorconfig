@@ -1,0 +1,4 @@
+# Core logic must never resume on a caller's UI or test synchronization context:
+# the scheduler's safety paths (emergency stop, watchdogs) cannot depend on a free UI thread.
+[*.cs]
+dotnet_diagnostic.CA2007.severity = error

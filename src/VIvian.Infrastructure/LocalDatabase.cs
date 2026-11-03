@@ -4,7 +4,7 @@ using VIvian.Core;
 namespace VIvian.Infrastructure;
 
 // Connections are short-lived. SQLite transactions provide cross-process protection.
-public sealed class LocalDatabase : ISettingsStore, IDiagnosticStore
+public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
 {
     private readonly string _connectionString;
     public LocalDatabase(string path)
@@ -28,6 +28,41 @@ public sealed class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
+    public const int CurrentSchemaVersion = 2;
+
+    // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
+    private const string SchemaV1 = """
+        CREATE TABLE engine_settings(game INTEGER PRIMARY KEY CHECK(game BETWEEN 0 AND 2),
+            install_path TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>=0));
+        INSERT INTO engine_settings VALUES(0,'',0),(1,'',0),(2,'',0);
+        CREATE TABLE diagnostics(id TEXT PRIMARY KEY, started_at TEXT NOT NULL, summary TEXT NOT NULL);
+        CREATE INDEX ix_diagnostics_time ON diagnostics(started_at DESC);
+        PRAGMA user_version=1;
+        """;
+
+    // M2: run records, their full transition history, and run events.
+    private const string SchemaV2 = """
+        CREATE TABLE runs(
+            run_id TEXT PRIMARY KEY, queue_id TEXT NOT NULL,
+            game INTEGER NOT NULL CHECK(game BETWEEN 0 AND 2), rule_version TEXT NOT NULL,
+            is_simulation INTEGER NOT NULL CHECK(is_simulation IN (0,1)),
+            phase TEXT NOT NULL, outcome TEXT NULL, cleanup TEXT NOT NULL, reason_code TEXT NULL,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+            acknowledged_at TEXT NULL, acknowledgement_note TEXT NULL);
+        CREATE INDEX ix_runs_created ON runs(created_at DESC);
+        CREATE INDEX ix_runs_open ON runs(phase) WHERE phase NOT IN ('Finished','Blocked');
+        CREATE TABLE run_transitions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(run_id),
+            phase TEXT NOT NULL, outcome TEXT NULL, cleanup TEXT NOT NULL, reason_code TEXT NULL,
+            at TEXT NOT NULL, source TEXT NOT NULL);
+        CREATE INDEX ix_run_transitions_run ON run_transitions(run_id, id);
+        CREATE TABLE run_events(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES runs(run_id),
+            at TEXT NOT NULL, kind TEXT NOT NULL, message TEXT NOT NULL);
+        CREATE INDEX ix_run_events_run ON run_events(run_id, id);
+        PRAGMA user_version=2;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -41,17 +76,16 @@ public sealed class LocalDatabase : ISettingsStore, IDiagnosticStore
         command.Transaction = tx;
         command.CommandText = "PRAGMA user_version;";
         var version = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
-        if (version > 1) throw new InvalidOperationException("数据库由更新版本创建，当前版本不会覆盖它。");
+        if (version > CurrentSchemaVersion) throw new InvalidOperationException("数据库由更新版本创建，当前版本不会覆盖它。");
+        // Each step upgrades exactly one version inside the same transaction; any failure rolls back everything.
         if (version == 0)
         {
-            command.CommandText = """
-                CREATE TABLE engine_settings(game INTEGER PRIMARY KEY CHECK(game BETWEEN 0 AND 2),
-                    install_path TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>=0));
-                INSERT INTO engine_settings VALUES(0,'',0),(1,'',0),(2,'',0);
-                CREATE TABLE diagnostics(id TEXT PRIMARY KEY, started_at TEXT NOT NULL, summary TEXT NOT NULL);
-                CREATE INDEX ix_diagnostics_time ON diagnostics(started_at DESC);
-                PRAGMA user_version=1;
-                """;
+            command.CommandText = SchemaV1;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 1)
+        {
+            command.CommandText = SchemaV2;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

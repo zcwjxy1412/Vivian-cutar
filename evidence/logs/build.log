@@ -1,0 +1,10 @@
+  VIvian.Core -> /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/bin/Release/net10.0/VIvian.Core.dll
+  VIvian.Infrastructure -> /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/bin/Release/net10.0/VIvian.Infrastructure.dll
+  VIvian.App -> /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/bin/Release/net10.0-windows/VIvian.dll
+  VIvian.Tests -> /workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:08.80

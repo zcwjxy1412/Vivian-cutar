@@ -1,0 +1,112 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="e8d52e5b-d19b-491c-8c75-bbf73a1a60a0" name="@00146f208178 2026-11-03 18:53:59" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-11-03T18:53:59.3801640+08:00" queuing="2026-11-03T18:53:59.3801640+08:00" start="2026-11-03T18:53:57.5845616+08:00" finish="2026-11-03T18:53:59.5944670+08:00" />
+  <TestSettings name="default" id="46967d89-5783-46a3-8092-97257eeaa9e8">
+    <Deployment runDeploymentRoot="_00146f208178_2026-11-03_18_53_59" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="212e0cce-e48b-4659-bc02-86c5ca64d7e4" testId="65765136-6f29-a480-8a7e-ed2d2cb52cac" testName="VIvian.Tests.PersistenceTests.ConflictRollsBackWholeBatchIncludingEarlierUpdates" computerName="00146f208178" duration="00:00:00.0243221" startTime="2026-11-03T18:53:59.3370808+08:00" endTime="2026-11-03T18:53:59.3615615+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="212e0cce-e48b-4659-bc02-86c5ca64d7e4" />
+    <UnitTestResult executionId="fa16c7e0-75d1-49d3-a070-8da72b5bac31" testId="e2860775-6e70-8023-c739-4a52933d777c" testName="VIvian.Tests.PersistenceTests.CorruptDatabaseIsNotSilentlyRecreated" computerName="00146f208178" duration="00:00:00.0211546" startTime="2026-11-03T18:53:59.1003786+08:00" endTime="2026-11-03T18:53:59.1373680+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="fa16c7e0-75d1-49d3-a070-8da72b5bac31" />
+    <UnitTestResult executionId="a261d3d1-9844-43b2-9838-9cac9dcb032e" testId="3374c842-e124-a6ee-a615-ab74a0b80bb3" testName="VIvian.Tests.PersistenceTests.SqlLikePathIsStoredAsData" computerName="00146f208178" duration="00:00:00.0161133" startTime="2026-11-03T18:53:59.4090229+08:00" endTime="2026-11-03T18:53:59.4253455+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a261d3d1-9844-43b2-9838-9cac9dcb032e" />
+    <UnitTestResult executionId="af7e65c9-9a83-4ccd-b05e-a6e8990072bb" testId="27277660-0dfe-80f2-2bb1-60c05a50d8a0" testName="VIvian.Tests.PersistenceTests.TwoWritersDoNotSilentlyOverwrite" computerName="00146f208178" duration="00:00:00.0463326" startTime="2026-11-03T18:53:59.0202698+08:00" endTime="2026-11-03T18:53:59.0664886+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="af7e65c9-9a83-4ccd-b05e-a6e8990072bb" />
+    <UnitTestResult executionId="1c6cc460-62bb-41d6-9985-2f7709638e38" testId="581a9c0a-ac90-995c-86be-f5dfe44eb8ce" testName="VIvian.Tests.PersistenceTests.DuplicateDiagnosticDoesNotOverwriteExistingEvidence" computerName="00146f208178" duration="00:00:00.1124386" startTime="2026-11-03T18:53:59.3085789+08:00" endTime="2026-11-03T18:53:59.3087920+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1c6cc460-62bb-41d6-9985-2f7709638e38" />
+    <UnitTestResult executionId="081add08-af4d-4fb5-a4f3-8504e54fdbad" testId="48c3b44a-2955-a8af-7611-620eec50326a" testName="VIvian.Tests.PersistenceTests.DuplicateGameSetIsRejected" computerName="00146f208178" duration="00:00:00.0164885" startTime="2026-11-03T18:53:59.1408763+08:00" endTime="2026-11-03T18:53:59.1572538+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="081add08-af4d-4fb5-a4f3-8504e54fdbad" />
+    <UnitTestResult executionId="01b07644-12d0-41e5-a1f8-6b1616a8ab83" testId="89d7ab5b-ab81-7ebd-151f-d0b1a78a0316" testName="VIvian.Tests.PersistenceTests.InvalidHistoryLimitIsRejected(limit: 0)" computerName="00146f208178" duration="00:00:00.0151650" startTime="2026-11-03T18:53:58.9364453+08:00" endTime="2026-11-03T18:53:58.9366654+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="01b07644-12d0-41e5-a1f8-6b1616a8ab83" />
+    <UnitTestResult executionId="ee5726fb-a7c8-432f-b8bc-17577b4b48f2" testId="b037a301-7eac-6453-091e-7202c90659c5" testName="VIvian.Tests.PersistenceTests.InvalidSettingsAreRejectedBeforeWrite(path: &quot;name\0extra&quot;)" computerName="00146f208178" duration="00:00:00.0129288" startTime="2026-11-03T18:53:59.0876756+08:00" endTime="2026-11-03T18:53:59.0998773+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ee5726fb-a7c8-432f-b8bc-17577b4b48f2" />
+    <UnitTestResult executionId="b8a91377-1d08-4b01-8125-66022179c9f3" testId="095ea8d7-4434-fdba-58d9-3c70e5da41e5" testName="VIvian.Tests.PersistenceTests.InvalidSettingsAreRejectedBeforeWrite(path: &quot;name\nextra&quot;)" computerName="00146f208178" duration="00:00:00.0200795" startTime="2026-11-03T18:53:59.0667825+08:00" endTime="2026-11-03T18:53:59.0874046+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b8a91377-1d08-4b01-8125-66022179c9f3" />
+    <UnitTestResult executionId="d63868e9-9362-41aa-889d-46f608b1d877" testId="5c9ffca9-f549-6ccb-b078-cc5cf5d58a3f" testName="VIvian.Tests.PersistenceTests.CancelledWriteDoesNotChangeDatabase" computerName="00146f208178" duration="00:00:00.0370744" startTime="2026-11-03T18:53:58.9835303+08:00" endTime="2026-11-03T18:53:59.0200447+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d63868e9-9362-41aa-889d-46f608b1d877" />
+    <UnitTestResult executionId="203742db-33ca-457a-b3c2-bb4d05ac57a8" testId="9756606e-f216-4229-e22d-16f92dd605de" testName="VIvian.Tests.PersistenceTests.DiagnosticsSurviveReopenAndRespectLimit" computerName="00146f208178" duration="00:00:00.0470168" startTime="2026-11-03T18:53:59.3617687+08:00" endTime="2026-11-03T18:53:59.4088011+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="203742db-33ca-457a-b3c2-bb4d05ac57a8" />
+    <UnitTestResult executionId="a9441e52-7d0d-424f-b997-08df5998881f" testId="bfdb7dab-f660-15a9-a193-7a12e8a25838" testName="VIvian.Tests.PersistenceTests.InvalidHistoryLimitIsRejected(limit: 201)" computerName="00146f208178" duration="00:00:00.0880141" startTime="2026-11-03T18:53:58.8205602+08:00" endTime="2026-11-03T18:53:58.9194602+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a9441e52-7d0d-424f-b997-08df5998881f" />
+    <UnitTestResult executionId="00dceaca-e907-4ba6-9dd1-9c4487980b1b" testId="70650277-17fe-25dd-760b-8d0832c572f1" testName="VIvian.Tests.PersistenceTests.NewerSchemaIsNotReset" computerName="00146f208178" duration="00:00:00.0467964" startTime="2026-11-03T18:53:58.9384998+08:00" endTime="2026-11-03T18:53:58.9825636+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="00dceaca-e907-4ba6-9dd1-9c4487980b1b" />
+    <UnitTestResult executionId="1a2f00c4-4b80-43ed-880f-cb0b5720d2e9" testId="9052d4f9-5be7-aaf9-45db-c36a7bf3d36e" testName="VIvian.Tests.PersistenceTests.InitializeIsIdempotentAndPreservesSettings" computerName="00146f208178" duration="00:00:00.0667230" startTime="2026-11-03T18:53:59.3099144+08:00" endTime="2026-11-03T18:53:59.3368700+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1a2f00c4-4b80-43ed-880f-cb0b5720d2e9" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="VIvian.Tests.PersistenceTests.DuplicateDiagnosticDoesNotOverwriteExistingEvidence" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="581a9c0a-ac90-995c-86be-f5dfe44eb8ce">
+      <Execution id="1c6cc460-62bb-41d6-9985-2f7709638e38" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="DuplicateDiagnosticDoesNotOverwriteExistingEvidence" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.DuplicateGameSetIsRejected" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="48c3b44a-2955-a8af-7611-620eec50326a">
+      <Execution id="081add08-af4d-4fb5-a4f3-8504e54fdbad" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="DuplicateGameSetIsRejected" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.DiagnosticsSurviveReopenAndRespectLimit" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="9756606e-f216-4229-e22d-16f92dd605de">
+      <Execution id="203742db-33ca-457a-b3c2-bb4d05ac57a8" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="DiagnosticsSurviveReopenAndRespectLimit" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.SqlLikePathIsStoredAsData" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="3374c842-e124-a6ee-a615-ab74a0b80bb3">
+      <Execution id="a261d3d1-9844-43b2-9838-9cac9dcb032e" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="SqlLikePathIsStoredAsData" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.TwoWritersDoNotSilentlyOverwrite" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="27277660-0dfe-80f2-2bb1-60c05a50d8a0">
+      <Execution id="af7e65c9-9a83-4ccd-b05e-a6e8990072bb" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="TwoWritersDoNotSilentlyOverwrite" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.InvalidSettingsAreRejectedBeforeWrite(path: &quot;name\0extra&quot;)" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="b037a301-7eac-6453-091e-7202c90659c5">
+      <Execution id="ee5726fb-a7c8-432f-b8bc-17577b4b48f2" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="InvalidSettingsAreRejectedBeforeWrite" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.InvalidHistoryLimitIsRejected(limit: 0)" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="89d7ab5b-ab81-7ebd-151f-d0b1a78a0316">
+      <Execution id="01b07644-12d0-41e5-a1f8-6b1616a8ab83" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="InvalidHistoryLimitIsRejected" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.InvalidHistoryLimitIsRejected(limit: 201)" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="bfdb7dab-f660-15a9-a193-7a12e8a25838">
+      <Execution id="a9441e52-7d0d-424f-b997-08df5998881f" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="InvalidHistoryLimitIsRejected" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.NewerSchemaIsNotReset" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="70650277-17fe-25dd-760b-8d0832c572f1">
+      <Execution id="00dceaca-e907-4ba6-9dd1-9c4487980b1b" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="NewerSchemaIsNotReset" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.InitializeIsIdempotentAndPreservesSettings" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="9052d4f9-5be7-aaf9-45db-c36a7bf3d36e">
+      <Execution id="1a2f00c4-4b80-43ed-880f-cb0b5720d2e9" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="InitializeIsIdempotentAndPreservesSettings" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.InvalidSettingsAreRejectedBeforeWrite(path: &quot;name\nextra&quot;)" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="095ea8d7-4434-fdba-58d9-3c70e5da41e5">
+      <Execution id="b8a91377-1d08-4b01-8125-66022179c9f3" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="InvalidSettingsAreRejectedBeforeWrite" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.ConflictRollsBackWholeBatchIncludingEarlierUpdates" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="65765136-6f29-a480-8a7e-ed2d2cb52cac">
+      <Execution id="212e0cce-e48b-4659-bc02-86c5ca64d7e4" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="ConflictRollsBackWholeBatchIncludingEarlierUpdates" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.CorruptDatabaseIsNotSilentlyRecreated" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="e2860775-6e70-8023-c739-4a52933d777c">
+      <Execution id="fa16c7e0-75d1-49d3-a070-8da72b5bac31" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="CorruptDatabaseIsNotSilentlyRecreated" />
+    </UnitTest>
+    <UnitTest name="VIvian.Tests.PersistenceTests.CancelledWriteDoesNotChangeDatabase" storage="/workspace/scratch/c113b8785176/vivian/tests/vivian.tests/bin/release/net10.0/vivian.tests.dll" id="5c9ffca9-f549-6ccb-b078-cc5cf5d58a3f">
+      <Execution id="d63868e9-9362-41aa-889d-46f608b1d877" />
+      <TestMethod codeBase="/workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner3/netcore/" className="VIvian.Tests.PersistenceTests" name="CancelledWriteDoesNotChangeDatabase" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="65765136-6f29-a480-8a7e-ed2d2cb52cac" executionId="212e0cce-e48b-4659-bc02-86c5ca64d7e4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e2860775-6e70-8023-c739-4a52933d777c" executionId="fa16c7e0-75d1-49d3-a070-8da72b5bac31" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="3374c842-e124-a6ee-a615-ab74a0b80bb3" executionId="a261d3d1-9844-43b2-9838-9cac9dcb032e" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="27277660-0dfe-80f2-2bb1-60c05a50d8a0" executionId="af7e65c9-9a83-4ccd-b05e-a6e8990072bb" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="581a9c0a-ac90-995c-86be-f5dfe44eb8ce" executionId="1c6cc460-62bb-41d6-9985-2f7709638e38" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="48c3b44a-2955-a8af-7611-620eec50326a" executionId="081add08-af4d-4fb5-a4f3-8504e54fdbad" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="89d7ab5b-ab81-7ebd-151f-d0b1a78a0316" executionId="01b07644-12d0-41e5-a1f8-6b1616a8ab83" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="b037a301-7eac-6453-091e-7202c90659c5" executionId="ee5726fb-a7c8-432f-b8bc-17577b4b48f2" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="095ea8d7-4434-fdba-58d9-3c70e5da41e5" executionId="b8a91377-1d08-4b01-8125-66022179c9f3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5c9ffca9-f549-6ccb-b078-cc5cf5d58a3f" executionId="d63868e9-9362-41aa-889d-46f608b1d877" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9756606e-f216-4229-e22d-16f92dd605de" executionId="203742db-33ca-457a-b3c2-bb4d05ac57a8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="bfdb7dab-f660-15a9-a193-7a12e8a25838" executionId="a9441e52-7d0d-424f-b997-08df5998881f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="70650277-17fe-25dd-760b-8d0832c572f1" executionId="00dceaca-e907-4ba6-9dd1-9c4487980b1b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9052d4f9-5be7-aaf9-45db-c36a7bf3d36e" executionId="1a2f00c4-4b80-43ed-880f-cb0b5720d2e9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="14" executed="14" passed="14" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v3.1.5+1b188a7b0a (64-bit .NET 10.0.14)
+[xUnit.net 00:00:00.20]   Discovering: VIvian.Tests
+[xUnit.net 00:00:00.39]   Discovered:  VIvian.Tests
+[xUnit.net 00:00:00.45]   Starting:    VIvian.Tests
+[xUnit.net 00:00:01.12]   Finished:    VIvian.Tests
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

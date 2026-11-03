@@ -1,0 +1,262 @@
+Build started 11/03/2026 18:49:51.
+     1>Project "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" on node 1 (Restore target(s)).
+     1>_GetAllRestoreProjectPathItems:
+         Determining projects to restore...
+     1>Project "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" (1) is building "/workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj" (2:4) on node 1 (_GenerateProjectRestoreGraph target(s)).
+     2>AddPrunePackageReferences:
+         Loading prune package data from PrunePackageData folder
+         Failed to load prune package data from PrunePackageData folder, loading from targeting packs instead
+         Looking for targeting packs in /tmp/vivian-dotnet/packs/Microsoft.NETCore.App.Ref
+         Pack directories found: /tmp/vivian-dotnet/packs/Microsoft.NETCore.App.Ref/10.0.14
+         Found package overrides file /tmp/vivian-dotnet/packs/Microsoft.NETCore.App.Ref/10.0.14/data/PackageOverrides.txt
+     2>Done Building Project "/workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj" (_GenerateProjectRestoreGraph target(s)).
+     1>Project "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" (1) is building "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" (1:6) on node 1 (_GenerateProjectRestoreGraph target(s)).
+     1>AddPrunePackageReferences:
+         Loading prune package data from PrunePackageData folder
+         Failed to load prune package data from PrunePackageData folder, loading from targeting packs instead
+         Looking for targeting packs in /tmp/vivian-dotnet/packs/Microsoft.NETCore.App.Ref
+         Pack directories found: /tmp/vivian-dotnet/packs/Microsoft.NETCore.App.Ref/10.0.14
+         Found package overrides file /tmp/vivian-dotnet/packs/Microsoft.NETCore.App.Ref/10.0.14/data/PackageOverrides.txt
+         Loading prune package data from PrunePackageData folder
+         Failed to load prune package data from PrunePackageData folder, loading from targeting packs instead
+         Looking for targeting packs in /tmp/vivian-dotnet/packs/Microsoft.WindowsDesktop.App.Ref
+         Targeting pack folder /tmp/vivian-dotnet/packs/Microsoft.WindowsDesktop.App.Ref does not exist
+         Failed to load prune package data for WindowsDesktop from targeting packs, loading from framework packages instead
+     1>Done Building Project "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" (_GenerateProjectRestoreGraph target(s)).
+     1>Restore:
+         X.509 certificate chain validation will use the fallback certificate bundle at '/tmp/vivian-dotnet/sdk/10.0.403/trustedroots/codesignctl.pem'.
+         X.509 certificate chain validation will use the fallback certificate bundle at '/tmp/vivian-dotnet/sdk/10.0.403/trustedroots/timestampctl.pem'.
+         Restoring packages for /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/VIvian.Core.csproj...
+         Restoring packages for /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj...
+         Restoring packages for /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj...
+         Generating MSBuild file /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/obj/VIvian.Core.csproj.nuget.g.props.
+         Generating MSBuild file /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/obj/VIvian.Core.csproj.nuget.g.targets.
+         Writing assets file to disk. Path: /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/obj/project.assets.json
+         Writing packages lock file at disk. Path: /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/packages.lock.json
+         Restored /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/VIvian.Core.csproj (in 185 ms).
+           GET https://api.nuget.org/v3-flatcontainer/serilog.sinks.file/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/index.json
+           GET https://api.nuget.org/v3-flatcontainer/serilog.extensions.hosting/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/index.json
+           OK https://api.nuget.org/v3-flatcontainer/serilog.sinks.file/index.json 29ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/index.json 55ms
+           OK https://api.nuget.org/v3-flatcontainer/serilog.extensions.hosting/index.json 76ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/index.json 91ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/10.0.0/microsoft.data.sqlite.10.0.0.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/10.0.0/microsoft.extensions.hosting.10.0.0.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/serilog.sinks.file/7.0.0/serilog.sinks.file.7.0.0.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/serilog.extensions.hosting/10.0.0/serilog.extensions.hosting.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite/10.0.0/microsoft.data.sqlite.10.0.0.nupkg 66ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite.core/index.json
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/index.json
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/index.json
+           OK https://api.nuget.org/v3-flatcontainer/serilog.sinks.file/7.0.0/serilog.sinks.file.7.0.0.nupkg 142ms
+           OK https://api.nuget.org/v3-flatcontainer/serilog.extensions.hosting/10.0.0/serilog.extensions.hosting.10.0.0.nupkg 253ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting/10.0.0/microsoft.extensions.hosting.10.0.0.nupkg 322ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.abstractions/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.fileextensions/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.commandline/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.environmentvariables/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.json/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.usersecrets/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.binder/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection.abstractions/index.json
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite.core/index.json 313ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.diagnostics/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.physical/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting.abstractions/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.configuration/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.console/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.abstractions/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.debug/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventlog/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventsource/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.abstractions/index.json
+           GET https://api.nuget.org/v3-flatcontainer/serilog.extensions.logging/index.json
+           GET https://api.nuget.org/v3-flatcontainer/serilog/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.options/index.json
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite.core/10.0.0/microsoft.data.sqlite.core.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/index.json 356ms
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.11/sqlitepclraw.bundle_e_sqlite3.2.1.11.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/index.json 371ms
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/2.1.11/sqlitepclraw.core.2.1.11.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.fileextensions/index.json 75ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.fileextensions/10.0.0/microsoft.extensions.configuration.fileextensions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.abstractions/index.json 89ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.abstractions/10.0.0/microsoft.extensions.configuration.abstractions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.commandline/index.json 104ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.commandline/10.0.0/microsoft.extensions.configuration.commandline.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.environmentvariables/index.json 118ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.environmentvariables/10.0.0/microsoft.extensions.configuration.environmentvariables.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.json/index.json 130ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.json/10.0.0/microsoft.extensions.configuration.json.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.usersecrets/index.json 145ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.usersecrets/10.0.0/microsoft.extensions.configuration.usersecrets.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.binder/index.json 156ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.binder/10.0.0/microsoft.extensions.configuration.binder.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection.abstractions/index.json 246ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection.abstractions/10.0.0/microsoft.extensions.dependencyinjection.abstractions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration/index.json 259ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration/10.0.0/microsoft.extensions.configuration.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection/index.json 283ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection/10.0.0/microsoft.extensions.dependencyinjection.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.diagnostics/index.json 298ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.diagnostics/10.0.0/microsoft.extensions.diagnostics.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.physical/index.json 309ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.physical/10.0.0/microsoft.extensions.fileproviders.physical.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting.abstractions/index.json 321ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting.abstractions/10.0.0/microsoft.extensions.hosting.abstractions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.configuration/index.json 335ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.configuration/10.0.0/microsoft.extensions.logging.configuration.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.console/index.json 346ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.console/10.0.0/microsoft.extensions.logging.console.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.abstractions/index.json 385ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.abstractions/10.0.0/microsoft.extensions.logging.abstractions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.debug/index.json 398ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.debug/10.0.0/microsoft.extensions.logging.debug.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventlog/index.json 412ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventlog/10.0.0/microsoft.extensions.logging.eventlog.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.abstractions/index.json 423ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.abstractions/10.0.0/microsoft.extensions.fileproviders.abstractions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging/index.json 468ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging/10.0.0/microsoft.extensions.logging.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventsource/index.json 489ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventsource/10.0.0/microsoft.extensions.logging.eventsource.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/serilog.extensions.logging/index.json 510ms
+           GET https://api.nuget.org/v3-flatcontainer/serilog.extensions.logging/10.0.0/serilog.extensions.logging.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/serilog/index.json 780ms
+           GET https://api.nuget.org/v3-flatcontainer/serilog/4.2.0/serilog.4.2.0.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/serilog/4.3.0/serilog.4.3.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.options/index.json 801ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.options/10.0.0/microsoft.extensions.options.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.data.sqlite.core/10.0.0/microsoft.data.sqlite.core.10.0.0.nupkg 809ms
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.bundle_e_sqlite3/2.1.11/sqlitepclraw.bundle_e_sqlite3.2.1.11.nupkg 912ms
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/index.json
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/index.json
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.core/2.1.11/sqlitepclraw.core.2.1.11.nupkg 971ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.fileextensions/10.0.0/microsoft.extensions.configuration.fileextensions.10.0.0.nupkg 978ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.abstractions/10.0.0/microsoft.extensions.configuration.abstractions.10.0.0.nupkg 1029ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.primitives/index.json
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.commandline/10.0.0/microsoft.extensions.configuration.commandline.10.0.0.nupkg 1091ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.environmentvariables/10.0.0/microsoft.extensions.configuration.environmentvariables.10.0.0.nupkg 1144ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.json/10.0.0/microsoft.extensions.configuration.json.10.0.0.nupkg 1192ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.usersecrets/10.0.0/microsoft.extensions.configuration.usersecrets.10.0.0.nupkg 1253ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration.binder/10.0.0/microsoft.extensions.configuration.binder.10.0.0.nupkg 1312ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection.abstractions/10.0.0/microsoft.extensions.dependencyinjection.abstractions.10.0.0.nupkg 1293ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.configuration/10.0.0/microsoft.extensions.configuration.10.0.0.nupkg 1360ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.dependencyinjection/10.0.0/microsoft.extensions.dependencyinjection.10.0.0.nupkg 1392ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.diagnostics/10.0.0/microsoft.extensions.diagnostics.10.0.0.nupkg 1430ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.physical/10.0.0/microsoft.extensions.fileproviders.physical.10.0.0.nupkg 1532ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.hosting.abstractions/10.0.0/microsoft.extensions.hosting.abstractions.10.0.0.nupkg 1593ms
+           CACHE https://api.nuget.org/v3-flatcontainer/microsoft.extensions.options.configurationextensions/index.json
+           CACHE https://api.nuget.org/v3-flatcontainer/microsoft.extensions.diagnostics.abstractions/index.json
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.configuration/10.0.0/microsoft.extensions.logging.configuration.10.0.0.nupkg 1679ms
+           CACHE https://api.nuget.org/v3-flatcontainer/microsoft.extensions.diagnostics.abstractions/10.0.0/microsoft.extensions.diagnostics.abstractions.10.0.0.nupkg
+           CACHE https://api.nuget.org/v3-flatcontainer/microsoft.extensions.options.configurationextensions/10.0.0/microsoft.extensions.options.configurationextensions.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.console/10.0.0/microsoft.extensions.logging.console.10.0.0.nupkg 1798ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.abstractions/10.0.0/microsoft.extensions.logging.abstractions.10.0.0.nupkg 1968ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.debug/10.0.0/microsoft.extensions.logging.debug.10.0.0.nupkg 2332ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventlog/10.0.0/microsoft.extensions.logging.eventlog.10.0.0.nupkg 2479ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.fileproviders.abstractions/10.0.0/microsoft.extensions.fileproviders.abstractions.10.0.0.nupkg 2576ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.filesystemglobbing/index.json
+           GET https://api.nuget.org/v3-flatcontainer/system.diagnostics.eventlog/index.json
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging/10.0.0/microsoft.extensions.logging.10.0.0.nupkg 2683ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.logging.eventsource/10.0.0/microsoft.extensions.logging.eventsource.10.0.0.nupkg 2748ms
+           OK https://api.nuget.org/v3-flatcontainer/serilog.extensions.logging/10.0.0/serilog.extensions.logging.10.0.0.nupkg 2805ms
+           OK https://api.nuget.org/v3-flatcontainer/serilog/4.3.0/serilog.4.3.0.nupkg 2606ms
+           OK https://api.nuget.org/v3-flatcontainer/system.diagnostics.eventlog/index.json 353ms
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/index.json 2466ms
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/2.1.11/sqlitepclraw.lib.e_sqlite3.2.1.11.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/system.diagnostics.eventlog/10.0.0/system.diagnostics.eventlog.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/serilog/4.2.0/serilog.4.2.0.nupkg 2631ms
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/index.json 2470ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.options/10.0.0/microsoft.extensions.options.10.0.0.nupkg 2614ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.primitives/index.json 2272ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.filesystemglobbing/index.json 375ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.filesystemglobbing/10.0.0/microsoft.extensions.filesystemglobbing.10.0.0.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.11/sqlitepclraw.provider.e_sqlite3.2.1.11.nupkg
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.extensions.primitives/10.0.0/microsoft.extensions.primitives.10.0.0.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.lib.e_sqlite3/2.1.11/sqlitepclraw.lib.e_sqlite3.2.1.11.nupkg 104ms
+           OK https://api.nuget.org/v3-flatcontainer/system.diagnostics.eventlog/10.0.0/system.diagnostics.eventlog.10.0.0.nupkg 117ms
+           OK https://api.nuget.org/v3-flatcontainer/sqlitepclraw.provider.e_sqlite3/2.1.11/sqlitepclraw.provider.e_sqlite3.2.1.11.nupkg 195ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.filesystemglobbing/10.0.0/microsoft.extensions.filesystemglobbing.10.0.0.nupkg 224ms
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.extensions.primitives/10.0.0/microsoft.extensions.primitives.10.0.0.nupkg 234ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.windowsdesktop.app.ref/index.json
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.windowsdesktop.app.ref/index.json 19ms
+           GET https://api.nuget.org/v3-flatcontainer/microsoft.windowsdesktop.app.ref/10.0.14/microsoft.windowsdesktop.app.ref.10.0.14.nupkg
+           OK https://api.nuget.org/v3-flatcontainer/microsoft.windowsdesktop.app.ref/10.0.14/microsoft.windowsdesktop.app.ref.10.0.14.nupkg 295ms
+         Installed SQLitePCLRaw.core 2.1.11 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/sqlitepclraw.core/2.1.11 with content hash PK0GLFkfhZzLQeR3PJf71FmhtHox+U3vcY6ZtswoMjrefkB9k6ErNJEnwXqc5KgXDSjige2XXrezqS39gkpQKA==.
+         Installed SQLitePCLRaw.provider.e_sqlite3 2.1.11 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/sqlitepclraw.provider.e_sqlite3/2.1.11 with content hash Y/0ZkR+r0Cg3DQFuCl1RBnv/tmxpIZRU3HUvelPw6MVaKHwYYR8YNvgs0vuNuXCMvlyJ+Fh88U1D4tah1tt6qw==.
+         Installed Microsoft.Extensions.Configuration.Json 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.configuration.json/10.0.0 with content hash BIOPTEAZoeWbHlDT9Zudu+rpecZizFwhdIFRiyZKDml7JbayXmfTXKUt+ezifsSXfBkWDdJM10oDOxo8pufEng==.
+         Installed Microsoft.Extensions.Options.ConfigurationExtensions 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.options.configurationextensions/10.0.0 with content hash tL9cSl3maS5FPzp/3MtlZI21ExWhni0nnUCF8HY4npTsINw45n9SNDbkKXBMtFyUFGSsQep25fHIDN4f/Vp3AQ==.
+         Installed Serilog.Extensions.Logging 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/serilog.extensions.logging/10.0.0 with content hash vx0kABKl2dWbBhhqAfTOk53/i8aV/5VaT3a6il9gn72Wqs2pM7EK2OB6No6xdqK2IaY6Zf9gdjLuK9BVa2rT+Q==.
+         Installed Microsoft.Extensions.FileSystemGlobbing 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.filesystemglobbing/10.0.0 with content hash 5hfVl/e+bx1px2UkN+1xXhd3hu7Ui6ENItBzckFaRDQXfr+SHT/7qrCDrlQekCF/PBtEu2vtk87U2+gDEF8EhQ==.
+         Installed Microsoft.Extensions.DependencyInjection.Abstractions 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.dependencyinjection.abstractions/10.0.0 with content hash L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA==.
+         Installed Microsoft.Extensions.Configuration 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.configuration/10.0.0 with content hash H4SWETCh/cC5L1WtWchHR6LntGk3rDTTznZMssr4cL8IbDmMWBxY+MOGDc/ASnqNolLKPIWHWeuC1ddiL/iNPw==.
+         Installed Serilog 4.2.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/serilog/4.2.0 with content hash gmoWVOvKgbME8TYR+gwMf7osROiWAURterc6Rt2dQyX7wtjZYpqFiA/pY6ztjGQKKV62GGCyOcmtP1UKMHgSmA==.
+         Installed Microsoft.Extensions.Primitives 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.primitives/10.0.0 with content hash inRnbpCS0nwO/RuoZIAqxQUuyjaknOOnCEZB55KSMMjRhl0RQDttSmLSGsUJN3RQ3ocf5NDLFd2mOQViHqMK5w==.
+         Installed Microsoft.Extensions.FileProviders.Physical 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.fileproviders.physical/10.0.0 with content hash UZUQ74lQMmvcprlG8w+XpxBbyRDQqfb7GAnccITw32hdkUBlmm9yNC4xl4aR9YjgV3ounZcub194sdmLSfBmPA==.
+         Installed Microsoft.Extensions.Logging.Configuration 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.logging.configuration/10.0.0 with content hash j8zcwhS6bYB6FEfaY3nYSgHdpiL2T+/V3xjpHtslVAegyI1JUbB9yAt/BFdvZdsNbY0Udm4xFtvfT/hUwcOOOg==.
+         Installed System.Diagnostics.EventLog 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/system.diagnostics.eventlog/10.0.0 with content hash uaFRda9NjtbJRkdx311eXlAA3n2em7223c1A8d1VWyl+4FL9vkG7y2lpPfBU9HYdj/9KgdRNdn1vFK8ZYCYT/A==.
+         Installed Microsoft.Extensions.DependencyInjection 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.dependencyinjection/10.0.0 with content hash f0RBabswJq+gRu5a+hWIobrLWiUYPKMhCD9WO3sYBAdSy3FFH14LMvLVFZc2kPSCimBLxSuitUhsd6tb0TAY6A==.
+         Installed Microsoft.Extensions.Diagnostics 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.diagnostics/10.0.0 with content hash xjkxIPgrT0mKTfBwb+CVqZnRchyZgzKIfDQOp8z+WUC6vPe3WokIf71z+hJPkH0YBUYJwa7Z/al1R087ib9oiw==.
+         Installed Microsoft.Extensions.Logging.EventSource 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.logging.eventsource/10.0.0 with content hash +Qc+kgoJi1w2A/Jm+7h04LcK2JoJkwAxKg7kBakkNRcemTmRGocqPa7rVNVGorTYruFrUS25GwkFNtOECnjhXg==.
+         Installed Microsoft.Extensions.Configuration.EnvironmentVariables 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.configuration.environmentvariables/10.0.0 with content hash TmFegsI/uCdwMBD4yKpmO+OkjVNHQL49Dh/ep83NI5rPUEoBK9OdsJo1zURc1A2FuS/R/Pos3wsTjlyLnguBLA==.
+         Installed Microsoft.Extensions.Hosting.Abstractions 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.hosting.abstractions/10.0.0 with content hash KrN6TGFwCwqOkLLk/idW/XtDQh+8In+CL9T4M1Dx+5ScsjTq4TlVbal8q532m82UYrMr6RiQJF2HvYCN0QwVsA==.
+         Installed Microsoft.Extensions.Logging.Abstractions 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.logging.abstractions/10.0.0 with content hash FU/IfjDfwaMuKr414SSQNTIti/69bHEMb+QKrskRb26oVqpx3lNFXMjs/RC9ZUuhBhcwDM2BwOgoMw+PZ+beqQ==.
+         Installed Microsoft.Data.Sqlite.Core 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.data.sqlite.core/10.0.0 with content hash wPKG/Ym6tSMCo06UOZXzVfeFGzawnOZrTba/R3PfK+RhNuNELZ9I7nFns4WGTtv2kKlrlmmErgJ+kgTXHaNdHg==.
+         Installed Microsoft.Extensions.Configuration.Abstractions 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.configuration.abstractions/10.0.0 with content hash d2kDKnCsJvY7mBVhcjPSp9BkJk48DsaHPg5u+Oy4f8XaOqnEedRy/USyvnpHL92wpJ6DrTPy7htppUUzskbCXQ==.
+         Installed Microsoft.Extensions.Configuration.CommandLine 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.configuration.commandline/10.0.0 with content hash CRj5clwZciVs46GMhAthkFq3+JiNM15Bz9CRlCZLBmRdggD6RwoBphRJ+EUDK2f+cZZ1L2zqVaQrn1KueoU5Kg==.
+         Installed Serilog 4.3.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/serilog/4.3.0 with content hash +cDryFR0GRhsGOnZSKwaDzRRl4MupvJ42FhCE4zhQRVanX0Jpg6WuCBk59OVhVDPmab1bB+nRykAnykYELA9qQ==.
+         Installed Microsoft.Extensions.FileProviders.Abstractions 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.fileproviders.abstractions/10.0.0 with content hash /ppSdehKk3fuXjlqCDgSOtjRK/pSHU8eWgzSHfHdwVm5BP4Dgejehkw+PtxKG2j98qTDEHDst2Y99aNsmJldmw==.
+         Installed SQLitePCLRaw.bundle_e_sqlite3 2.1.11 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/sqlitepclraw.bundle_e_sqlite3/2.1.11 with content hash DC4nA7yWnf4UZdgJDF+9Mus4/cb0Y3Sfgi3gDnAoKNAIBwzkskNAbNbyu+u4atT0ruVlZNJfwZmwiEwE5oz9LQ==.
+         Installed Microsoft.Extensions.Configuration.UserSecrets 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.configuration.usersecrets/10.0.0 with content hash B4qHB6gQ2B3I52YRohSV7wetp01BQzi8jDmrtiVm6e4l8vH5vjqwxWcR5wumGWjdBkj1asJLLsDIocdyTQSP0A==.
+         Installed Microsoft.Extensions.Hosting 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.extensions.hosting/10.0.0 with content hash yKJiVdXkSfe9foojGpBRbuDPQI8YD71IO/aE8ehGjRHE0VkEF/YWkW6StthwuFF146pc2lypZrpk/Tks6Plwhw==.
+         Installed SQLitePCLRaw.lib.e_sqlite3 2.1.11 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/sqlitepclraw.lib.e_sqlite3/2.1.11 with content hash Ev2ytaXiOlWZ4b3R67GZBsemTINslLD1DCJr2xiacpn4tbapu0Q4dHEzSvZSMnVWeE5nlObU3VZN2p81q3XOYQ==.
+         Installed Microsoft.WindowsDesktop.App.Ref 10.0.14 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.windowsdesktop.app.ref/10.0.14 with content hash 8BIrKDOh97v8uXl1dQb1cLh7EJaWX8Cg3wnG4xwQFz3Kr3rCyLlA2dInl3Uz2h47TbXgDrzZlSxWmVQr9r543w==.
+         Installed Microsoft.Data.Sqlite 10.0.0 from https://api.nuget.org/v3/index.json to /root/.nuget/packages/microsoft.data.sqlite/10.0.0 with content hash I/azQ5WjwoLvSlTyDydkhARPSjYJN8jkXRjR5D92OeyTLbTrQ1K93rgf6XU+HYWHZA6lBI9SUOfl69OqEHb4ow==.
+           GET https://api.nuget.org/v3/vulnerabilities/index.json
+           OK https://api.nuget.org/v3/vulnerabilities/index.json 17ms
+           GET https://api.nuget.org/v3-vulnerabilities/2026.10.28.05.41.06/vulnerability.base.json
+           GET https://api.nuget.org/v3-vulnerabilities/2026.10.28.05.41.06/2026.11.02.17.41.59/vulnerability.update.json
+           OK https://api.nuget.org/v3-vulnerabilities/2026.10.28.05.41.06/2026.11.02.17.41.59/vulnerability.update.json 14ms
+           OK https://api.nuget.org/v3-vulnerabilities/2026.10.28.05.41.06/vulnerability.base.json 55ms
+     1>/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj : error NU1903: Warning As Error: Package 'SQLitePCLRaw.lib.e_sqlite3' 2.1.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-2m69-gcr7-jv3q
+     1>/workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj : error NU1903: Warning As Error: Package 'SQLitePCLRaw.lib.e_sqlite3' 2.1.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-2m69-gcr7-jv3q [/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj]
+         Generating MSBuild file /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/obj/VIvian.Infrastructure.csproj.nuget.g.props.
+         Generating MSBuild file /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/obj/VIvian.Infrastructure.csproj.nuget.g.targets.
+         Writing assets file to disk. Path: /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/obj/project.assets.json
+         Generating MSBuild file /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/obj/VIvian.App.csproj.nuget.g.props.
+         Generating MSBuild file /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/obj/VIvian.App.csproj.nuget.g.targets.
+         Writing assets file to disk. Path: /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/obj/project.assets.json
+         Writing packages lock file at disk. Path: /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/packages.lock.json
+         Writing packages lock file at disk. Path: /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/packages.lock.json
+         Failed to restore /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj (in 29.3 sec).
+         Failed to restore /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj (in 29.31 sec).
+         
+         NuGet Config files used:
+             /workspace/scratch/c113b8785176/VIvian/NuGet.Config
+             /root/.nuget/NuGet/NuGet.Config
+         
+         Feeds used:
+             https://api.nuget.org/v3/index.json
+         
+         Installed:
+             6 package(s) to /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj
+             39 package(s) to /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj
+     1>Done Building Project "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" (Restore target(s)) -- FAILED.
+
+Build FAILED.
+
+       "/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj" (Restore target) (1) ->
+       (Restore target) -> 
+         /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj : error NU1903: Warning As Error: Package 'SQLitePCLRaw.lib.e_sqlite3' 2.1.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-2m69-gcr7-jv3q
+         /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/VIvian.Infrastructure.csproj : error NU1903: Warning As Error: Package 'SQLitePCLRaw.lib.e_sqlite3' 2.1.11 has a known high severity vulnerability, https://github.com/advisories/GHSA-2m69-gcr7-jv3q [/workspace/scratch/c113b8785176/VIvian/src/VIvian.App/VIvian.App.csproj]
+
+    0 Warning(s)
+    2 Error(s)
+
+Time Elapsed 00:00:30.88

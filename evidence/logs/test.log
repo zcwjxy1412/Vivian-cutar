@@ -1,0 +1,6 @@
+Test run for /workspace/scratch/c113b8785176/VIvian/tests/VIvian.Tests/bin/Release/net10.0/VIvian.Tests.dll (.NETCoreApp,Version=v10.0)
+A total of 1 test files matched the specified pattern.
+WARNING: Overwriting results file: /workspace/scratch/c113b8785176/VIvian/artifacts/tests/m1.trx
+Results File: /workspace/scratch/c113b8785176/VIvian/artifacts/tests/m1.trx
+
+Passed!  - Failed:     0, Passed:    14, Skipped:     0, Total:    14, Duration: 604 ms - VIvian.Tests.dll (net10.0)

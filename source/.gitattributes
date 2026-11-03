@@ -1,0 +1,2 @@
+# Keep supplied research documents byte-for-byte.
+docs/reference/original/** -text -whitespace

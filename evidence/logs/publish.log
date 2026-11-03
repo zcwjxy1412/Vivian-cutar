@@ -1,0 +1,6 @@
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  VIvian.Core -> /workspace/scratch/c113b8785176/VIvian/src/VIvian.Core/bin/Release/net10.0/win-x64/VIvian.Core.dll
+  VIvian.Infrastructure -> /workspace/scratch/c113b8785176/VIvian/src/VIvian.Infrastructure/bin/Release/net10.0/win-x64/VIvian.Infrastructure.dll
+  VIvian.App -> /workspace/scratch/c113b8785176/VIvian/src/VIvian.App/bin/Release/net10.0-windows/win-x64/VIvian.dll
+  VIvian.App -> /workspace/scratch/c113b8785176/VIvian/artifacts/portable/

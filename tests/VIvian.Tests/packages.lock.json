@@ -147,6 +147,15 @@
       "vivian.core": {
         "type": "Project"
       },
+      "vivian.crashhost": {
+        "type": "Project",
+        "dependencies": {
+          "VIvian.Infrastructure": "[1.0.0, )"
+        }
+      },
+      "vivian.fakeengine": {
+        "type": "Project"
+      },
       "vivian.infrastructure": {
         "type": "Project",
         "dependencies": {

@@ -49,6 +49,8 @@ public interface ISupervisedProcessGroup : IAsyncDisposable
     /// <summary>Lines from the root process's standard output and error, in arrival order.</summary>
     IAsyncEnumerable<string> OutputLines { get; }
     Task<int> WaitForRootExitAsync(CancellationToken ct);
+    /// <summary>Writes one line to the root process's standard input. False if the engine no longer reads it.</summary>
+    Task<bool> SendInputLineAsync(string line, CancellationToken ct);
     /// <summary>Number of owned processes still alive (root and descendants).</summary>
     int ActiveProcessCount { get; }
     /// <summary>Terminates every owned process and waits until none remain or the timeout elapses.</summary>

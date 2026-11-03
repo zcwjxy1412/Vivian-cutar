@@ -4,5 +4,9 @@
     <Project Path="src/VIvian.Infrastructure/VIvian.Infrastructure.csproj" />
     <Project Path="src/VIvian.App/VIvian.App.csproj" />
   </Folder>
-  <Folder Name="/tests/"><Project Path="tests/VIvian.Tests/VIvian.Tests.csproj" /></Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VIvian.Tests/VIvian.Tests.csproj" />
+    <Project Path="tests/VIvian.FakeEngine/VIvian.FakeEngine.csproj" />
+    <Project Path="tests/VIvian.CrashHost/VIvian.CrashHost.csproj" />
+  </Folder>
 </Solution>

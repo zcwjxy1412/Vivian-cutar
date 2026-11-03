@@ -113,6 +113,11 @@ public sealed class InMemoryJournal : IRunJournal
         get { lock (_gate) return Events.Count; }
     }
 
+    public RunEvent[] EventsSnapshot()
+    {
+        lock (_gate) return [.. Events];
+    }
+
     public bool AnyInPhase(RunPhase phase)
     {
         lock (_gate) return Updates.Any(u => u.Phase == phase);

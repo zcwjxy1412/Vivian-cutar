@@ -7,8 +7,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
       - name: Build, test, publish and WPF smoke
@@ -16,7 +16,7 @@ jobs:
         run: ./scripts/Build.ps1 -SmokeTest
       - name: Preserve build evidence and portable preview
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: VIvian-M1-evidence
           path: |

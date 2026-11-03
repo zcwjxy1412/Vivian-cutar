@@ -41,9 +41,9 @@ jobs:
           if ($LASTEXITCODE -eq 0) { throw "Release '$env:TAG' 已存在，未做任何修改。" }
           $global:LASTEXITCODE = 0
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 

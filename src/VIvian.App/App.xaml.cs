@@ -86,6 +86,7 @@ public partial class App : Application
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
+                        SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
                             "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport);
                         Shutdown(0);
@@ -150,6 +151,39 @@ public partial class App : Application
         var worstUi = await probe;
         if (worstUi > TimeSpan.FromSeconds(1)) throw new InvalidOperationException("UI thread unresponsive: " + worstUi);
         return $"simulation queue 3/3 success persisted; emergency stop {stopLatency.TotalMilliseconds:F0} ms; worst UI response {worstUi.TotalMilliseconds:F0} ms.";
+    }
+
+    /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
+    private static void SaveTabScreenshots(Window window, string root)
+    {
+        var tabs = FindTabControl(window) ?? throw new InvalidOperationException("TabControl not found");
+        for (var i = 0; i < tabs.Items.Count; i++)
+        {
+            tabs.SelectedIndex = i;
+            window.UpdateLayout();
+            window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+            var content = (FrameworkElement)window.Content;
+            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                (int)content.ActualWidth, (int)content.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            var background = new System.Windows.Media.DrawingVisual();
+            using (var dc = background.RenderOpen())
+                dc.DrawRectangle(window.Background, null, new Rect(0, 0, content.ActualWidth, content.ActualHeight));
+            bitmap.Render(background);
+            bitmap.Render(content);
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+            using var file = File.Create(Path.Combine(root, $"screen-{i}.png"));
+            encoder.Save(file);
+        }
+        tabs.SelectedIndex = 0;
+    }
+
+    private static System.Windows.Controls.TabControl? FindTabControl(DependencyObject node)
+    {
+        if (node is System.Windows.Controls.TabControl tabs) return tabs;
+        foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>())
+            if (FindTabControl(child) is { } found) return found;
+        return null;
     }
 
     protected override void OnExit(ExitEventArgs e)

@@ -1,0 +1,95 @@
+name: Release
+
+# 手动触发：在 GitHub 网页 Actions → Release → Run workflow 中填写版本标签后运行。
+# 流程：Windows 上构建 → 14 项测试 → 便携版发布 → WPF 启动冒烟 → 创建 GitHub Release。
+# 任一步骤失败都不会创建 Release。
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '版本标签，例如 v0.1.0-m1'
+        required: true
+        type: string
+      prerelease:
+        description: '标记为预发布版本'
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Validate tag
+        shell: pwsh
+        run: |
+          if ($env:TAG -notmatch '^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$') {
+            throw "版本标签格式无效：'$env:TAG'（应类似 v0.1.0-m1）"
+          }
+          gh release view $env:TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw "Release '$env:TAG' 已存在，未做任何修改。" }
+          $global:LASTEXITCODE = 0
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build, test, publish and WPF smoke
+        shell: pwsh
+        run: ./scripts/Build.ps1 -SmokeTest
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $zip = "artifacts/VIvian-$env:TAG-win-x64.zip"
+          Move-Item 'artifacts/VIvian-M1-win-x64.zip' $zip
+          Compress-Archive -Path 'artifacts/logs','artifacts/tests','artifacts/smoke' -DestinationPath "artifacts/VIvian-$env:TAG-evidence.zip"
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          $sha = $env:GITHUB_SHA.Substring(0, 7)
+          $run = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $tests = (Select-String -Path 'artifacts/logs/test.log' -Pattern 'Passed!.*' | Select-Object -Last 1).Line.Trim()
+          @"
+          ## VIvian $env:TAG
+
+          提交：``$sha``
+
+          ### 本次发布由 Windows CI 自动构建并验证
+          - Release 构建、自动化测试、win-x64 自包含发布、WPF 启动冒烟测试全部通过。
+          - 测试结果：``$tests``
+          - [构建运行记录]($run)；完整日志和测试报告见附件 ``VIvian-$env:TAG-evidence.zip``。
+
+          ### 使用说明
+          - 解压后运行 ``VIvian.exe``，无需另装 .NET；当前**未签名**。
+          - 视觉效果、高 DPI 缩放和多显示器表现仍需人工验收。
+          - 使用第三方游戏自动化工具存在账号处罚风险，VIvian 无法保证不受处罚。
+
+          便携版 SHA-256：``$hash``
+          "@ | Out-File -Encoding utf8 'artifacts/release-notes.md'
+
+      - name: Create GitHub Release
+        shell: pwsh
+        run: |
+          $flags = @()
+          if ('${{ inputs.prerelease }}' -eq 'true') { $flags += '--prerelease' }
+          gh release create $env:TAG `
+            "artifacts/VIvian-$env:TAG-win-x64.zip" `
+            "artifacts/VIvian-$env:TAG-evidence.zip" `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title "VIvian $env:TAG" `
+            --notes-file 'artifacts/release-notes.md' `
+            @flags
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }

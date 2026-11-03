@@ -11,6 +11,7 @@ namespace VIvian.App;
 public partial class App : Application
 {
     private IHost? _host;
+    private SingleInstanceGuard? _instance;
     private bool _smoke;
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -30,9 +31,22 @@ public partial class App : Application
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VIvian");
             Directory.CreateDirectory(root);
+            // One instance per data directory, decided before the database or logs are touched.
+            _instance = SingleInstanceGuard.Acquire(root);
+            if (!_instance.IsOwner)
+            {
+                if (!_smoke)
+                    MessageBox.Show(_instance.Result == InstanceLockResult.AccessDenied
+                        ? "检测到另一个 VIvian 实例（可能以其他用户或管理员身份运行），无法确认它的状态。为避免冲突，本窗口不会启动。"
+                        : "VIvian 已经在运行，请切换到已打开的窗口。", "VIvian");
+                Shutdown(_instance.Result == InstanceLockResult.AccessDenied ? 3 : 2);
+                return;
+            }
             Log.Logger = new LoggerConfiguration().MinimumLevel.Information()
                 .WriteTo.File(Path.Combine(root, "logs", "vivian-.log"), rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 14, fileSizeLimitBytes: 5_000_000, rollOnFileSizeLimit: true).CreateLogger();
+            if (_instance.Result == InstanceLockResult.AcquiredAfterAbandoned)
+                Log.Warning("Previous instance exited without releasing the instance lock");
             var database = new LocalDatabase(Path.Combine(root, "vivian.db"));
             _host = Host.CreateDefaultBuilder().UseSerilog().ConfigureServices(services =>
             {
@@ -44,6 +58,10 @@ public partial class App : Application
             }).Build();
             await _host.StartAsync();
             await Task.Run(() => database.InitializeAsync());
+            // Safe only while holding the instance lock: no other VIvian can have a run in progress.
+            var reconciled = await Task.Run(() => database.ReconcileInterruptedRunsAsync(DateTimeOffset.UtcNow));
+            if (reconciled.Count > 0)
+                Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
             var vm = _host.Services.GetRequiredService<MainViewModel>();
             await vm.InitializeAsync();
             var window = _host.Services.GetRequiredService<MainWindow>();
@@ -56,7 +74,10 @@ public partial class App : Application
                     {
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
-                        await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"), "WPF content rendered; SQLite round-trip passed.");
+                        using (var second = SingleInstanceGuard.Acquire(root))
+                            if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
+                        await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
+                            "WPF content rendered; SQLite round-trip passed; second instance refused.");
                         Shutdown(0);
                     }
                     catch (Exception ex) { Log.Error("Smoke failed: {ErrorType}", ex.GetType().Name); Shutdown(1); }
@@ -76,6 +97,7 @@ public partial class App : Application
     {
         _host?.Dispose();
         Log.CloseAndFlush();
+        _instance?.Dispose();
         base.OnExit(e);
     }
 }

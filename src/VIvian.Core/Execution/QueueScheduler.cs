@@ -102,6 +102,7 @@ public sealed class QueueScheduler(
     /// <summary>Events waiting to be stored per run; beyond this, output is dropped and the drop is recorded.</summary>
     public const int MaxBufferedEvents = 10_000;
     private const int MaxEventBatch = 500;
+    private static readonly TimeSpan EventFlushTimeout = TimeSpan.FromSeconds(30);
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -233,8 +234,10 @@ public sealed class QueueScheduler(
             {
                 cleanup = CleanupState.Unconfirmed;
             }
+            // Stop reading engine output (prompt), then let already-buffered events reach storage so the record is
+            // complete when the run is reported finished. Bounded, in case an adapter's event stream misbehaves.
             watchCts.Cancel();
-            await Task.WhenAny(pump, Task.Delay(TimeSpan.FromSeconds(2), Time)).ConfigureAwait(false);
+            await Task.WhenAny(pump, Task.Delay(EventFlushTimeout, Time)).ConfigureAwait(false);
             return await FinishAsync(cleanup).ConfigureAwait(false);
         }
 

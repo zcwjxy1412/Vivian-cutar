@@ -13,7 +13,7 @@ public sealed class RunStoreTests : IDisposable
     private static readonly DateTimeOffset T0 = new(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
 
     public RunStoreTests() => Directory.CreateDirectory(_root);
-    public void Dispose() => Directory.Delete(_root, true);
+    public void Dispose() => TestDirectories.DeleteWithRetry(_root);
 
     private async Task<LocalDatabase> CreateAsync()
     {

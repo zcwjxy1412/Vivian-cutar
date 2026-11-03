@@ -9,7 +9,7 @@ public sealed class PersistenceTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "vivian-tests", Guid.NewGuid().ToString("N"));
     private string DbPath => Path.Combine(_root, "test.db");
     public PersistenceTests() => Directory.CreateDirectory(_root);
-    public void Dispose() => Directory.Delete(_root, true);
+    public void Dispose() => TestDirectories.DeleteWithRetry(_root);
     private async Task<LocalDatabase> CreateAsync()
     { var db = new LocalDatabase(DbPath); await db.InitializeAsync(); return db; }
 

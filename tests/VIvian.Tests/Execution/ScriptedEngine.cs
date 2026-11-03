@@ -102,11 +102,32 @@ public sealed class InMemoryJournal : IRunJournal
         lock (_gate) Updates.Add(update);
     }
 
-    public Task AppendEventAsync(RunEvent runEvent, CancellationToken ct)
+    public Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct)
     {
-        lock (_gate) Events.Add(runEvent);
+        lock (_gate) Events.AddRange(events);
         return Task.CompletedTask;
     }
+
+    public int EventCount
+    {
+        get { lock (_gate) return Events.Count; }
+    }
+
+    public bool AnyInPhase(RunPhase phase)
+    {
+        lock (_gate) return Updates.Any(u => u.Phase == phase);
+    }
+
+    public RunPhase? PhaseOf(Guid runId)
+    {
+        lock (_gate) return Updates.LastOrDefault(u => u.RunId == runId)?.Phase;
+    }
+
+    public int Unresolved { get; set; }
+    public bool FailCount { get; set; }
+
+    public Task<int> CountUnresolvedAsync(CancellationToken ct) =>
+        FailCount ? throw new IOException("journal unavailable") : Task.FromResult(Unresolved);
 
     public RunUpdate? LastFor(Guid runId)
     {

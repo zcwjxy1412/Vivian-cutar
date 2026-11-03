@@ -59,5 +59,33 @@ public interface ISupervisedProcessGroup : IAsyncDisposable
 public interface IRunJournal
 {
     Task PublishAsync(RunUpdate update, CancellationToken ct);
-    Task AppendEventAsync(RunEvent runEvent, CancellationToken ct);
+    /// <summary>Stores a batch of events for one or more runs. Called from a single background writer,
+    /// so slow storage never blocks the scheduler's safety paths.</summary>
+    Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct);
+    /// <summary>Runs whose cleanup is unconfirmed and that the user has not yet acknowledged.
+    /// While any exist, no new queue may start.</summary>
+    Task<int> CountUnresolvedAsync(CancellationToken ct);
+}
+
+/// <summary>A stored run. The user's acknowledgement is kept separately and never rewrites the automatic verdict.</summary>
+public sealed record RunRecord(
+    Guid RunId, Guid QueueId, GameId Game, string RuleVersion, bool IsSimulation,
+    RunPhase Phase, RunOutcome? Outcome, CleanupState Cleanup, string? ReasonCode,
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? AcknowledgedAt, string? AcknowledgementNote)
+{
+    public bool IsUnresolved => Cleanup == CleanupState.Unconfirmed && AcknowledgedAt is null;
+}
+
+public interface IRunHistory
+{
+    Task<IReadOnlyList<RunRecord>> ReadRecentRunsAsync(int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<RunEvent>> ReadEventsAsync(Guid runId, int limit, CancellationToken ct = default);
+    Task<IReadOnlyList<RunRecord>> ReadUnresolvedAsync(CancellationToken ct = default);
+    /// <summary>
+    /// Call once at startup, only while holding the single-instance lock: runs left unfinished by a crash are
+    /// closed without ever being marked successful. Started runs become Blocked with cleanup Unconfirmed.
+    /// </summary>
+    Task<IReadOnlyList<RunRecord>> ReconcileInterruptedRunsAsync(DateTimeOffset now, CancellationToken ct = default);
+    /// <summary>The user confirms they checked the machine. Stored as a separate note; outcome and cleanup are unchanged.</summary>
+    Task AcknowledgeAsync(Guid runId, string note, DateTimeOffset at, CancellationToken ct = default);
 }

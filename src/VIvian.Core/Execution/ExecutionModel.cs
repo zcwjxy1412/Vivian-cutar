@@ -44,6 +44,7 @@ public static class ReasonCodes
     public const string NotConfigured = "not_configured";
     public const string SuccessWithoutEvidence = "success_without_evidence";
     public const string JournalUnavailable = "journal_unavailable";
+    public const string UnresolvedRuns = "unresolved_runs";
 }
 
 public sealed record RunContext(Guid RunId, Guid QueueId, GameId Game, DateTimeOffset CreatedAt);
@@ -87,7 +88,7 @@ public sealed record QueueItem
 }
 
 public sealed record QueueResult(Guid QueueId, QueueStatus Status, IReadOnlyList<RunUpdate> Runs,
-    IReadOnlyList<GameId> NotStarted, bool JournalFaulted);
+    IReadOnlyList<GameId> NotStarted, bool JournalFaulted, string? BlockReason = null);
 
 /// <summary>Thrown by adapters when start fails. <paramref name="NothingStarted"/> must only be true when
 /// the adapter is certain no process was created; otherwise cleanup is treated as unconfirmed.</summary>

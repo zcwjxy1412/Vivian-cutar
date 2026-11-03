@@ -1,3 +1,5 @@
+using System.Threading.Channels;
+
 namespace VIvian.Core.Execution;
 
 /// <summary>Per-run time limits. The stall timeout restarts whenever the run reports an event.</summary>
@@ -45,7 +47,7 @@ public sealed class QueueScheduler(
         var emergency = NewSignal();
         Volatile.Write(ref _emergency, emergency);
         // Cancelling the caller's token (e.g. application shutdown) is treated as an emergency stop.
-        await using var registration = ct.Register(() => emergency.TrySetResult());
+        using var registration = ct.Register(() => emergency.TrySetResult());
         using var stopToken = new CancellationTokenSource();
         _ = emergency.Task.ContinueWith(_ =>
         {
@@ -54,6 +56,13 @@ public sealed class QueueScheduler(
         try
         {
             var queueId = Guid.NewGuid();
+            // A previous run may still own processes (e.g. after a crash). Nothing starts until the user resolves it.
+            int unresolved;
+            try { unresolved = await _journal.CountUnresolvedAsync(CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception) { unresolved = -1; }
+            if (unresolved != 0)
+                return new QueueResult(queueId, QueueStatus.Blocked, [], items.Select(x => x.Game).ToList(),
+                    unresolved < 0, unresolved < 0 ? ReasonCodes.JournalUnavailable : ReasonCodes.UnresolvedRuns);
             var runs = new List<RunUpdate>();
             var journalFaulted = false;
             var status = QueueStatus.Completed;
@@ -67,7 +76,7 @@ public sealed class QueueScheduler(
                     break;
                 }
                 var execution = new RunExecution(this, queueId, items[i], emergency.Task, stopToken.Token);
-                var (last, blocksQueue) = await execution.ExecuteAsync();
+                var (last, blocksQueue) = await execution.ExecuteAsync().ConfigureAwait(false);
                 journalFaulted |= execution.JournalFaulted;
                 runs.Add(last);
                 var stop = blocksQueue ? QueueStatus.Blocked
@@ -80,13 +89,19 @@ public sealed class QueueScheduler(
                     break;
                 }
             }
-            return new QueueResult(queueId, status, runs, notStarted, journalFaulted);
+            return new QueueResult(queueId, status, runs, notStarted, journalFaulted,
+                status != QueueStatus.Blocked ? null
+                : runs[^1].Cleanup == CleanupState.Unconfirmed ? ReasonCodes.CleanupUnconfirmed : runs[^1].ReasonCode);
         }
         finally
         {
             Volatile.Write(ref _running, 0);
         }
     }
+
+    /// <summary>Events waiting to be stored per run; beyond this, output is dropped and the drop is recorded.</summary>
+    public const int MaxBufferedEvents = 10_000;
+    private const int MaxEventBatch = 500;
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -108,36 +123,36 @@ public sealed class QueueScheduler(
         public async Task<(RunUpdate Last, bool BlocksQueue)> ExecuteAsync()
         {
             var context = new RunContext(_runId, queueId, item.Game, Time.GetUtcNow());
-            await PublishAsync();
+            await PublishAsync().ConfigureAwait(false);
 
-            if (emergency.IsCompleted) return await CancelBeforeStartAsync();
+            if (emergency.IsCompleted) return await CancelBeforeStartAsync().ConfigureAwait(false);
             _sm.MoveTo(RunPhase.Preflight);
-            await PublishAsync();
+            await PublishAsync().ConfigureAwait(false);
 
             PreflightResult preflight;
-            try { preflight = await Adapter.PreflightAsync(context, stopToken); }
-            catch (OperationCanceledException) when (emergency.IsCompleted) { return await CancelBeforeStartAsync(); }
+            try { preflight = await Adapter.PreflightAsync(context, stopToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (emergency.IsCompleted) { return await CancelBeforeStartAsync().ConfigureAwait(false); }
             catch (Exception) { preflight = PreflightResult.Block(ReasonCodes.PreflightError, "预检出错。"); }
             if (!preflight.CanStart)
             {
                 _sm.SetBlockReason(preflight.ReasonCode ?? ReasonCodes.PreflightError);
                 _sm.MoveTo(RunPhase.Blocked);
-                return (await PublishAsync(), preflight.BlocksQueue);
+                return (await PublishAsync().ConfigureAwait(false), preflight.BlocksQueue);
             }
-            if (emergency.IsCompleted) return await CancelBeforeStartAsync();
+            if (emergency.IsCompleted) return await CancelBeforeStartAsync().ConfigureAwait(false);
 
             // The Starting record must be durable before any process exists, so a crash can be reconciled.
             try
             {
                 await owner._journal.PublishAsync(
-                    Snapshot() with { Phase = RunPhase.Starting, Cleanup = CleanupState.Pending }, CancellationToken.None);
+                    Snapshot() with { Phase = RunPhase.Starting, Cleanup = CleanupState.Pending }, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception)
             {
                 JournalFaulted = true;
                 _sm.SetBlockReason(ReasonCodes.JournalUnavailable);
                 _sm.MoveTo(RunPhase.Blocked);
-                return (await PublishAsync(), true);
+                return (await PublishAsync().ConfigureAwait(false), true);
             }
             _sm.MoveTo(RunPhase.Starting);
             owner.Raise(Snapshot());
@@ -145,32 +160,32 @@ public sealed class QueueScheduler(
             IEngineRun run;
             try
             {
-                run = await Adapter.StartAsync(context, owner._supervisor, stopToken);
+                run = await Adapter.StartAsync(context, owner._supervisor, stopToken).ConfigureAwait(false);
             }
             catch (EngineStartException ex)
             {
                 var userStop = emergency.IsCompleted;
                 return await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Failed,
                     userStop ? ReasonCodes.UserStop : ex.ReasonCode,
-                    ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed);
+                    ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed).ConfigureAwait(false);
             }
             catch (Exception)
             {
                 var userStop = emergency.IsCompleted;
                 return await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Failed,
-                    userStop ? ReasonCodes.UserStop : ReasonCodes.AdapterError, CleanupState.Unconfirmed);
+                    userStop ? ReasonCodes.UserStop : ReasonCodes.AdapterError, CleanupState.Unconfirmed).ConfigureAwait(false);
             }
 
-            await using (run)
+            await using (run.ConfigureAwait(false))
             {
-                return await SuperviseAsync(run);
+                return await SuperviseAsync(run).ConfigureAwait(false);
             }
         }
 
         private async Task<(RunUpdate, bool)> SuperviseAsync(IEngineRun run)
         {
             _sm.MoveTo(RunPhase.Running);
-            await PublishAsync();
+            await PublishAsync().ConfigureAwait(false);
             Interlocked.Exchange(ref _lastActivity, Time.GetTimestamp());
             var limits = item.Limits ?? Options.DefaultLimits;
 
@@ -180,12 +195,12 @@ public sealed class QueueScheduler(
             var timeoutTask = Task.Delay(limits.TaskTimeout, Time, watchCts.Token);
             var stallTask = StallWatchAsync(limits.StallTimeout, watchCts.Token);
 
-            var winner = await Task.WhenAny(verdictTask, timeoutTask, stallTask, emergency);
+            var winner = await Task.WhenAny(verdictTask, timeoutTask, stallTask, emergency).ConfigureAwait(false);
             RunOutcome outcome;
             string reason;
             if (winner == verdictTask)
             {
-                (outcome, reason) = Judge(await verdictTask);
+                (outcome, reason) = Judge(await verdictTask.ConfigureAwait(false));
             }
             else
             {
@@ -195,23 +210,23 @@ public sealed class QueueScheduler(
                 _sm.MoveTo(RunPhase.Stopping);
                 // The stop request goes out before anything is written, so an emergency stop is never delayed by I/O.
                 var firstRequest = RequestStopSafeAsync(run, mode);
-                await PublishAsync();
-                await firstRequest;
-                var ended = await StopAsync(run, verdictTask, mode);
+                await PublishAsync().ConfigureAwait(false);
+                await firstRequest.ConfigureAwait(false);
+                var ended = await StopAsync(run, verdictTask, mode).ConfigureAwait(false);
                 if (emergency.IsCompleted) (outcome, reason) = (RunOutcome.Cancelled, ReasonCodes.UserStop);
-                else if (ended && (await verdictTask).Outcome == RunOutcome.Failed)
-                    (outcome, reason) = (RunOutcome.Failed, (await verdictTask).ReasonCode);
+                else if (ended && (await verdictTask.ConfigureAwait(false)).Outcome == RunOutcome.Failed)
+                    (outcome, reason) = (RunOutcome.Failed, (await verdictTask.ConfigureAwait(false)).ReasonCode);
                 else (outcome, reason) = (RunOutcome.Indeterminate, stopReason);
             }
             _sm.SetOutcome(outcome, reason);
             _sm.MoveTo(RunPhase.Reconciling);
-            await PublishAsync();
+            await PublishAsync().ConfigureAwait(false);
 
             CleanupState cleanup;
             try
             {
                 using var reconcileCts = new CancellationTokenSource(Options.ReconcileTimeout, Time);
-                cleanup = await run.ReconcileAsync(reconcileCts.Token);
+                cleanup = await run.ReconcileAsync(reconcileCts.Token).ConfigureAwait(false);
                 if (cleanup is CleanupState.Pending or CleanupState.NotRequired) cleanup = CleanupState.Unconfirmed;
             }
             catch (Exception)
@@ -219,8 +234,8 @@ public sealed class QueueScheduler(
                 cleanup = CleanupState.Unconfirmed;
             }
             watchCts.Cancel();
-            await Task.WhenAny(pump, Task.Delay(TimeSpan.FromSeconds(2), Time));
-            return await FinishAsync(cleanup);
+            await Task.WhenAny(pump, Task.Delay(TimeSpan.FromSeconds(2), Time)).ConfigureAwait(false);
+            return await FinishAsync(cleanup).ConfigureAwait(false);
         }
 
         /// <summary>Applies the evidence rule: success only with explicit completion evidence for this run.</summary>
@@ -239,11 +254,11 @@ public sealed class QueueScheduler(
             if (mode == StopMode.Graceful)
             {
                 var graceful = Task.Delay(Options.GracefulStopTimeout, Time);
-                await Task.WhenAny(verdictTask, graceful, emergency);
+                await Task.WhenAny(verdictTask, graceful, emergency).ConfigureAwait(false);
                 if (verdictTask.IsCompleted) return true;
-                await RequestStopSafeAsync(run, StopMode.Emergency);
+                await RequestStopSafeAsync(run, StopMode.Emergency).ConfigureAwait(false);
             }
-            await Task.WhenAny(verdictTask, Task.Delay(Options.EmergencyStopTimeout, Time));
+            await Task.WhenAny(verdictTask, Task.Delay(Options.EmergencyStopTimeout, Time)).ConfigureAwait(false);
             return verdictTask.IsCompleted;
         }
 
@@ -252,7 +267,7 @@ public sealed class QueueScheduler(
             try
             {
                 using var cts = new CancellationTokenSource(Options.EmergencyStopTimeout, Time);
-                await run.RequestStopAsync(mode, cts.Token);
+                await run.RequestStopAsync(mode, cts.Token).ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -262,27 +277,59 @@ public sealed class QueueScheduler(
 
         private async Task<RunVerdict> WaitVerdictSafeAsync(IEngineRun run)
         {
-            try { return await run.WaitForVerdictAsync(CancellationToken.None); }
+            try { return await run.WaitForVerdictAsync(CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { return new RunVerdict(RunOutcome.Indeterminate, ReasonCodes.AdapterError, []); }
         }
 
         private async Task PumpEventsAsync(IEngineRun run, CancellationToken ct)
         {
+            // Events are handed to a single batching writer: storage latency can never hold up the watchdogs or
+            // an emergency stop, and a flood of output costs at most one blocked thread.
+            var buffer = Channel.CreateBounded<RunEvent>(new BoundedChannelOptions(MaxBufferedEvents)
+            { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
+            var writer = WriteEventsAsync(buffer.Reader);
+            var dropped = 0;
             try
             {
-                await foreach (var runEvent in run.Events.WithCancellation(ct))
+                await foreach (var runEvent in run.Events.WithCancellation(ct).ConfigureAwait(false))
                 {
                     // Events from other runs (old logs, other instances) are ignored entirely.
                     if (runEvent.RunId != _runId) continue;
                     Interlocked.Exchange(ref _lastActivity, Time.GetTimestamp());
-                    try { await owner._journal.AppendEventAsync(runEvent, CancellationToken.None); }
-                    catch (Exception) { JournalFaulted = true; }
+                    if (!buffer.Writer.TryWrite(runEvent)) dropped++;
                     try { owner.EventReceived?.Invoke(runEvent); } catch (Exception) { /* observers never break safety */ }
                 }
             }
             catch (Exception)
             {
                 // Event stream errors do not decide the outcome; the verdict and reconciliation do.
+            }
+            finally
+            {
+                if (dropped > 0)
+                    buffer.Writer.TryWrite(new RunEvent(_runId, Time.GetUtcNow(), RunEventKind.Warning,
+                        $"输出过快，已丢弃 {dropped} 条记录。"));
+                buffer.Writer.TryComplete();
+            }
+            await writer.ConfigureAwait(false);
+        }
+
+        private async Task WriteEventsAsync(ChannelReader<RunEvent> reader)
+        {
+            var batch = new List<RunEvent>(MaxEventBatch);
+            try
+            {
+                while (await reader.WaitToReadAsync().ConfigureAwait(false))
+                {
+                    batch.Clear();
+                    while (batch.Count < MaxEventBatch && reader.TryRead(out var item)) batch.Add(item);
+                    try { await owner._journal.AppendEventsAsync(batch.ToArray(), CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception) { JournalFaulted = true; }
+                }
+            }
+            catch (Exception)
+            {
+                JournalFaulted = true;
             }
         }
 
@@ -292,7 +339,7 @@ public sealed class QueueScheduler(
             {
                 var idle = Time.GetElapsedTime(Interlocked.Read(ref _lastActivity));
                 if (idle >= stall) return;
-                await Task.Delay(stall - idle, Time, ct);
+                await Task.Delay(stall - idle, Time, ct).ConfigureAwait(false);
             }
         }
 
@@ -300,15 +347,15 @@ public sealed class QueueScheduler(
         {
             _sm.SetOutcome(RunOutcome.Cancelled, ReasonCodes.UserStop);
             _sm.MoveTo(RunPhase.Finished);
-            return (await PublishAsync(), false);
+            return (await PublishAsync().ConfigureAwait(false), false);
         }
 
         private async Task<(RunUpdate, bool)> FinishWithoutRunAsync(RunOutcome outcome, string reason, CleanupState cleanup)
         {
             _sm.SetOutcome(outcome, reason);
             _sm.MoveTo(RunPhase.Reconciling);
-            await PublishAsync();
-            return await FinishAsync(cleanup);
+            await PublishAsync().ConfigureAwait(false);
+            return await FinishAsync(cleanup).ConfigureAwait(false);
         }
 
         private async Task<(RunUpdate, bool)> FinishAsync(CleanupState cleanup)
@@ -316,13 +363,13 @@ public sealed class QueueScheduler(
             _sm.SetCleanup(cleanup);
             var confirmed = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
             _sm.MoveTo(confirmed ? RunPhase.Finished : RunPhase.Blocked);
-            return (await PublishAsync(), !confirmed);
+            return (await PublishAsync().ConfigureAwait(false), !confirmed);
         }
 
         private async Task<RunUpdate> PublishAsync()
         {
             var update = Snapshot();
-            try { await owner._journal.PublishAsync(update, CancellationToken.None); }
+            try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { JournalFaulted = true; }
             owner.Raise(update);
             return update;

@@ -34,7 +34,7 @@
 | [#7](https://github.com/zcwjxy1412/Vivian-cutar/pull/7) | M2.5 模拟队列界面（含对比度修复） | `fd6d995` | [通过](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/41682790717) |
 | [#8](https://github.com/zcwjxy1412/Vivian-cutar/pull/8) | 验收前复查修复 | `06d2cda` | [通过](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/41683935004) |
 
-每个 PR 都是独立分支，Windows CI 通过后才压缩合并。
+每个 PR 都是独立分支，Windows CI 通过后才压缩合并。合并后 `main` @ `06d2cda` 的推送 CI 也已通过：[run 41684300962](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/41684300962)。
 
 ## 3. 自动化测试结果（Windows CI，`06d2cda`）
 

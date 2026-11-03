@@ -86,9 +86,9 @@ public partial class App : Application
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
-                        SaveTabScreenshots(window, root);
+                        var contrastReport = SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
-                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport);
+                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + contrastReport);
                         Shutdown(0);
                     }
                     catch (Exception ex) { Log.Error("Smoke failed: {ErrorType}", ex.GetType().Name); Shutdown(1); }
@@ -154,14 +154,20 @@ public partial class App : Application
     }
 
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
-    private static void SaveTabScreenshots(Window window, string root)
+    private static string SaveTabScreenshots(Window window, string root)
     {
         var tabs = FindTabControl(window) ?? throw new InvalidOperationException("TabControl not found");
+        var failures = new List<string>();
+        int checkedTotal = 0, skippedTotal = 0;
         for (var i = 0; i < tabs.Items.Count; i++)
         {
             tabs.SelectedIndex = i;
             window.UpdateLayout();
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+            var (found, checkedCount, skipped) = ContrastAudit.Check(window);
+            checkedTotal += checkedCount;
+            skippedTotal += skipped;
+            failures.AddRange(found.Select(f => $"tab {i}: \"{f.Text}\" {f.Ratio:F1}:1 ({f.Foreground} on {f.Background})"));
             // Render the whole client area (content plus its margin), not just the content's own size.
             var content = (FrameworkElement)window.Content;
             var width = content.ActualWidth + content.Margin.Left + content.Margin.Right;
@@ -179,6 +185,12 @@ public partial class App : Application
             encoder.Save(file);
         }
         tabs.SelectedIndex = 0;
+        if (failures.Count > 0)
+        {
+            File.WriteAllLines(Path.Combine(root, "contrast-failures.txt"), failures.Distinct());
+            throw new InvalidOperationException("Text below WCAG AA contrast: " + string.Join(" | ", failures.Distinct().Take(8)));
+        }
+        return $"contrast ok for {checkedTotal} text elements ({skippedTotal} over non-solid backgrounds not checked).";
     }
 
     private static System.Windows.Controls.TabControl? FindTabControl(DependencyObject node)

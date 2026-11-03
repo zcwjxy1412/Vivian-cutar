@@ -1,5 +1,9 @@
 <Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:VIvian.App"
 Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth="640" MinHeight="480" Background="#0D1523" Foreground="#EEF3FB" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen">
+<Window.Resources>
+<!-- Window-level implicit styles stop at template boundaries, so controls keep their own readable text colours. -->
+<Style TargetType="TextBlock"><Setter Property="Foreground" Value="#EEF3FB"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
+</Window.Resources>
 <Grid Margin="28">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -44,7 +48,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 <DockPanel Margin="0,0,8,0"><TextBlock DockPanel.Dock="Top" Text="运行日志（模拟）" FontSize="16" Margin="0,0,0,8"/>
 <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
-<ListBox ItemsSource="{Binding LogLines}" Background="#101A2A" Foreground="#EEF3FB" BorderThickness="0" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True"/></DockPanel>
+<ListBox ItemsSource="{Binding LogLines}" Background="#101A2A" Foreground="#EEF3FB" BorderThickness="0" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#EEF3FB"/></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel>
 <DockPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock DockPanel.Dock="Top" Text="运行记录" FontSize="16" Margin="0,0,0,8"/>
 <Border DockPanel.Dock="Top" Background="#4A1F22" CornerRadius="10" Padding="12" Margin="0,0,0,8">
 <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
@@ -52,7 +56,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="请先确认相关引擎和游戏都已关闭。你的确认会单独记录，不会改写原判定。" Foreground="#E8C2BE" Margin="0,4,0,8"/>
 <Button Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel></Border>
 <ListView ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="6">
-<TextBlock Text="{Binding When}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,4,0,0"/>
+<TextBlock Text="{Binding When}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,4,0,0" TextWrapping="Wrap"/>
 </StackPanel></DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
 </Grid></Grid></TabItem>
 <TabItem Header="引擎设置"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel IsEnabled="{Binding IsIdle}">
@@ -65,7 +69,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </StackPanel></ScrollViewer></TabItem>
 <TabItem Header="自检记录"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <StackPanel Margin="0,0,0,16"><TextBlock Text="本地基础自检记录" FontSize="24"/><TextBlock Text="保留最近记录；这里不是游戏任务历史。时间显示为 UTC。" Foreground="{StaticResource Muted}" Margin="0,8,0,12"/><Button Content="刷新记录与配置" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel>
-<ListView Grid.Row="1" ItemsSource="{Binding History}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="10"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,6,0,0"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+<ListView Grid.Row="1" ItemsSource="{Binding History}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="10"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,6,0,0" TextWrapping="Wrap"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
 </Grid></TabItem>
 <TabItem Header="关于"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="4">
 <TextBlock Text="一个控制中心，三款独立引擎。" FontSize="24" FontWeight="SemiBold"/>

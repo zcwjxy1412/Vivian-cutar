@@ -162,12 +162,15 @@ public partial class App : Application
             tabs.SelectedIndex = i;
             window.UpdateLayout();
             window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+            // Render the whole client area (content plus its margin), not just the content's own size.
             var content = (FrameworkElement)window.Content;
+            var width = content.ActualWidth + content.Margin.Left + content.Margin.Right;
+            var height = content.ActualHeight + content.Margin.Top + content.Margin.Bottom;
             var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                (int)content.ActualWidth, (int)content.ActualHeight, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                (int)Math.Ceiling(width), (int)Math.Ceiling(height), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
             var background = new System.Windows.Media.DrawingVisual();
             using (var dc = background.RenderOpen())
-                dc.DrawRectangle(window.Background, null, new Rect(0, 0, content.ActualWidth, content.ActualHeight));
+                dc.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
             bitmap.Render(background);
             bitmap.Render(content);
             var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();

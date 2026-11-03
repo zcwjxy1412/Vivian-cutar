@@ -4,7 +4,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using VIvian.Core;
+using VIvian.Core.Execution;
 using VIvian.Infrastructure;
+using VIvian.Infrastructure.Simulation;
 
 namespace VIvian.App;
 
@@ -53,6 +55,12 @@ public partial class App : Application
                 services.AddSingleton(database);
                 services.AddSingleton<ISettingsStore>(database);
                 services.AddSingleton<IDiagnosticStore>(database);
+                services.AddSingleton<IRunJournal>(database);
+                services.AddSingleton<IRunHistory>(database);
+                // M2 simulation mode: the only supervisor available refuses to start processes.
+                services.AddSingleton<IProcessSupervisor, RefusingProcessSupervisor>();
+                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(), sp.GetRequiredService<IProcessSupervisor>()));
+                services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
             }).Build();
@@ -64,6 +72,7 @@ public partial class App : Application
                 Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
             var vm = _host.Services.GetRequiredService<MainViewModel>();
             await vm.InitializeAsync();
+            vm.ReportReconciled(reconciled.Count);
             var window = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = window;
             if (_smoke)
@@ -76,8 +85,9 @@ public partial class App : Application
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
+                        var queueReport = await SmokeQueueAsync(vm.Queue, database);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
-                            "WPF content rendered; SQLite round-trip passed; second instance refused.");
+                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport);
                         Shutdown(0);
                     }
                     catch (Exception ex) { Log.Error("Smoke failed: {ErrorType}", ex.GetType().Name); Shutdown(1); }
@@ -93,6 +103,55 @@ public partial class App : Application
             Shutdown(1);
         }
     }
+    /// <summary>
+    /// Smoke check for M2: runs a simulation queue through the real view model, scheduler and SQLite journal while a
+    /// background probe measures how long the UI thread takes to answer; then checks the emergency stop.
+    /// </summary>
+    private static async Task<string> SmokeQueueAsync(QueueViewModel queue, LocalDatabase database)
+    {
+        queue.Step = TimeSpan.FromMilliseconds(60);
+        var dispatcher = Current.Dispatcher;
+        using var probeStop = new CancellationTokenSource();
+        var probe = Task.Run(() =>
+        {
+            var worst = TimeSpan.Zero;
+            while (!probeStop.IsCancellationRequested)
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Input);
+                if (clock.Elapsed > worst) worst = clock.Elapsed;
+                Thread.Sleep(20);
+            }
+            return worst;
+        });
+
+        var plan = new[] { (GameId.Genshin, DemoScenario.Success), (GameId.StarRail, DemoScenario.Success), (GameId.ZenlessZoneZero, DemoScenario.Success) };
+        var completed = await queue.RunDemoAsync(plan) ?? throw new InvalidOperationException("Queue did not start");
+        if (completed.Status != QueueStatus.Completed || completed.Runs.Count != 3
+            || completed.Runs.Any(r => r.Outcome != RunOutcome.Success || !r.IsSimulation))
+            throw new InvalidOperationException("Simulation queue did not complete as expected");
+        var stored = await database.ReadRecentRunsAsync(10);
+        if (stored.Count(r => r.IsSimulation && r.Outcome == RunOutcome.Success) != 3)
+            throw new InvalidOperationException("Simulation runs were not persisted");
+        if (queue.Runs.Any(r => !r.Summary.StartsWith(RunPresentation.SimulationLabel, StringComparison.Ordinal)))
+            throw new InvalidOperationException("A simulation result was displayed without the simulation label");
+
+        var stalled = queue.RunDemoAsync([(GameId.Genshin, DemoScenario.Stall), (GameId.StarRail, DemoScenario.Success)]);
+        while (!queue.LogLines.Any(l => l.Contains("模拟卡死", StringComparison.Ordinal))) await Task.Delay(20);
+        var stopClock = System.Diagnostics.Stopwatch.StartNew();
+        queue.EmergencyStop();
+        var stopped = await stalled ?? throw new InvalidOperationException("Stop queue did not start");
+        var stopLatency = stopClock.Elapsed;
+        if (stopped.Status != QueueStatus.Cancelled || stopped.Runs.Single().Outcome != RunOutcome.Cancelled)
+            throw new InvalidOperationException("Emergency stop did not cancel the queue");
+        if (stopLatency > TimeSpan.FromSeconds(3)) throw new InvalidOperationException("Emergency stop too slow: " + stopLatency);
+
+        probeStop.Cancel();
+        var worstUi = await probe;
+        if (worstUi > TimeSpan.FromSeconds(1)) throw new InvalidOperationException("UI thread unresponsive: " + worstUi);
+        return $"simulation queue 3/3 success persisted; emergency stop {stopLatency.TotalMilliseconds:F0} ms; worst UI response {worstUi.TotalMilliseconds:F0} ms.";
+    }
+
     protected override void OnExit(ExitEventArgs e)
     {
         _host?.Dispose();

@@ -1,16 +1,16 @@
-<Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+<Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:VIvian.App"
 Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth="640" MinHeight="480" Background="#0D1523" Foreground="#EEF3FB" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen">
 <Grid Margin="28">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <StackPanel><TextBlock Text="VIvian" FontSize="32" FontWeight="Bold"/><TextBlock Text="每天的旅程，从这里开始。" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/></StackPanel>
-<Border Grid.Column="1" Background="#203250" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="M1 · 基础工程预览" Foreground="#B9CDFB"/></Border>
+<Border Grid.Column="1" Background="#3A2A12" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="M2 · 模拟模式 · 未接入真实引擎" Foreground="#F2CC85"/></Border>
 </Grid>
 <TabControl Grid.Row="1" Background="#0D1523" BorderThickness="0" Padding="0,20,0,0">
 <TabItem Header="概览"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
 <Border Background="{StaticResource Surface}" CornerRadius="16" Padding="24" Margin="0,0,0,20"><StackPanel>
 <TextBlock Text="准备好你的三段旅程" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="先保存引擎位置，检查本地基础服务。自动日常将在接口验证完成后开放。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
+<TextBlock Text="先保存引擎位置，检查本地基础服务。真实自动日常将在三款引擎完成实机验证后开放；在此之前可在“模拟队列”中体验调度流程。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
 <WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="运行基础自检" Command="{Binding CheckCommand}"/><TextBlock Text="仅检查 VIvian，不启动游戏" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/></WrapPanel>
 </StackPanel></Border>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate>
@@ -20,8 +20,41 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/></StackPanel>
 <TextBlock Grid.Column="2" Text="尚未接入" Foreground="#E5BF76" VerticalAlignment="Center" Margin="12,0,0,0"/>
 </Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<TextBlock Text="此版本没有游戏任务执行能力，不会将基础自检标记为日常完成。" Foreground="{StaticResource Muted}" Margin="0,8,0,16"/>
+<TextBlock Text="此版本没有真实游戏任务执行能力；模拟队列的结果均标注为【模拟】，不会被当作日常完成。" Foreground="{StaticResource Muted}" Margin="0,8,0,16"/>
 </StackPanel></ScrollViewer></TabItem>
+<TabItem Header="模拟队列"><Grid DataContext="{Binding Queue}">
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+<Border Background="#3A2A12" CornerRadius="12" Padding="16" Margin="0,0,0,16"><StackPanel>
+<TextBlock Text="模拟模式：这里的所有结果都是演示，不代表任何游戏的真实日常。" FontWeight="SemiBold" Foreground="#F2CC85"/>
+<TextBlock Text="不会启动游戏或任何程序，不读写游戏文件，也不操作键盘鼠标。用于检验 VIvian 的串行调度、停止与结果判定逻辑。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
+</StackPanel></Border>
+<Grid Grid.Row="1" Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<ItemsControl ItemsSource="{Binding Games}" IsEnabled="{Binding IsIdle}"><ItemsControl.ItemTemplate><DataTemplate>
+<Border Background="{StaticResource Surface}" CornerRadius="10" Padding="14,10" Margin="0,0,0,8"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<CheckBox IsChecked="{Binding Include}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Name}"/>
+<TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="10,0,12,0"/>
+<ComboBox Grid.Column="2" MinWidth="200" ItemsSource="{Binding Source={x:Static local:DemoGameOption.Scenarios}}" DisplayMemberPath="Label" SelectedItem="{Binding Scenario}" AutomationProperties.Name="模拟情形"/>
+</Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+<StackPanel Grid.Column="1" Margin="16,0,0,0" MinWidth="180">
+<Button Content="开始模拟队列" Command="{Binding StartCommand}" IsEnabled="{Binding IsIdle}" Margin="0,0,0,10"/>
+<Button Content="紧急停止" Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}" Background="#F08A80" Margin="0,0,0,10" AutomationProperties.HelpText="立即停止，不倒计时"/>
+<TextBlock Text="{Binding Current}" Foreground="{StaticResource Muted}" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Grid>
+<Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<DockPanel Margin="0,0,8,0"><TextBlock DockPanel.Dock="Top" Text="运行日志（模拟）" FontSize="16" Margin="0,0,0,8"/>
+<TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+<ListBox ItemsSource="{Binding LogLines}" Background="#101A2A" Foreground="#EEF3FB" BorderThickness="0" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True"/></DockPanel>
+<DockPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock DockPanel.Dock="Top" Text="运行记录" FontSize="16" Margin="0,0,0,8"/>
+<Border DockPanel.Dock="Top" Background="#4A1F22" CornerRadius="10" Padding="12" Margin="0,0,0,8">
+<Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
+<StackPanel><TextBlock Text="有运行无法确认已清理。在你确认之前，新的队列不会启动。" Foreground="#FFD3CF"/>
+<TextBlock Text="请先确认相关引擎和游戏都已关闭。你的确认会单独记录，不会改写原判定。" Foreground="#E8C2BE" Margin="0,4,0,8"/>
+<Button Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel></Border>
+<ListView ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="6">
+<TextBlock Text="{Binding When}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,4,0,0"/>
+</StackPanel></DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
+</Grid></Grid></TabItem>
 <TabItem Header="引擎设置"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel IsEnabled="{Binding IsIdle}">
 <TextBlock Text="引擎位置" FontSize="24" FontWeight="SemiBold"/><TextBlock Text="填写已经安装的目录；留空也可以。此处仅保存位置，不创建目录、不修改引擎文件。" Foreground="{StaticResource Muted}" Margin="0,10,0,20"/>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Surface}" Padding="20" CornerRadius="12" Margin="0,0,0,12"><StackPanel>
@@ -36,9 +69,9 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </Grid></TabItem>
 <TabItem Header="关于"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="4">
 <TextBlock Text="一个控制中心，三款独立引擎。" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="VIvian 0.1.0 · M1 基础工程" Margin="0,14,0,24" Foreground="#93B3FF"/>
-<TextBlock Text="当前已提供：本地配置、SQLite 持久化、基础日志、错误反馈和基础自检。" Margin="0,0,0,16"/>
-<TextBlock Text="尚未提供：自动日常、统一停止、引擎安装更新、回滚及托盘。真实引擎需完成接口与停止能力验证后接入。" Margin="0,0,0,16"/>
+<TextBlock Text="VIvian 0.2.0 · M2 执行内核（模拟模式）" Margin="0,14,0,24" Foreground="#93B3FF"/>
+<TextBlock Text="当前已提供：本地配置、SQLite 持久化、日志、单实例保护，以及在模拟模式下的串行调度、紧急停止、运行记录与崩溃后对账。" Margin="0,0,0,16"/>
+<TextBlock Text="尚未提供：真实游戏自动日常、引擎安装更新、回滚及托盘。真实引擎需完成接口与停止能力的实机验证后接入。" Margin="0,0,0,16"/>
 <TextBlock Text="三款引擎由各自开源项目维护。本程序无官方游戏关联，不收集游戏密码，不自动上传诊断信息。" Margin="0,0,0,16"/>
 <TextBlock Text="游戏自动化存在账号处罚风险。后续接入不会承诺零风险，也不会绕过反作弊。" Foreground="#E5BF76"/>
 </StackPanel></ScrollViewer></TabItem>

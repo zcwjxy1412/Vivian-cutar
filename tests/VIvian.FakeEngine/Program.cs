@@ -5,6 +5,7 @@
 // Evidence text is completion | failure | cancel. Any other line is free-form engine output.
 // A line "stop" on standard input is a graceful stop request.
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 Console.OutputEncoding = new UTF8Encoding(false);
@@ -91,6 +92,13 @@ switch (scenario)
         Emit("evidence", "completion");
         return 0;
 
+    case "probe-handle":
+        // The supplied numeric value is a handle in the parent process. It must be invalid here.
+        var candidate = new IntPtr(long.Parse(arguments["--probe-handle"]));
+        Emit("info", "unrelated-handle-inherited=" + HandleProbe.GetHandleInformation(candidate, out _));
+        Emit("evidence", "completion");
+        return 0;
+
     case "sleep-forever":
         Thread.Sleep(Timeout.Infinite);
         return 0;
@@ -105,4 +113,11 @@ static Dictionary<string, string> ParseArguments(string[] args)
     var result = new Dictionary<string, string>();
     for (var i = 0; i + 1 < args.Length; i += 2) result[args[i]] = args[i + 1];
     return result;
+}
+
+internal static class HandleProbe
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetHandleInformation(IntPtr handle, out uint flags);
 }

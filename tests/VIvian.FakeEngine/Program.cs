@@ -103,7 +103,7 @@ switch (scenario)
     case "probe-identity":
         if (!OperatingSystem.IsWindows()) return 64;
         Emit("info", "user-sid=" + WindowsIdentity.GetCurrent().User?.Value);
-        Emit("info", "in-job=" + JobProbe.IsProcessInJob(IntPtr.Zero, IntPtr.Zero, out var insideJob));
+        Emit("info", "in-job=" + JobProbe.IsProcessInJob(JobProbe.GetCurrentProcess(), IntPtr.Zero, out var insideJob));
         Emit("info", "job-member=" + insideJob);
         return 0;
 
@@ -132,6 +132,9 @@ internal static class HandleProbe
 
 internal static class JobProbe
 {
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetCurrentProcess();
+
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool IsProcessInJob(IntPtr processHandle, IntPtr jobHandle,

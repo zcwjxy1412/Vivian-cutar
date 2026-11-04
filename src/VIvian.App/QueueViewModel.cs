@@ -146,12 +146,16 @@ public sealed class QueueViewModel : ObservableObject
         if (_stop is not { } stop) return;
         // Sent immediately, no confirmation dialog or countdown. Cancelling runs adapter cancellation callbacks
         // synchronously, so it is done off the UI thread: a slow callback must never freeze the window.
+        var ui = SynchronizationContext.Current;
         _ = Task.Run(() =>
         {
             try { stop.Cancel(); }
             catch (Exception ex) when (ex is ObjectDisposedException or AggregateException) { /* queue ended or callback failed */ }
+            // Delivered to the scheduler (its stop path is running); this is not a claim that anything has ended.
+            ui?.Post(_ => { if (IsRunning) Status = "紧急停止已送达调度器，正在等待引擎结束并核对清理…"; }, null);
         });
-        Status = "已发出紧急停止…";
+        // Only queued so far: the request may not have reached the scheduler yet.
+        Status = "正在发送紧急停止…";
         Serilog.Log.Information("Emergency stop requested from UI");
     }
 

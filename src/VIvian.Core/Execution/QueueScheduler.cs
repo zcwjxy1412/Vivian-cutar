@@ -144,14 +144,23 @@ public sealed class QueueScheduler(
         private readonly CancellationTokenSource _token = new();
         private readonly TaskCompletionSource _signal = NewSignal();
         private int _disposed;
+        private int _requested;
 
         public Task Requested => _signal.Task;
         public CancellationToken Token => _token.Token;
 
+        /// <summary>
+        /// Set before anything else observes the stop (signal, token, callbacks). Safety gates — such as a run's
+        /// launch permission — read this flag directly, so no adapter cancellation callback can delay them.
+        /// </summary>
+        public bool IsRequested => Volatile.Read(ref _requested) == 1;
+
         public void Trigger()
         {
-            // The scheduler's own stop path (escalation, grace timers) is released first, so an adapter
-            // cancellation callback that blocks below can never hide or delay the emergency stop.
+            // 1. Safety gates first: from here on no gate that reads IsRequested admits new work.
+            Interlocked.Exchange(ref _requested, 1);
+            // 2. The scheduler's own stop path (escalation, grace timers) is released next, so an adapter
+            //    cancellation callback that blocks below can never hide or delay the emergency stop.
             _signal.TrySetResult();
             if (Volatile.Read(ref _disposed) == 0)
             {

@@ -40,7 +40,7 @@ public sealed class FakeEngineScenarioTests : IAsyncLifetime
                     Path.GetDirectoryName(engine)!), context.RunId, CancellationToken.None);
             }
             catch (Exception ex) { LaunchError = ex; }
-            throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: LaunchError is not null);
+            throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: LaunchError is not null, "late launch rejected");
         }
     }
 

@@ -142,7 +142,7 @@ public sealed class QueueScheduler(
             {
                 using var queryCts = new CancellationTokenSource(_options.JournalTimeout, _time);
                 var query = _journal.CountUnresolvedAsync(queryCts.Token);
-                unresolved = await query.WaitAsync(_options.JournalTimeout, _time).ConfigureAwait(false);
+                unresolved = await query.WaitAsync(_options.JournalTimeout, _time, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception) { unresolved = -1; }
             if (unresolved != 0)

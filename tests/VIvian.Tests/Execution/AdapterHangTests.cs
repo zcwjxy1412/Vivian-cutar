@@ -478,6 +478,7 @@ public sealed class AdapterHangTests : IDisposable
 
     private sealed class FakeGroup(Guid runId) : ISupervisedProcessGroup
     {
+        public bool OwnsProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process) => false; // simulated: owns nothing
         public volatile bool Terminated;
         public volatile bool Disposed;
         public Func<Task<CleanupState>>? Terminate;

@@ -14,8 +14,11 @@ public sealed record AppPaths(string DataDirectory)
 {
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
     public string ExportDirectory => Path.Combine(DataDirectory, "exports");
-    public static string Version { get; } =
-        typeof(AppPaths).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev";
+    private static readonly string Informational =
+        typeof(AppPaths).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "dev";
+    public static string Version { get; } = Informational.Split('+')[0];
+    /// <summary>Source commit stamped by scripts/Build.ps1, or "本地构建" for an unstamped local build.</summary>
+    public static string Commit { get; } = Informational.Split('+') is [_, var sha, ..] && sha.Length >= 7 ? sha[..Math.Min(12, sha.Length)] : "本地构建";
 }
 
 public sealed class MainViewModel : ObservableObject
@@ -33,7 +36,7 @@ public sealed class MainViewModel : ObservableObject
     public bool IsIdle => !_busy;
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
-    public string VersionText => $"VIvian {AppPaths.Version} · 预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）";
+    public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}）· 预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
     public ObservableCollection<EngineCard> Engines { get; } =
     [new(GameId.Genshin, "原神", "BetterGI", "01"), new(GameId.StarRail, "崩坏：星穹铁道", "March7thAssistant", "02"), new(GameId.ZenlessZoneZero, "绝区零", "OneDragon", "03")];

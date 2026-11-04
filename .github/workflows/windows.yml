@@ -13,13 +13,18 @@ jobs:
           global-json-file: global.json
       - name: Build, test, publish and WPF smoke
         shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Build.ps1 -SmokeTest
       - name: Upload development build (simulated engines only)
         if: success()
         uses: actions/upload-artifact@v6
         with:
           name: VIvian-dev-win-x64
-          path: artifacts/VIvian-win-x64.zip
+          path: |
+            artifacts/VIvian-win-x64.zip
+            artifacts/VIvian-win-x64.zip.sha256
+            artifacts/BUILD-INFO.txt
           if-no-files-found: error
       - name: Preserve build evidence and portable preview
         if: always()

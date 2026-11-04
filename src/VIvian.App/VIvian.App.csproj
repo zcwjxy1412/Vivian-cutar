@@ -4,7 +4,7 @@
 <OutputType>WinExe</OutputType><UseWPF>true</UseWPF>
 <EnableWindowsTargeting>true</EnableWindowsTargeting>
 <ApplicationManifest>app.manifest</ApplicationManifest>
-<AssemblyName>VIvian</AssemblyName><Version>0.3.0</Version><InformationalVersion>0.3.0-dev</InformationalVersion>
+<AssemblyName>VIvian</AssemblyName><Version>0.4.0</Version><InformationalVersion>0.4.0-dev</InformationalVersion>
 </PropertyGroup>
 <ItemGroup>
 <ProjectReference Include="../VIvian.Infrastructure/VIvian.Infrastructure.csproj" />

@@ -68,6 +68,16 @@ public static class ReadOnlyFileAccess
     }
 
     /// <summary>
+    /// Number of hard links to an open file (Windows), or null where unavailable. More than one means the same bytes
+    /// are reachable under another path, possibly one outside the folder the user chose.
+    /// </summary>
+    public static uint? LinkCount(SafeFileHandle handle)
+    {
+        if (!OperatingSystem.IsWindows()) return null;
+        return Native.GetFileInformationByHandle(handle, out var info) ? info.NumberOfLinks : null;
+    }
+
+    /// <summary>
     /// True when the open handle's final path (after the system resolved every link) is the path that was asked for.
     /// Always true where the check is unavailable; the reparse-point walk then remains the guard.
     /// </summary>

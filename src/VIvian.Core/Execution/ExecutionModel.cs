@@ -46,6 +46,8 @@ public static class ReasonCodes
     public const string JournalUnavailable = "journal_unavailable";
     public const string UnresolvedRuns = "unresolved_runs";
     public const string InternalError = "internal_error";
+    public const string AdapterUnresponsive = "adapter_unresponsive";
+    public const string RealAdapterUnverified = "real_adapter_unverified";
 }
 
 public sealed record RunContext(Guid RunId, Guid QueueId, GameId Game, DateTimeOffset CreatedAt);
@@ -90,6 +92,10 @@ public sealed record QueueItem
 
 public sealed record QueueResult(Guid QueueId, QueueStatus Status, IReadOnlyList<RunUpdate> Runs,
     IReadOnlyList<GameId> NotStarted, bool JournalFaulted, string? BlockReason = null);
+
+/// <summary>An acknowledgement was refused because an abandoned adapter call of the run has not returned yet.</summary>
+public sealed class RunStillActiveException()
+    : InvalidOperationException("该运行仍有未结束的适配器操作，可能仍占用电脑，暂时不能确认。");
 
 /// <summary>Thrown by adapters when start fails. <paramref name="NothingStarted"/> must only be true when
 /// the adapter is certain no process was created; otherwise cleanup is treated as unconfirmed.</summary>

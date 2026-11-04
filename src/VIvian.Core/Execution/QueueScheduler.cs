@@ -24,6 +24,15 @@ public sealed record RunLimits
 public sealed record SchedulerOptions(
     TimeSpan GracefulStopTimeout, TimeSpan EmergencyStopTimeout, TimeSpan ReconcileTimeout, RunLimits DefaultLimits)
 {
+    /// <summary>Scheduler-owned limit for <see cref="IGameAdapter.PreflightAsync"/> (#28).</summary>
+    public TimeSpan PreflightTimeout { get; init; } = TimeSpan.FromSeconds(60);
+    /// <summary>Scheduler-owned limit for <see cref="IGameAdapter.StartAsync"/> (#28).</summary>
+    public TimeSpan StartTimeout { get; init; } = TimeSpan.FromSeconds(120);
+    /// <summary>Scheduler-owned limit for disposing a run (#28).</summary>
+    public TimeSpan DisposeTimeout { get; init; } = TimeSpan.FromSeconds(15);
+    /// <summary>Scheduler-owned limit for journal gate queries and abandoned-call audit writes.</summary>
+    public TimeSpan JournalTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
     public static SchedulerOptions Default { get; } = new(
         TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(30),
         new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)));
@@ -34,6 +43,9 @@ public sealed record SchedulerOptions(
 /// Safety rules (M2 plan §2.1): the next game starts only after the previous run's cleanup is confirmed;
 /// an emergency stop is sent immediately with no countdown; uncertain runs are never retried;
 /// success needs explicit completion evidence for the current RunId.
+/// Every adapter call is bounded by a scheduler-owned limit (#28): an adapter that ignores cancellation or never
+/// returns cannot keep the queue running. An abandoned call is not assumed to have ended; it holds the
+/// <see cref="SessionHazards"/> barrier until it actually returns, and its run ends with cleanup Unconfirmed.
 /// </summary>
 public sealed class QueueScheduler(
     IRunJournal journal, IProcessSupervisor supervisor, SchedulerOptions? options = null, TimeProvider? time = null)
@@ -42,6 +54,7 @@ public sealed class QueueScheduler(
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private TaskCompletionSource _emergency = NewSignal();
     private int _running;
+    private readonly SafetyBarrier _barrier = new();
 
     /// <summary>Raised on a background thread whenever a run changes phase, outcome or cleanup state.</summary>
     public event Action<RunUpdate>? RunChanged;
@@ -49,6 +62,49 @@ public sealed class QueueScheduler(
     public event Action<RunEvent>? EventReceived;
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
+
+    /// <summary>
+    /// Runs that, in this session, may still occupy the machine. While this is not empty, no queue starts — even if
+    /// the database could not record the problem (#29) or an abandoned adapter call has not returned yet (#28).
+    /// </summary>
+    public IReadOnlyList<SessionHazard> SessionHazards => _barrier.Snapshot();
+
+    /// <summary>Raised on a background thread when <see cref="SessionHazards"/> changes.</summary>
+    public event Action? HazardsChanged
+    {
+        add => _barrier.Changed += value;
+        remove => _barrier.Changed -= value;
+    }
+
+    /// <summary>
+    /// The user confirms that a run whose cleanup was unconfirmed no longer occupies the machine. Refused while an
+    /// abandoned adapter call of that run is still running. If the run's final state never reached the journal it is
+    /// written first; the acknowledgement is stored by <paramref name="history"/> and never rewrites the verdict.
+    /// The in-session barrier is released only after the acknowledgement was stored.
+    /// </summary>
+    public async Task AcknowledgeAsync(Guid runId, string note, IRunHistory history, DateTimeOffset at, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        if (_barrier.Find(runId) is { } hazard)
+        {
+            if (hazard.PendingOperations > 0 || hazard.RequiresVerifiedRecovery)
+                throw new RunStillActiveException();
+            if (!hazard.TerminalPersisted && hazard.LastKnown is { } last)
+            {
+                try
+                {
+                    await _journal.PublishAsync(last, ct).ConfigureAwait(false);
+                    _barrier.MarkPersisted(runId);
+                }
+                catch (Exception)
+                {
+                    // The acknowledgement below fails as well if the record is still missing; the barrier then stays.
+                }
+            }
+        }
+        await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+        if (!_barrier.TryResolve(runId)) throw new RunStillActiveException();
+    }
 
     /// <summary>
     /// Requests an immediate stop of the queue that is currently running. No countdown; safe from any thread.
@@ -65,21 +121,29 @@ public sealed class QueueScheduler(
             throw new ArgumentException("每款游戏在一个队列中只能出现一次。", nameof(items));
         if (Interlocked.Exchange(ref _running, 1) == 1)
             throw new InvalidOperationException("已有队列在运行。");
-        var emergency = NewSignal();
-        Volatile.Write(ref _emergency, emergency);
-        // Cancelling the caller's token (e.g. application shutdown) is treated as an emergency stop.
-        using var registration = ct.Register(() => emergency.TrySetResult());
-        using var stopToken = new CancellationTokenSource();
-        _ = emergency.Task.ContinueWith(_ =>
-        {
-            try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
-        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         try
         {
+            var emergency = NewSignal();
+            Volatile.Write(ref _emergency, emergency);
+            using var stopToken = new CancellationTokenSource();
+            using var registration = ct.Register(() => emergency.TrySetResult());
+            _ = emergency.Task.ContinueWith(_ =>
+            {
+                try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             var queueId = Guid.NewGuid();
+            // In-session barrier first: it does not depend on the database being writable.
+            if (!_barrier.IsClear)
+                return new QueueResult(queueId, QueueStatus.Blocked, [], items.Select(x => x.Game).ToList(), false,
+                    _barrier.HasPendingOperations ? ReasonCodes.AdapterUnresponsive : ReasonCodes.UnresolvedRuns);
             // A previous run may still own processes (e.g. after a crash). Nothing starts until the user resolves it.
             int unresolved;
-            try { unresolved = await _journal.CountUnresolvedAsync(CancellationToken.None).ConfigureAwait(false); }
+            try
+            {
+                using var queryCts = new CancellationTokenSource(_options.JournalTimeout, _time);
+                var query = _journal.CountUnresolvedAsync(queryCts.Token);
+                unresolved = await query.WaitAsync(_options.JournalTimeout, _time, CancellationToken.None).ConfigureAwait(false);
+            }
             catch (Exception) { unresolved = -1; }
             if (unresolved != 0)
                 return new QueueResult(queueId, QueueStatus.Blocked, [], items.Select(x => x.Game).ToList(),
@@ -142,7 +206,11 @@ public sealed class QueueScheduler(
     {
         private readonly RunStateMachine _sm = new();
         private readonly Guid _runId = Guid.NewGuid();
+        private RunProcessScope? _processScope;
         private long _lastActivity;
+        private bool _lastPublishSucceeded;
+        private bool _abandoned;      // an adapter call of this run outlived its limit (#28)
+        private bool _runDisposed;
         public bool JournalFaulted { get; private set; }
 
         private IGameAdapter Adapter => item.Adapter;
@@ -161,10 +229,22 @@ public sealed class QueueScheduler(
             _sm.MoveTo(RunPhase.Preflight);
             await PublishAsync().ConfigureAwait(false);
 
-            PreflightResult preflight;
-            try { preflight = await Adapter.PreflightAsync(context, stopToken).ConfigureAwait(false); }
-            catch (OperationCanceledException) when (emergency.IsCompleted) { return await CancelBeforeStartAsync().ConfigureAwait(false); }
-            catch (Exception) { preflight = PreflightResult.Block(ReasonCodes.PreflightError, "预检出错。"); }
+            // No real adapter has passed process-ownership admission yet. A third-party adapter can
+            // ignore our supervisor and launch on its own; the scoped gate cannot contain such code.
+            if (!Adapter.IsSimulation)
+            {
+                _sm.SetBlockReason(ReasonCodes.RealAdapterUnverified);
+                _sm.MoveTo(RunPhase.Blocked);
+                return (await PublishAsync().ConfigureAwait(false), true);
+            }
+
+            var pre = await BoundAsync("PreflightAsync", t => Adapter.PreflightAsync(context, t),
+                Options.PreflightTimeout, emergencyShortens: true).ConfigureAwait(false);
+            if (pre.Status == BoundStatus.Abandoned) return await AbandonBeforeStartAsync().ConfigureAwait(false);
+            if (pre.Status == BoundStatus.Faulted && pre.Error is OperationCanceledException && emergency.IsCompleted)
+                return await CancelBeforeStartAsync().ConfigureAwait(false);
+            var preflight = pre.Status == BoundStatus.Completed && pre.Value is { } value
+                ? value : PreflightResult.Block(ReasonCodes.PreflightError, "预检出错。");
             if (!preflight.CanStart)
             {
                 _sm.SetBlockReason(preflight.ReasonCode ?? ReasonCodes.PreflightError);
@@ -189,23 +269,42 @@ public sealed class QueueScheduler(
             _sm.MoveTo(RunPhase.Starting);
             owner.Raise(Snapshot());
 
-            IEngineRun run;
-            try
+            // A run that arrives after the limit is still released (e.g. its job handle closed), but that is never
+            // taken as proof that its processes have ended.
+            _processScope = new RunProcessScope(owner._supervisor, _runId);
+            using var stopRegistration = stopToken.Register(() => _processScope.RevokeLaunches());
+            var started = await BoundAsync("StartAsync", t => Adapter.StartAsync(context, _processScope, t),
+                Options.StartTimeout, emergencyShortens: true,
+                onLateResult: async late => { if (late is not null) await late.DisposeAsync().ConfigureAwait(false); })
+                .ConfigureAwait(false);
+            var userStop = emergency.IsCompleted;
+            if (started.Status == BoundStatus.Abandoned)
             {
-                run = await Adapter.StartAsync(context, owner._supervisor, stopToken).ConfigureAwait(false);
+                _processScope.RevokeLaunches();
+                if (!await _processScope.RevokeAsync(Options.DisposeTimeout).ConfigureAwait(false))
+                    owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                return await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Indeterminate,
+                    ReasonCodes.AdapterUnresponsive, CleanupState.Unconfirmed).ConfigureAwait(false);
             }
-            catch (EngineStartException ex)
+            if (started.Status == BoundStatus.Faulted)
             {
-                var userStop = emergency.IsCompleted;
-                return await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Failed,
-                    userStop ? ReasonCodes.UserStop : ex.ReasonCode,
-                    ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed).ConfigureAwait(false);
+                _processScope.RevokeLaunches();
+                if (!await _processScope.RevokeAsync(Options.DisposeTimeout).ConfigureAwait(false))
+                    owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                return started.Error is EngineStartException ex
+                    ? await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Failed,
+                        userStop ? ReasonCodes.UserStop : ex.ReasonCode,
+                        ex.NothingStarted && !(_processScope.HasUnsafeLaunch) ? CleanupState.NotRequired : CleanupState.Unconfirmed).ConfigureAwait(false)
+                    : await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Failed,
+                        userStop ? ReasonCodes.UserStop : ReasonCodes.AdapterError, CleanupState.Unconfirmed).ConfigureAwait(false);
             }
-            catch (Exception)
+            if (started.Value is not { } run)
             {
-                var userStop = emergency.IsCompleted;
-                return await FinishWithoutRunAsync(userStop ? RunOutcome.Cancelled : RunOutcome.Failed,
-                    userStop ? ReasonCodes.UserStop : ReasonCodes.AdapterError, CleanupState.Unconfirmed).ConfigureAwait(false);
+                _processScope.RevokeLaunches();
+                if (!await _processScope.RevokeAsync(Options.DisposeTimeout).ConfigureAwait(false))
+                    owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                return await FinishWithoutRunAsync(RunOutcome.Failed, ReasonCodes.AdapterError, CleanupState.Unconfirmed)
+                    .ConfigureAwait(false);
             }
 
             try
@@ -214,15 +313,176 @@ public sealed class QueueScheduler(
             }
             finally
             {
-                // Disposal releases handles; whether processes are gone was already decided by reconciliation.
-                try { await run.DisposeAsync().ConfigureAwait(false); }
-                catch (Exception) { /* never let disposal change the recorded result */ }
+                // Only reached without disposal on an unexpected internal error; AbortAsync then records Unconfirmed.
+                if (!_runDisposed) await DisposeRunAsync(run).ConfigureAwait(false);
+            }
+        }
+
+        /// <summary>Preflight did not return in time: the adapter may still be doing something, so nothing is assumed.</summary>
+        private async Task<(RunUpdate, bool)> AbandonBeforeStartAsync()
+        {
+            if (emergency.IsCompleted) _sm.SetOutcome(RunOutcome.Cancelled, ReasonCodes.AdapterUnresponsive);
+            else _sm.SetBlockReason(ReasonCodes.AdapterUnresponsive);
+            _sm.SetCleanup(CleanupState.Unconfirmed);
+            _sm.MoveTo(RunPhase.Blocked);
+            var update = await PublishAsync().ConfigureAwait(false);
+            owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);
+            return (update, true);
+        }
+
+        private async Task DisposeRunAsync(IEngineRun run)
+        {
+            _runDisposed = true;
+            // Disposal releases handles; whether processes are gone is decided by reconciliation, not by this call.
+            try
+            {
+                var disposed = await BoundAsync("DisposeAsync", async _ => { await run.DisposeAsync().ConfigureAwait(false); return true; },
+                    Options.DisposeTimeout, emergencyShortens: false).ConfigureAwait(false);
+                if (disposed.Status != BoundStatus.Completed)
+                    owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+            }
+            catch (Exception)
+            {
+                // Bound setup failed before it launched the call. Try disposal once, track it,
+                // and never interpret a late or hung release as confirmed cleanup.
+                _abandoned = true;
+                owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                owner._barrier.BeginOperation(_runId, item.Game);
+                var release = Task.Run(async () => { await run.DisposeAsync().ConfigureAwait(false); return true; });
+                _ = ObserveAbandonedAsync("DisposeAsync", release, null);
+            }
+        }
+
+        private enum BoundStatus { Completed, Faulted, Abandoned }
+
+        private readonly record struct Bounded<T>(BoundStatus Status, T? Value, Exception? Error);
+
+        /// <summary>
+        /// Runs one adapter call under a scheduler-owned limit (#28). The call runs on the thread pool, so an adapter
+        /// that blocks synchronously is bounded too, and receives a token cancelled by an emergency stop or the limit.
+        /// If it has not returned by the limit (or <see cref="SchedulerOptions.EmergencyStopTimeout"/> after an
+        /// emergency stop, when <paramref name="emergencyShortens"/>), the scheduler stops waiting. That does not end
+        /// the call: it is tracked on the safety barrier until it returns, its result or exception is observed, and
+        /// the run's cleanup can no longer be reported as confirmed.
+        /// </summary>
+        private async Task<Bounded<T>> BoundAsync<T>(string operation, Func<CancellationToken, Task<T>> call, TimeSpan limit,
+            bool emergencyShortens, Func<T, Task>? onLateResult = null)
+        {
+            CancellationTokenSource? limitCts = null;
+            CancellationTokenSource? callCts = null;
+            CancellationTokenRegistration launchRegistration = default;
+            Task<T> task;
+            try
+            {
+                limitCts = new CancellationTokenSource(limit, Time);
+                callCts = CancellationTokenSource.CreateLinkedTokenSource(stopToken, limitCts.Token);
+                if (operation == "StartAsync")
+                    launchRegistration = callCts.Token.Register(() => _processScope?.RevokeLaunches());
+                task = Task.Run(() => call(callCts.Token), CancellationToken.None);
+            }
+            catch
+            {
+                launchRegistration.Dispose();
+                callCts?.Dispose();
+                limitCts?.Dispose();
+                throw;
+            }
+            Task? winner;
+            try
+            {
+                using var waitCts = new CancellationTokenSource();
+                var deadline = Task.Delay(limit, Time, waitCts.Token);
+                var grace = emergencyShortens
+                    ? GraceAfterEmergencyAsync(waitCts.Token)
+                    : Task.Delay(Timeout.InfiniteTimeSpan, waitCts.Token);
+                winner = await Task.WhenAny(task, deadline, grace).ConfigureAwait(false);
+                waitCts.Cancel();
+            }
+            catch (Exception)
+            {
+                // The call is already running: if waiting for it fails, it must still never go untracked.
+                winner = null;
+            }
+            if (winner == task)
+            {
+                launchRegistration.Dispose();
+                callCts.Dispose();
+                limitCts.Dispose();
+                try { return new(BoundStatus.Completed, await task.ConfigureAwait(false), null); }
+                catch (Exception ex) { return new(BoundStatus.Faulted, default, ex); }
+            }
+
+            _abandoned = true;
+            if (operation == "StartAsync") _processScope?.RevokeLaunches();
+            owner._barrier.BeginOperation(_runId, item.Game);
+            _ = ObserveAbandonedAsync(operation, task, onLateResult, launchRegistration, callCts, limitCts);
+            return new(BoundStatus.Abandoned, default, null);
+        }
+
+        private async Task GraceAfterEmergencyAsync(CancellationToken ct)
+        {
+            await emergency.WaitAsync(ct).ConfigureAwait(false);
+            await Task.Delay(Options.EmergencyStopTimeout, Time, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>Waits for an abandoned call to really return, then releases its hold on the barrier.</summary>
+        private async Task ObserveAbandonedAsync<T>(string operation, Task<T> task, Func<T, Task>? onLateResult,
+            params IDisposable[] disposables)
+        {
+            try
+            {
+                string note;
+                try
+                {
+                    var value = await task.ConfigureAwait(false);
+                    note = $"适配器操作 {operation} 在时限之后才返回。";
+                    if (onLateResult is not null)
+                    {
+                        try
+                        {
+                            var release = onLateResult(value);
+                            await release.WaitAsync(Options.DisposeTimeout, Time, CancellationToken.None).ConfigureAwait(false);
+                        }
+                        catch (TimeoutException)
+                        {
+                            owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                            note += " 迟到结果释放超时；需核实资源归属。";
+                        }
+                        catch (Exception ex)
+                        {
+                            owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                            note += $" 释放迟到的结果时出错（{ex.GetType().Name}）。";
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    note = $"适配器操作 {operation} 在时限之后以异常结束（{ex.GetType().Name}）。";
+                }
+                foreach (var d in disposables) d.Dispose();
+                // A journal that never returns must not keep PendingOperations permanently high.
+                try
+                {
+                    using var auditCts = new CancellationTokenSource(Options.JournalTimeout, Time);
+                    var write = owner._journal.AppendEventsAsync(
+                        [new RunEvent(_runId, Time.GetUtcNow(), RunEventKind.Warning, note)], auditCts.Token);
+                    await write.WaitAsync(Options.JournalTimeout, Time, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                }
+            }
+            finally
+            {
+                owner._barrier.EndOperation(_runId);
             }
         }
 
         /// <summary>Closes the run after an unexpected internal error, without depending on the clock or adapter.</summary>
         public async Task<RunUpdate> AbortAsync()
         {
+            _processScope?.RevokeLaunches();
             var started = _sm.Phase is not (RunPhase.Pending or RunPhase.Preflight);
             RunUpdate update;
             try
@@ -237,8 +497,10 @@ public sealed class QueueScheduler(
                     started ? RunOutcome.Indeterminate : null, started ? CleanupState.Unconfirmed : CleanupState.NotRequired,
                     ReasonCodes.InternalError, DateTimeOffset.UtcNow);
             }
+            var persisted = true;
             try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { JournalFaulted = true; }
+            catch (Exception) { JournalFaulted = true; persisted = false; }
+            if (update.Cleanup == CleanupState.Unconfirmed) owner._barrier.MarkUnconfirmed(update, persisted);
             owner.Raise(update);
             return update;
         }
@@ -251,8 +513,9 @@ public sealed class QueueScheduler(
             var limits = item.Limits ?? Options.DefaultLimits;
 
             using var watchCts = new CancellationTokenSource();
-            var pump = PumpEventsAsync(run, watchCts.Token);
-            var verdictTask = WaitVerdictSafeAsync(run);
+            // Off the scheduler's path: an adapter whose enumerator or verdict blocks synchronously cannot stall it.
+            var pump = Task.Run(() => PumpEventsAsync(run, watchCts.Token), CancellationToken.None);
+            var verdictTask = Task.Run(() => WaitVerdictSafeAsync(run), CancellationToken.None);
             var timeoutTask = Task.Delay(limits.TaskTimeout, Time, watchCts.Token);
             var stallTask = StallWatchAsync(limits.StallTimeout, watchCts.Token);
 
@@ -283,21 +546,26 @@ public sealed class QueueScheduler(
             _sm.MoveTo(RunPhase.Reconciling);
             await PublishAsync().ConfigureAwait(false);
 
-            CleanupState cleanup;
-            try
-            {
-                using var reconcileCts = new CancellationTokenSource(Options.ReconcileTimeout, Time);
-                cleanup = await run.ReconcileAsync(reconcileCts.Token).ConfigureAwait(false);
-                if (cleanup is CleanupState.Pending or CleanupState.NotRequired) cleanup = CleanupState.Unconfirmed;
-            }
-            catch (Exception)
-            {
-                cleanup = CleanupState.Unconfirmed;
-            }
+            var reconciled = await BoundAsync("ReconcileAsync", t => run.ReconcileAsync(t),
+                Options.ReconcileTimeout, emergencyShortens: false).ConfigureAwait(false);
+            var cleanup = reconciled is { Status: BoundStatus.Completed, Value: CleanupState.Confirmed }
+                ? CleanupState.Confirmed : CleanupState.Unconfirmed;
             // Stop reading engine output (prompt), then let already-buffered events reach storage so the record is
             // complete when the run is reported finished. Bounded, in case an adapter's event stream misbehaves.
             watchCts.Cancel();
             await Task.WhenAny(pump, Task.Delay(EventFlushTimeout, Time)).ConfigureAwait(false);
+            await DisposeRunAsync(run).ConfigureAwait(false);
+            if (_processScope is { } scope)
+            {
+                scope.RevokeLaunches();
+                if (!await scope.RevokeAsync(Options.DisposeTimeout).ConfigureAwait(false))
+                {
+                    owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                    cleanup = CleanupState.Unconfirmed;
+                }
+            }
+            // An abandoned call may still be acting on the machine: never report this run as cleaned up.
+            if (_abandoned) cleanup = CleanupState.Unconfirmed;
             return await FinishAsync(cleanup).ConfigureAwait(false);
         }
 
@@ -327,15 +595,9 @@ public sealed class QueueScheduler(
 
         private async Task RequestStopSafeAsync(IEngineRun run, StopMode mode)
         {
-            try
-            {
-                using var cts = new CancellationTokenSource(Options.EmergencyStopTimeout, Time);
-                await run.RequestStopAsync(mode, cts.Token).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                // Whether the engine really stopped is decided by the verdict and reconciliation, not by this call.
-            }
+            // Whether the engine really stopped is decided by the verdict and reconciliation, not by this call.
+            await BoundAsync("RequestStopAsync", t => run.RequestStopAsync(mode, t),
+                Options.EmergencyStopTimeout, emergencyShortens: false).ConfigureAwait(false);
         }
 
         private async Task<RunVerdict> WaitVerdictSafeAsync(IEngineRun run)
@@ -423,17 +685,32 @@ public sealed class QueueScheduler(
 
         private async Task<(RunUpdate, bool)> FinishAsync(CleanupState cleanup)
         {
+            _processScope?.RevokeLaunches();
+            if (owner._barrier.Find(_runId)?.RequiresVerifiedRecovery == true)
+                cleanup = CleanupState.Unconfirmed;
             _sm.SetCleanup(cleanup);
             var confirmed = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
             _sm.MoveTo(confirmed ? RunPhase.Finished : RunPhase.Blocked);
-            return (await PublishAsync().ConfigureAwait(false), !confirmed);
+            var update = await PublishAsync().ConfigureAwait(false);
+            // Fail closed: the barrier holds whether or not the database accepted the final state.
+            if (!confirmed) owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);
+            return (update, !confirmed);
         }
 
         private async Task<RunUpdate> PublishAsync()
         {
             var update = Snapshot();
-            try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { JournalFaulted = true; }
+            try
+            {
+                await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false);
+                _lastPublishSucceeded = true;
+            }
+            catch (Exception)
+            {
+                JournalFaulted = true;
+                _lastPublishSucceeded = false;
+            }
+            owner._barrier.Observe(update, _lastPublishSucceeded);
             owner.Raise(update);
             return update;
         }

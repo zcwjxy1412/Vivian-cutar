@@ -64,7 +64,7 @@ public interface IRunJournal
     /// <summary>Stores a batch of events for one or more runs. Called from a single background writer,
     /// so slow storage never blocks the scheduler's safety paths.</summary>
     Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct);
-    /// <summary>Runs whose cleanup is unconfirmed and that the user has not yet acknowledged.
+    /// <summary>Runs whose cleanup is unconfirmed and not yet acknowledged, plus runs that never reached a terminal phase.
     /// While any exist, no new queue may start.</summary>
     Task<int> CountUnresolvedAsync(CancellationToken ct);
 }
@@ -75,7 +75,9 @@ public sealed record RunRecord(
     RunPhase Phase, RunOutcome? Outcome, CleanupState Cleanup, string? ReasonCode,
     DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, DateTimeOffset? AcknowledgedAt, string? AcknowledgementNote)
 {
-    public bool IsUnresolved => Cleanup == CleanupState.Unconfirmed && AcknowledgedAt is null;
+    /// <summary>Unconfirmed cleanup not yet acknowledged, or a record that never reached a terminal phase.</summary>
+    public bool IsUnresolved =>
+        (Cleanup == CleanupState.Unconfirmed && AcknowledgedAt is null) || Phase is not (RunPhase.Finished or RunPhase.Blocked);
 }
 
 public interface IRunHistory

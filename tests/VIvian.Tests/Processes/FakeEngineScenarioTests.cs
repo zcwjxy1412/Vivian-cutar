@@ -19,6 +19,54 @@ namespace VIvian.Tests.Processes;
 [SupportedOSPlatform("windows")]
 public sealed class FakeEngineScenarioTests : IAsyncLifetime
 {
+    private sealed class LateLaunchAdapter(string engine, Task release) : IGameAdapter
+    {
+        public GameId Game => GameId.Genshin;
+        public string RuleVersion => "late-launch-test";
+        public bool IsSimulation => true;
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Exception? LaunchError;
+        public Task<PreflightResult> PreflightAsync(RunContext context, CancellationToken ct) =>
+            Task.FromResult(PreflightResult.Ok());
+        public async Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+        {
+            Entered.TrySetResult();
+            await release.ConfigureAwait(false);
+            // Deliberately ignore the cancelled token: the scoped supervisor must still reject this.
+            try
+            {
+                await supervisor.StartAsync(new ProcessLaunchSpec(engine,
+                    ["--run-id", context.RunId.ToString("D"), "--scenario", "long-running"],
+                    Path.GetDirectoryName(engine)!), context.RunId, CancellationToken.None);
+            }
+            catch (Exception ex) { LaunchError = ex; }
+            throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: LaunchError is not null, "late launch rejected");
+        }
+    }
+
+    [WindowsFact]
+    public async Task TimedOutStartCannotCreateLateFakeEngineEvenWithUncancelledToken()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adapter = new LateLaunchAdapter(FakeEngine, release.Task);
+        var scheduler = new QueueScheduler(new InMemoryJournal(), new WindowsProcessSupervisor(),
+            Options with { StartTimeout = TimeSpan.FromMilliseconds(200) });
+        try
+        {
+            var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]);
+            await adapter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var result = await queue.WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.Equal(QueueStatus.Blocked, result.Status);
+            release.TrySetResult();
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (adapter.LaunchError is null && DateTime.UtcNow < deadline) await Task.Delay(10);
+            Assert.IsType<EngineStartException>(adapter.LaunchError);
+            Assert.Empty(FakeEngineAdapter.ForeignProcessIds(FakeEngine));
+            Assert.Equal(CleanupState.Unconfirmed, result.Runs.Single().Cleanup);
+        }
+        finally { release.TrySetResult(); }
+    }
+
     private static readonly SchedulerOptions Options = new(
         GracefulStopTimeout: TimeSpan.FromSeconds(3),
         EmergencyStopTimeout: TimeSpan.FromSeconds(10),

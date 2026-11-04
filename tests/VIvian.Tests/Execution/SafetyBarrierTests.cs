@@ -22,7 +22,10 @@ public sealed class SafetyBarrierTests : IDisposable
 
     private static SchedulerOptions Options => new(
         GracefulStopTimeout: TimeSpan.FromSeconds(30), EmergencyStopTimeout: TimeSpan.FromSeconds(15),
-        ReconcileTimeout: TimeSpan.FromSeconds(30), DefaultLimits: new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)));
+        ReconcileTimeout: TimeSpan.FromSeconds(30), DefaultLimits: new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)))
+    {
+        JournalTimeout = TimeSpan.FromDays(1), // see AdapterHangTests: virtual time must not race real SQLite I/O
+    };
 
     private static ScriptedAdapter Completes(GameId game) =>
         new(game) { Script = r => { r.End(EvidenceKind.CompletionReported); return Task.CompletedTask; } };

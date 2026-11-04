@@ -12,7 +12,12 @@ try {
         $process.Kill()
         throw "WPF smoke timed out. Evidence retained at $root"
     }
-    if ($process.ExitCode -ne 0 -or -not (Test-Path (Join-Path $root 'smoke.ok'))) { throw "WPF smoke failed. Evidence retained at $root" }
+    if ($process.ExitCode -ne 0 -or -not (Test-Path (Join-Path $root 'smoke.ok'))) {
+        # Artifacts are not always reachable; print the end of the application's own log into the CI output.
+        Get-ChildItem -Path $root -Recurse -Filter '*.log' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Output "----- $($_.Name) (last 40 lines)"; Get-Content $_.FullName -Tail 40 }
+        throw "WPF smoke failed (exit code $($process.ExitCode)). Evidence retained at $root"
+    }
     Get-Content (Join-Path $root 'smoke.ok')
     Write-Output "Smoke evidence: $root"
  } finally {

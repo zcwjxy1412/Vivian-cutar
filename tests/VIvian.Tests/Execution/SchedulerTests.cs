@@ -20,7 +20,11 @@ public sealed class SchedulerTests
         GracefulStopTimeout: TimeSpan.FromMilliseconds(300),
         EmergencyStopTimeout: TimeSpan.FromMilliseconds(300),
         ReconcileTimeout: TimeSpan.FromSeconds(1),
-        DefaultLimits: new RunLimits(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)));
+        DefaultLimits: new RunLimits(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)))
+    {
+        // Some tests advance a virtual clock in large steps; a healthy in-memory write must never "time out" there.
+        JournalTimeout = TimeSpan.FromDays(1),
+    };
 
     private readonly InMemoryJournal _journal = new();
 
@@ -77,6 +81,42 @@ public sealed class SchedulerTests
         var run = (await NewScheduler().RunAsync([Item(a)])).Runs.Single();
         Assert.Equal(RunOutcome.Indeterminate, run.Outcome);
         Assert.Equal(ReasonCodes.SuccessWithoutEvidence, run.ReasonCode);
+    }
+
+    [Fact]
+    public async Task DisposedCallerTokenDoesNotLeaveSchedulerRunning()
+    {
+        var scheduler = NewScheduler();
+        using var source = new CancellationTokenSource();
+        var token = source.Token;
+        source.Dispose();
+        var first = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+
+        // .NET 10 permits registration on an already disposed token source; record that actual contract.
+        var firstResult = await scheduler.RunAsync([Item(first)], token);
+        Assert.Equal(QueueStatus.Completed, firstResult.Status);
+        Assert.False(scheduler.IsRunning);
+        Assert.Equal(1, first.StartCount);
+
+        var next = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var result = await scheduler.RunAsync([Item(next)]);
+        Assert.Equal(QueueStatus.Completed, result.Status);
+        Assert.Equal(RunOutcome.Success, result.Runs.Single().Outcome);
+    }
+
+    [Fact]
+    public async Task AdapterClaimingSuccessWithConflictingEvidenceIsIndeterminate()
+    {
+        var a = Adapter(GameId.Genshin, run =>
+        {
+            var evidence = new[] { EvidenceKind.CompletionReported, EvidenceKind.FailureReported }
+                .Select(kind => new Evidence(run.RunId, kind, "test", DateTimeOffset.UtcNow)).ToArray();
+            run.EndWith(new RunVerdict(RunOutcome.Success, ReasonCodes.Completed, evidence));
+            return Task.CompletedTask;
+        });
+        var result = await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(RunOutcome.Indeterminate, result.Runs.Single().Outcome);
+        Assert.Equal(ReasonCodes.ConflictingEvidence, result.Runs.Single().ReasonCode);
     }
 
     [Fact]
@@ -284,6 +324,86 @@ public sealed class SchedulerTests
     }
 
     [Fact]
+    public async Task EmergencyStopDuringStartDoesNotLoseRequestOrStartNextGame()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = Adapter(GameId.Genshin);
+        first.StartGate = gate;
+        var second = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var scheduler = NewScheduler();
+        var queue = scheduler.RunAsync([Item(first), Item(second)]);
+        await WaitUntilAsync(() => first.StartCount == 1);
+
+        scheduler.EmergencyStop();
+        gate.SetResult();
+        var result = await queue.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(QueueStatus.Cancelled, result.Status);
+        Assert.Equal(RunOutcome.Cancelled, result.Runs.Single().Outcome);
+        Assert.Equal(CleanupState.NotRequired, result.Runs.Single().Cleanup);
+        Assert.Equal(0, second.StartCount);
+    }
+
+    /// <summary>
+    /// The adapter's cancellation token must already be cancelled when EmergencyStop() returns — not some time later
+    /// on the thread pool — so an adapter checking it can never start a process after the user pressed stop.
+    /// Repeated to make a timing-dependent regression show up reliably.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopIsVisibleOnAdapterTokenWhenStopReturns(bool viaCallerToken)
+    {
+        for (var i = 0; i < 25; i++)
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var adapter = Adapter(GameId.Genshin);
+            adapter.StartGate = gate;
+            var scheduler = NewScheduler();
+            using var caller = new CancellationTokenSource();
+            var queue = scheduler.RunAsync([Item(adapter)], caller.Token);
+            await adapter.StartEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            if (viaCallerToken) caller.Cancel(); else scheduler.EmergencyStop();
+            var visible = adapter.StartToken.IsCancellationRequested; // read immediately, no waiting
+            visible &= adapter.LinkedStartToken.IsCancellationRequested; // a token linked to it is cancelled too
+
+            gate.SetResult();
+            await queue.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(visible, $"iteration {i}: adapter token not yet cancelled when the stop call returned");
+        }
+    }
+
+    // Integration of #20 with #30: adapter tokens are per call (bounded), so the blocking callback is registered on
+    // the StartAsync token. The emergency grace must start even though the callback blocks the stop request.
+    [Fact]
+    public async Task EmergencyStopIsDeliveredWhileAnAdapterCancellationCallbackBlocks()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adapter = Adapter(GameId.Genshin);
+        adapter.StartGate = gate; // StartAsync does not return until the end of the test
+        var scheduler = NewScheduler();
+        var queue = scheduler.RunAsync([Item(adapter, new RunLimits(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30)))]);
+        await adapter.StartEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        using var block = new ManualResetEventSlim();
+        using var registration = adapter.StartToken.Register(() => block.Wait(TimeSpan.FromSeconds(30)));
+        var trigger = DedicatedThread.Run(scheduler.EmergencyStop); // blocks inside the adapter's callback
+        try
+        {
+            var result = await queue.WaitAsync(TimeSpan.FromSeconds(5)); // 300 ms emergency grace, not the 120 s start limit
+            Assert.False(trigger.IsCompleted, "the callback should still be blocking the trigger");
+            Assert.Equal(CleanupState.Unconfirmed, result.Runs.Single().Cleanup);
+        }
+        finally
+        {
+            block.Set();
+            gate.TrySetResult();
+        }
+        await trigger.WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
     public async Task BlockingPreflightStopsQueueWithoutStarting()
     {
         var first = Adapter(GameId.Genshin);
@@ -375,6 +495,53 @@ public sealed class SchedulerTests
         var runId = result.Runs.Single().RunId;
         Assert.Equal(new[] { "mine" }, _journal.Events.Select(e => e.Message));
         Assert.All(_journal.Events, e => Assert.Equal(runId, e.RunId));
+    }
+
+    /// <summary>
+    /// The event pump may start late (thread-pool pressure). Simulated deterministically: the run's event stream only
+    /// becomes readable shortly after reconciliation. Events that were emitted before the run ended must still be stored.
+    /// </summary>
+    [Fact]
+    public async Task EventsAreNotLostWhenTheEventPumpStartsLate()
+    {
+        var journal = new InMemoryJournal();
+        var adapter = new LateReaderAdapter();
+        await new QueueScheduler(journal, new NoProcessSupervisor(), Fast).RunAsync([new QueueItem(GameId.Genshin, adapter)]);
+        Assert.Contains(journal.EventsSnapshot(), e => e.Message == "only line");
+    }
+
+    private sealed class LateReaderAdapter : IGameAdapter
+    {
+        public GameId Game => GameId.Genshin;
+        public string RuleVersion => "late-reader";
+        public bool IsSimulation => true;
+        public Task<PreflightResult> PreflightAsync(RunContext c, CancellationToken ct) => Task.FromResult(PreflightResult.Ok());
+        public Task<IEngineRun> StartAsync(RunContext c, IProcessSupervisor s, CancellationToken ct) =>
+            Task.FromResult<IEngineRun>(new LateReaderRun(c.RunId));
+    }
+
+    private sealed class LateReaderRun : IEngineRun
+    {
+        private readonly System.Threading.Channels.Channel<RunEvent> _events = System.Threading.Channels.Channel.CreateUnbounded<RunEvent>();
+        private readonly ManualResetEventSlim _readable = new(false);
+        public LateReaderRun(Guid id)
+        {
+            RunId = id;
+            _events.Writer.TryWrite(new RunEvent(id, DateTimeOffset.UtcNow, RunEventKind.Output, "only line"));
+            _events.Writer.TryComplete();
+        }
+        public Guid RunId { get; }
+        // The pump's first access blocks until shortly after reconciliation, like a pump started late.
+        public IAsyncEnumerable<RunEvent> Events { get { _readable.Wait(TimeSpan.FromSeconds(10)); return _events.Reader.ReadAllAsync(); } }
+        public Task<RunVerdict> WaitForVerdictAsync(CancellationToken ct) => Task.FromResult(VerdictPolicy.Decide(RunId,
+            [new Evidence(RunId, EvidenceKind.CompletionReported, "late-reader", DateTimeOffset.UtcNow)]));
+        public Task<StopResult> RequestStopAsync(StopMode mode, CancellationToken ct) => Task.FromResult(new StopResult(CleanupState.Pending, "n/a"));
+        public Task<CleanupState> ReconcileAsync(CancellationToken ct)
+        {
+            _ = Task.Run(async () => { await Task.Delay(100); _readable.Set(); });
+            return Task.FromResult(CleanupState.Confirmed);
+        }
+        public ValueTask DisposeAsync() { _readable.Set(); return ValueTask.CompletedTask; }
     }
 
     [Fact]

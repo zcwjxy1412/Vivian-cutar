@@ -1,0 +1,146 @@
+# =============================================================================
+# 草案：DeepSeek 自动审查（方案 C）—— 尚未启用、尚未测试
+#
+# 为什么这个文件在 docs/ai-integration/ 而不是 .github/workflows/：
+#   1) 它还没有被真实运行过，放进 .github/workflows/ 会立刻对每个 PR 生效；
+#   2) 它依赖仓库 Secret DEEPSEEK_API_KEY，在配置之前运行必然失败。
+# 启用步骤：
+#   1) 在仓库 Settings → Secrets and variables → Actions 添加 DEEPSEEK_API_KEY；
+#   2) 人工在一个测试 PR 上跑通后，把本文件移动到 .github/workflows/ai-review.yml；
+#   3) 首次启用建议把 "Post comment" 这一步注释掉，只把报告上传为 artifact 人工查看。
+#
+# 安全设计（重要，不要改掉）：
+#   - checkout 的是 PR 的 base commit，不是 PR head；PR 里的脚本永远不会被执行；
+#   - PR 内容只以文本 diff 的形式发送给模型；
+#   - fork 来的 PR 没有 Secret，用 if 条件直接跳过；
+#   - 不做 required check，审查失败不阻断合并；
+#   - 不允许模型输出被当作 shell 命令执行。
+# =============================================================================
+
+name: AI Review (draft)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ai-review-¤{{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # fork PR 拿不到 Secret，直接跳过，避免产生误导性的失败。
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout base commit only
+        uses: actions/checkout@v4
+        with:
+          ref: ¤{{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Collect diff as text
+        env:
+          BASE_SHA: ¤{{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ¤{{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          # 只取文本 diff；二进制与锁文件不送审，避免噪声与体积。
+          git diff --unified=3 "$BASE_SHA" "$HEAD_SHA" \
+            -- . ':(exclude)*.lock.json' ':(exclude)docs/reference/original/**' \
+            > pr.diff || true
+          echo "diff lines: $(wc -l < pr.diff)"
+          echo "diff bytes: $(wc -c < pr.diff)"
+          # 体积上限 400KB，超出只保留前 400KB 并在报告里注明截断。
+          head -c 409600 pr.diff > pr.trunc.diff
+          if [ "$(wc -c < pr.diff)" -gt 409600 ]; then
+            echo "TRUNCATED=true" >> "$GITHUB_ENV"
+          else
+            echo "TRUNCATED=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Ask DeepSeek for a review
+        env:
+          DEEPSEEK_API_KEY: ¤{{ secrets.DEEPSEEK_API_KEY }}
+          PR_TITLE: ¤{{ github.event.pull_request.title }}
+          PR_BODY: ¤{{ github.event.pull_request.body }}
+          TRUNCATED: ¤{{ env.TRUNCATED }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+
+          diff = open("pr.trunc.diff", encoding="utf-8", errors="replace").read()
+          truncated = os.environ.get("TRUNCATED") == "true"
+
+          system = (
+              "你是 VIvian 项目的独立代码审查员。VIvian 用 C#/.NET 10/WPF 调度三款 GPL 游戏自动化引擎。"
+              "项目铁律：退出码 0、日志无报错、游戏已关闭都不能单独作为成功证据；"
+              "只终止属于本次运行的进程（Windows Job Object），绝不按进程名杀进程；"
+              "清理无法确认时必须阻断后续任务；紧急停止必须立即生效。"
+              "请只输出：1) 变更摘要（3 行内）2) 按 Critical/High/Medium/Low 分级的问题，"
+              "每条给出文件、行号或可定位的代码片段、为什么是问题、如何修 3) 需要人工确认的假设。"
+              "不要编造未出现在 diff 中的代码；不确定就写不确定。"
+          )
+          user = f"PR 标题：{os.environ.get('PR_TITLE','')}\n\nPR 描述：\n{os.environ.get('PR_BODY','')[:4000]}\n\nDiff:\n{diff}"
+
+          payload = json.dumps({
+              "model": "deepseek-flash",
+              "messages": [
+                  {"role": "system", "content": system},
+                  {"role": "user", "content": user},
+              ],
+              "temperature": 0.2,
+              "max_tokens": 4000,
+              "stream": False,
+          }).encode()
+
+          req = urllib.request.Request(
+              "https://api.deepseek.com/chat/completions",
+              data=payload,
+              headers={
+                  "Content-Type": "application/json",
+                  "Authorization": "Bearer " + os.environ["DEEPSEEK_API_KEY"],
+              },
+          )
+          with urllib.request.urlopen(req, timeout=300) as resp:
+              body = json.load(resp)
+
+          text = body["choices"][0]["message"]["content"].strip()
+          usage = body.get("usage", {})
+          header = "## AI 审查（草案，仅供参考，不构成合并门禁）\n\n"
+          if truncated:
+              header += "> 注意：diff 超过 400KB，仅审查了前 400KB。\n\n"
+          header += f"> 用量：输入 {usage.get('prompt_tokens','?')} / 输出 {usage.get('completion_tokens','?')} tokens\n\n"
+          open("review.md", "w", encoding="utf-8").write(header + text)
+          print(text[:2000])
+          PY
+
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review
+          path: review.md
+          retention-days: 7
+
+      # 启用自动评论前，建议先观察几轮报告质量。
+      - name: Post comment
+        if: ¤{{ vars.AI_REVIEW_AUTO_COMMENT == 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review.md', 'utf8').slice(0, 60000);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

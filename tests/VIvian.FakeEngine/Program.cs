@@ -101,11 +101,22 @@ switch (scenario)
         return 0;
 
     case "probe-identity":
+    case "probe-identity-wait":
+    {
         if (!OperatingSystem.IsWindows()) return 64;
-        Emit("info", "user-sid=" + WindowsIdentity.GetCurrent().User?.Value);
-        Emit("info", "in-job=" + JobProbe.IsProcessInJob(JobProbe.GetCurrentProcess(), IntPtr.Zero, out var insideJob));
-        Emit("info", "job-member=" + insideJob);
-        return 0;
+        using var identity = WindowsIdentity.GetCurrent();
+        Emit("info", "user-sid=" + identity.User?.Value);
+        // Under UAC, the Administrators role is only active in an elevated token.
+        Emit("info", "elevated=" + new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator));
+        // NULL job handle: "is this process in ANY job". That alone cannot prove membership in VIvian's job;
+        // the test checks VIvian's own job from the parent side and records this value only as context.
+        Emit("info", "api-ok=" + JobProbe.IsProcessInJob(JobProbe.GetCurrentProcess(), IntPtr.Zero, out var insideAnyJob));
+        Emit("info", "any-job-member=" + insideAnyJob);
+        if (scenario == "probe-identity") return 0;
+        Emit("info", "waiting");
+        while (!Pause(60_000)) { }
+        return HonouredStop();
+    }
 
     case "sleep-forever":
         Thread.Sleep(Timeout.Infinite);

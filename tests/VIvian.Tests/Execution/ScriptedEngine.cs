@@ -17,6 +17,7 @@ public sealed class ScriptedAdapter(GameId game) : IGameAdapter
 
     public PreflightResult Preflight { get; set; } = PreflightResult.Ok();
     public Exception? StartException { get; set; }
+    public TaskCompletionSource? StartGate { get; set; }
     public Func<ScriptedRun, Task>? Script { get; set; }
     public StopReaction StopReaction { get; set; } = StopReaction.Honour;
     public CleanupState ReconcileResult { get; set; } = CleanupState.Confirmed;
@@ -28,15 +29,21 @@ public sealed class ScriptedAdapter(GameId game) : IGameAdapter
 
     public Task<PreflightResult> PreflightAsync(RunContext context, CancellationToken ct) => Task.FromResult(Preflight);
 
-    public Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+    public async Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
     {
         Interlocked.Increment(ref StartCount);
         JournalPhaseAtStart = Journal?.LastFor(context.RunId)?.Phase;
+        if (StartGate is { } gate)
+        {
+            await gate.Task.ConfigureAwait(false);
+            if (ct.IsCancellationRequested)
+                throw new EngineStartException(ReasonCodes.UserStop, nothingStarted: true, "Cancelled before process creation.");
+        }
         if (StartException is not null) throw StartException;
         var run = new ScriptedRun(context.RunId, StopReaction, ReconcileResult);
         LastRun = run;
         if (Script is not null) _ = Task.Run(() => Script(run));
-        return Task.FromResult<IEngineRun>(run);
+        return run;
     }
 }
 

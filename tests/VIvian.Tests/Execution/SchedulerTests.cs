@@ -80,6 +80,40 @@ public sealed class SchedulerTests
     }
 
     [Fact]
+    public async Task DisposedCallerTokenDoesNotLeaveSchedulerRunning()
+    {
+        var scheduler = NewScheduler();
+        using var source = new CancellationTokenSource();
+        var token = source.Token;
+        source.Dispose();
+        var first = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => scheduler.RunAsync([Item(first)], token));
+        Assert.False(scheduler.IsRunning);
+        Assert.Equal(0, first.StartCount);
+
+        var next = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var result = await scheduler.RunAsync([Item(next)]);
+        Assert.Equal(QueueStatus.Completed, result.Status);
+        Assert.Equal(RunOutcome.Success, result.Runs.Single().Outcome);
+    }
+
+    [Fact]
+    public async Task AdapterClaimingSuccessWithConflictingEvidenceIsIndeterminate()
+    {
+        var a = Adapter(GameId.Genshin, run =>
+        {
+            var evidence = new[] { EvidenceKind.CompletionReported, EvidenceKind.FailureReported }
+                .Select(kind => new Evidence(run.RunId, kind, "test", DateTimeOffset.UtcNow)).ToArray();
+            run.EndWith(new RunVerdict(RunOutcome.Success, ReasonCodes.Completed, evidence));
+            return Task.CompletedTask;
+        });
+        var result = await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(RunOutcome.Indeterminate, result.Runs.Single().Outcome);
+        Assert.Equal(ReasonCodes.ConflictingEvidence, result.Runs.Single().ReasonCode);
+    }
+
+    [Fact]
     public async Task EvidenceForAnotherRunDoesNotCountAsSuccess()
     {
         var a = Adapter(GameId.Genshin, run =>
@@ -281,6 +315,27 @@ public sealed class SchedulerTests
         var result = await queue.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(StopMode.Emergency, a.LastRun!.StopRequests.First().Mode);
         Assert.Equal(QueueStatus.Cancelled, result.Status);
+    }
+
+    [Fact]
+    public async Task EmergencyStopDuringStartDoesNotLoseRequestOrStartNextGame()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = Adapter(GameId.Genshin);
+        first.StartGate = gate;
+        var second = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var scheduler = NewScheduler();
+        var queue = scheduler.RunAsync([Item(first), Item(second)]);
+        await WaitUntilAsync(() => first.StartCount == 1);
+
+        scheduler.EmergencyStop();
+        gate.SetResult();
+        var result = await queue.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(QueueStatus.Cancelled, result.Status);
+        Assert.Equal(RunOutcome.Cancelled, result.Runs.Single().Outcome);
+        Assert.Equal(CleanupState.NotRequired, result.Runs.Single().Cleanup);
+        Assert.Equal(0, second.StartCount);
     }
 
     [Fact]

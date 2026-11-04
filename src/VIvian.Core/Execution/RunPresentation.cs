@@ -85,7 +85,9 @@ public static class RunPresentation
     public static string Summary(GameId game, RunPhase phase, RunOutcome? outcome, CleanupState cleanup, string? reason, bool isSimulation)
     {
         var parts = new List<string> { (isSimulation ? SimulationLabel : "") + GameName(game) };
-        parts.Add(outcome is null ? Phase(phase) : Outcome(outcome, isSimulation: false));
+        // A completed task can still leave processes behind; the visible row must lead with the block.
+        parts.Add(phase == RunPhase.Blocked && cleanup == CleanupState.Unconfirmed
+            ? Phase(phase) : outcome is null ? Phase(phase) : Outcome(outcome, isSimulation: false));
         if (cleanup is not CleanupState.NotRequired) parts.Add(Cleanup(cleanup));
         if (Reason(reason) is { Length: > 0 } text) parts.Add(text);
         return string.Join(" · ", parts);

@@ -63,19 +63,19 @@ public sealed class QueueScheduler(
         ArgumentNullException.ThrowIfNull(items);
         if (items.Select(i => i.Game).Distinct().Count() != items.Count)
             throw new ArgumentException("每款游戏在一个队列中只能出现一次。", nameof(items));
-        if (Interlocked.Exchange(ref _running, 1) == 1)
+        if (Interlocked.CompareExchange(ref _running, 1, 0) == 1)
             throw new InvalidOperationException("已有队列在运行。");
-        var emergency = NewSignal();
-        Volatile.Write(ref _emergency, emergency);
-        // Cancelling the caller's token (e.g. application shutdown) is treated as an emergency stop.
-        using var registration = ct.Register(() => emergency.TrySetResult());
-        using var stopToken = new CancellationTokenSource();
-        _ = emergency.Task.ContinueWith(_ =>
-        {
-            try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
-        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         try
         {
+            var emergency = NewSignal();
+            Volatile.Write(ref _emergency, emergency);
+            // Cancelling the caller's token (e.g. application shutdown) is treated as an emergency stop.
+            using var registration = ct.Register(() => emergency.TrySetResult());
+            using var stopToken = new CancellationTokenSource();
+            _ = emergency.Task.ContinueWith(_ =>
+            {
+                try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
+            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             var queueId = Guid.NewGuid();
             // A previous run may still own processes (e.g. after a crash). Nothing starts until the user resolves it.
             int unresolved;
@@ -304,9 +304,14 @@ public sealed class QueueScheduler(
         /// <summary>Applies the evidence rule: success only with explicit completion evidence for this run.</summary>
         private (RunOutcome, string) Judge(RunVerdict verdict)
         {
-            if (verdict.Outcome == RunOutcome.Success
-                && !verdict.Evidence.Any(e => e.RunId == _runId && e.Kind == EvidenceKind.CompletionReported))
-                return (RunOutcome.Indeterminate, ReasonCodes.SuccessWithoutEvidence);
+            if (verdict.Outcome == RunOutcome.Success)
+            {
+                var ownKinds = verdict.Evidence.Where(e => e.RunId == _runId && e.Kind != EvidenceKind.Note)
+                    .Select(e => e.Kind).Distinct().ToArray();
+                if (ownKinds.Length > 1) return (RunOutcome.Indeterminate, ReasonCodes.ConflictingEvidence);
+                if (!ownKinds.Contains(EvidenceKind.CompletionReported))
+                    return (RunOutcome.Indeterminate, ReasonCodes.SuccessWithoutEvidence);
+            }
             return (verdict.Outcome, verdict.ReasonCode);
         }
 

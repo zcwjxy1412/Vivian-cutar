@@ -651,9 +651,11 @@ public sealed class AdapterHangTests : IDisposable
         finally { late?.Release.TrySetResult(); startRelease.TrySetResult(); }
     }
 
+    /// <summary>A late run whose disposal fails at a moment the test chooses.</summary>
     private sealed class ThrowingDisposeRun(Guid id) : IEngineRun
     {
-        public volatile bool DisposeCalled;
+        public TaskCompletionSource DisposeEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FailNow { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Guid RunId => id;
         public IAsyncEnumerable<RunEvent> Events => Empty();
         private static async IAsyncEnumerable<RunEvent> Empty() { await Task.CompletedTask; yield break; }
@@ -662,53 +664,96 @@ public sealed class AdapterHangTests : IDisposable
         public Task<CleanupState> ReconcileAsync(CancellationToken ct) => Task.FromResult(CleanupState.Confirmed);
         public async ValueTask DisposeAsync()
         {
-            DisposeCalled = true;
-            await Task.Yield();
+            DisposeEntered.TrySetResult();
+            await FailNow.Task.ConfigureAwait(false);
             throw new LateFailure();
         }
     }
 
-    // H-30-2: processing the late result throws. The fault is observed, recorded, and keeps the hazard.
-    [Fact]
-    public async Task H30_LateResultProcessingThatThrowsIsObservedAndKeepsTheHazard()
+    /// <summary>In-memory journal that signals when the scheduler's audit note for a late failure is stored.</summary>
+    private sealed class AuditSignalJournal : IRunJournal
     {
-        var unobserved = 0;
-        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, e) =>
+        private readonly InMemoryJournal _inner = new();
+        public TaskCompletionSource<RunEvent> LateFailureAudited { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task PublishAsync(RunUpdate u, CancellationToken ct) => _inner.PublishAsync(u, ct);
+        public async Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct)
         {
-            if (e.Exception.InnerExceptions.Any(x => x is LateFailure)) Interlocked.Increment(ref unobserved);
-        };
-        TaskScheduler.UnobservedTaskException += handler;
+            await _inner.AppendEventsAsync(events, ct).ConfigureAwait(false);
+            foreach (var e in events.Where(e => e.Message.Contains("释放迟到的结果时出错", StringComparison.Ordinal)))
+                LateFailureAudited.TrySetResult(e);
+        }
+        public Task<int> CountUnresolvedAsync(CancellationToken ct) => _inner.CountUnresolvedAsync(ct);
+    }
+
+    private static Task WhenHazardsAsync(QueueScheduler scheduler, Func<IReadOnlyList<SessionHazard>, bool> condition)
+    {
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void Check() { if (condition(scheduler.SessionHazards)) reached.TrySetResult(); }
+        scheduler.HazardsChanged += Check;
+        Check();
+        return reached.Task.ContinueWith(t => { scheduler.HazardsChanged -= Check; return t; },
+            CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default).Unwrap();
+    }
+
+    private async Task LateResultThatThrowsOnceAsync()
+    {
+        var time = new FakeTimeProvider(Start);
+        var journal = new AuditSignalJournal();
         var startRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ThrowingDisposeRun? late = null;
+        var created = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adapter = new LaunchingAdapter(startRelease.Task, id => { late = new ThrowingDisposeRun(id); created.TrySetResult(); return late; });
+        var scheduler = new QueueScheduler(journal, new FixedSupervisor(id => new FakeGroup(id)),
+            Options with { StartTimeout = TimeSpan.FromSeconds(2) }, time);
         try
         {
-            var time = new FakeTimeProvider(Start);
-            var db = new LocalDatabase(Path.Combine(_root, "late-throw.db"));
-            await db.InitializeAsync();
-            ThrowingDisposeRun? late = null;
-            var adapter = new LaunchingAdapter(startRelease.Task, id => late = new ThrowingDisposeRun(id));
-            var scheduler = new QueueScheduler(db, new FixedSupervisor(id => new FakeGroup(id)),
-                Options with { StartTimeout = TimeSpan.FromSeconds(2) }, time);
             var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
             Assert.NotNull(result);
-            var runId = result!.Runs.Single().RunId;
-            startRelease.TrySetResult();
-            await WaitUntilAsync(() => scheduler.SessionHazards.All(h => h.PendingOperations == 0), "late result observed");
-            Assert.True(late!.DisposeCalled);
-            Assert.True(Assert.Single(scheduler.SessionHazards).RequiresVerifiedRecovery);
-            Assert.Contains(await db.ReadEventsAsync(runId, 50), e => e.Message.Contains("释放迟到的结果时出错（LateFailure）"));
-            for (var i = 0; i < 3; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); await Task.Delay(20); }
-            Assert.Equal(0, unobserved);
+            Assert.True(Assert.Single(scheduler.SessionHazards).PendingOperations > 0);
+
+            startRelease.TrySetResult(); // the abandoned StartAsync returns its run late
+            await created.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await late!.DisposeEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            // While the late disposal is still running, its bookkeeping is still pending.
+            Assert.True(Assert.Single(scheduler.SessionHazards).PendingOperations > 0);
+
+            var drained = WhenHazardsAsync(scheduler, h => h.All(x => x.PendingOperations == 0));
+            late.FailNow.TrySetResult(); // the late processing throws now
+            // Observed: the scheduler caught the exception (its type is in the stored audit note) …
+            var audit = await journal.LateFailureAudited.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Contains("（LateFailure）", audit.Message, StringComparison.Ordinal);
+            Assert.Equal(result!.Runs.Single().RunId, audit.RunId);
+            // … and the bookkeeping ended, but the safety hazard did not.
+            await drained.WaitAsync(TimeSpan.FromSeconds(10));
+            var hazard = Assert.Single(scheduler.SessionHazards);
+            Assert.True(hazard.RequiresVerifiedRecovery);
+            await Assert.ThrowsAsync<RunStillActiveException>(() =>
+                scheduler.AcknowledgeAsync(hazard.RunId, "generic confirmation", new LocalDatabase(Path.Combine(_root, Guid.NewGuid() + ".db")), Start));
+            var next = Completes(GameId.StarRail);
+            Assert.Equal(QueueStatus.Blocked, (await scheduler.RunAsync([new QueueItem(GameId.StarRail, next)])).Status);
+            Assert.Equal(0, next.StartCount);
         }
         finally
         {
             startRelease.TrySetResult();
-            TaskScheduler.UnobservedTaskException -= handler;
+            late?.FailNow.TrySetResult();
         }
     }
 
-    // H-30-2 controlled recovery: a hazard that needs verified recovery cannot be acknowledged in-session. Ending
-    // VIvian closes every Job handle it owns (kill-on-close), so after a restart the stored run (Blocked, cleanup
-    // Unconfirmed) is acknowledged in the normal way. The stored verdict is never rewritten as cleaned up.
+    // H-30-2: processing the late result throws. Explicit gates only: no GC, no global unobserved-exception hook.
+    // Eight independent schedulers run concurrently to expose ordering assumptions.
+    [Fact]
+    public async Task H30_LateResultProcessingThatThrowsIsObservedAndKeepsTheHazard()
+    {
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(LateResultThatThrowsOnceAsync)));
+    }
+
+    // H-30-2 controlled recovery — the gate protocol only. A hazard that needs verified recovery cannot be
+    // acknowledged in-session. Ending VIvian closes every Job handle VIvian itself owns (kill-on-close), so after a
+    // restart the stored run (Blocked, cleanup Unconfirmed) can be acknowledged. This test uses simulated groups:
+    // it proves neither that any process exited nor anything about processes outside VIvian's Job (UAC, launchers,
+    // scheduled tasks). The acknowledgement is the user's statement, never cleanup evidence: the stored cleanup stays
+    // Unconfirmed. Real process identity checks and cross-privilege paths remain Pending (desktop validation).
     [Fact]
     public async Task H30_RestartIsTheControlledRecoveryPathForAnUnresolvedCleanup()
     {

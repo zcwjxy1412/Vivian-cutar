@@ -91,7 +91,12 @@ public partial class App : Application
                             "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + contrastReport);
                         Shutdown(0);
                     }
-                    catch (Exception ex) { Log.Error("Smoke failed: {ErrorType}", ex.GetType().Name); Shutdown(1); }
+                    catch (Exception ex)
+                    {
+                        // Smoke-only: the messages are VIvian's own check descriptions (no user data).
+                        Log.Error("Smoke failed: {ErrorType}: {Message}", ex.GetType().Name, ex.Message);
+                        Shutdown(1);
+                    }
                 };
             }
             window.Show();

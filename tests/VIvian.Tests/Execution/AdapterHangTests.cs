@@ -246,6 +246,59 @@ public sealed class AdapterHangTests : IDisposable
         Assert.Equal(CleanupState.Unconfirmed, Assert.Single(scheduler.SessionHazards).LastKnown!.Cleanup);
     }
 
+    private sealed class NeverDisposedRun(Guid id) : IEngineRun
+    {
+        public TaskCompletionSource DisposeEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Guid RunId => id;
+        public IAsyncEnumerable<RunEvent> Events => Empty();
+        private static async IAsyncEnumerable<RunEvent> Empty() { await Task.CompletedTask; yield break; }
+        public Task<RunVerdict> WaitForVerdictAsync(CancellationToken ct) =>
+            Task.FromResult(VerdictPolicy.Decide(id, [new Evidence(id, EvidenceKind.CompletionReported, "test", DateTimeOffset.UtcNow)]));
+        public Task<StopResult> RequestStopAsync(StopMode mode, CancellationToken ct) =>
+            Task.FromResult(new StopResult(CleanupState.Pending, "test"));
+        public Task<CleanupState> ReconcileAsync(CancellationToken ct) => Task.FromResult(CleanupState.Confirmed);
+        public async ValueTask DisposeAsync()
+        {
+            DisposeEntered.TrySetResult();
+            await Release.Task.ConfigureAwait(false);
+        }
+    }
+
+    private sealed class NeverDisposedAdapter : IGameAdapter
+    {
+        public NeverDisposedRun? Run;
+        public GameId Game => GameId.Genshin;
+        public string RuleVersion => "never-disposed";
+        public bool IsSimulation => true;
+        public Task<PreflightResult> PreflightAsync(RunContext c, CancellationToken ct) => Task.FromResult(PreflightResult.Ok());
+        public Task<IEngineRun> StartAsync(RunContext c, IProcessSupervisor s, CancellationToken ct) =>
+            Task.FromResult<IEngineRun>(Run = new NeverDisposedRun(c.RunId));
+    }
+
+    [Fact]
+    public async Task H30_DisposeThatNeverReturnsEndsQueueButCannotBeAcknowledged()
+    {
+        var time = new FakeTimeProvider(Start);
+        var adapter = new NeverDisposedAdapter();
+        var scheduler = new QueueScheduler(new InMemoryJournal(), new NoProcessSupervisor(),
+            Options with { DisposeTimeout = TimeSpan.FromSeconds(2) }, time);
+        var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]);
+        try
+        {
+            await WaitUntilAsync(() => adapter.Run?.DisposeEntered.Task.IsCompleted == true, "dispose entered");
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(10));
+            Assert.NotNull(result);
+            Assert.Equal(QueueStatus.Blocked, result!.Status);
+            Assert.Equal(CleanupState.Unconfirmed, result.Runs.Single().Cleanup);
+            var hazard = Assert.Single(scheduler.SessionHazards);
+            Assert.True(hazard.RequiresVerifiedRecovery);
+            Assert.Equal(QueueStatus.Blocked,
+                (await scheduler.RunAsync([new QueueItem(GameId.StarRail, Completes(GameId.StarRail))])).Status);
+        }
+        finally { adapter.Run?.Release.TrySetResult(); }
+    }
+
     private sealed class LateFailure : Exception;
 
     [Fact]

@@ -10,7 +10,8 @@ namespace VIvian.Core.Execution;
 /// <param name="RequiresAcknowledgement">Cleanup ended unconfirmed; the user must confirm before queues resume.</param>
 /// <param name="TerminalPersisted">Whether the final state was written to the journal successfully.</param>
 public sealed record SessionHazard(
-    Guid RunId, GameId Game, RunUpdate? LastKnown, int PendingOperations, bool RequiresAcknowledgement, bool TerminalPersisted);
+    Guid RunId, GameId Game, RunUpdate? LastKnown, int PendingOperations, bool RequiresAcknowledgement, bool TerminalPersisted,
+    bool RequiresVerifiedRecovery = false);
 
 /// <summary>
 /// In-memory, fail-closed record of runs that may still own resources. It is kept independently of persistence,
@@ -29,6 +30,7 @@ internal sealed class SafetyBarrier
         public int Pending { get; set; }
         public bool RequiresAcknowledgement { get; set; }
         public bool Persisted { get; set; }
+        public bool RecoveryRequired { get; set; }
     }
 
     public event Action? Changed;
@@ -73,6 +75,18 @@ internal sealed class SafetyBarrier
         Raise();
     }
 
+    /// <summary>Unknown live resources cannot be cleared by a user's generic acknowledgement.</summary>
+    public void RequireVerifiedRecovery(Guid runId, GameId game)
+    {
+        lock (_gate)
+        {
+            var entry = Get(runId, game);
+            entry.RecoveryRequired = true;
+            entry.RequiresAcknowledgement = true;
+        }
+        Raise();
+    }
+
     /// <summary>Remembers the last decided state of a run that has abandoned operations (for display and retry).</summary>
     public void Observe(RunUpdate update, bool persisted)
     {
@@ -95,7 +109,7 @@ internal sealed class SafetyBarrier
         lock (_gate)
         {
             if (!_entries.TryGetValue(runId, out var entry)) return true;
-            if (entry.Pending > 0) return false;
+            if (entry.Pending > 0 || entry.RecoveryRequired) return false;
             entry.RequiresAcknowledgement = false;
             RemoveIfClear(runId, entry);
         }
@@ -126,7 +140,7 @@ internal sealed class SafetyBarrier
     }
 
     private static SessionHazard ToHazard(Guid runId, Entry e) =>
-        new(runId, e.Game, e.Last, e.Pending, e.RequiresAcknowledgement, e.Persisted);
+        new(runId, e.Game, e.Last, e.Pending, e.RequiresAcknowledgement, e.Persisted, e.RecoveryRequired);
 
     private void Raise()
     {

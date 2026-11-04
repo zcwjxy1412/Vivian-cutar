@@ -106,7 +106,9 @@ public sealed class QueueViewModel : ObservableObject
         Status = "模拟队列运行中…（可随时紧急停止）";
         try
         {
-            var result = await Task.Run(() => _scheduler.RunAsync(items, stop.Token));
+            var queueTask = Task.Run(() => _scheduler.RunAsync(items, stop.Token));
+            _queueTask = queueTask;
+            var result = await queueTask;
             Status = RunPresentation.SimulationLabel + RunPresentation.QueueStatusText(result)
                 + (result.NotStarted.Count > 0 ? "；未启动：" + string.Join("、", result.NotStarted.Select(RunPresentation.GameName)) : "");
             Serilog.Log.Information("Simulation queue finished: {Status} {Reason}", result.Status, result.BlockReason);
@@ -119,6 +121,23 @@ public sealed class QueueViewModel : ObservableObject
             Current = "空闲";
             await RefreshAsync();
         }
+    }
+
+    private Task? _queueTask;
+
+    /// <summary>
+    /// Application shutdown: requests the emergency stop and waits, bounded, for the queue to end so its final state
+    /// is recorded. Returns false when it did not end in time; the caller then exits anyway: every engine process
+    /// VIvian started is in a kill-on-close Job that Windows terminates when VIvian exits, and the next start
+    /// reconciles the unfinished run as Blocked with cleanup unconfirmed (never as cleaned up).
+    /// </summary>
+    public async Task<bool> StopForShutdownAsync(TimeSpan timeout)
+    {
+        if (_queueTask is not { IsCompleted: false } running) return true;
+        EmergencyStop();
+        var ended = await Task.WhenAny(running, Task.Delay(timeout)) == running;
+        Serilog.Log.Information("Shutdown stop: queue {State}", ended ? "ended" : "still running at exit");
+        return ended;
     }
 
     public void EmergencyStop()

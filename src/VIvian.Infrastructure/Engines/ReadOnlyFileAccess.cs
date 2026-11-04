@@ -94,7 +94,9 @@ public static class ReadOnlyFileAccess
     [SupportedOSPlatform("windows")]
     private static class Native
     {
-        [StructLayout(LayoutKind.Sequential)]
+        // FILETIME members are two DWORDs (4-byte aligned). Pack = 4 keeps the managed layout identical to the native
+        // 52-byte structure; with default packing every field after FileAttributes was read 4 bytes too late.
+        [StructLayout(LayoutKind.Sequential, Pack = 4)]
         public struct BY_HANDLE_FILE_INFORMATION
         {
             public uint FileAttributes;

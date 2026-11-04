@@ -344,9 +344,13 @@ public sealed class QueueScheduler(
             }
             catch (Exception)
             {
-                // Do not invoke DisposeAsync a second time after exceptional bound setup.
+                // Bound setup failed before it launched the call. Try disposal once, track it,
+                // and never interpret a late or hung release as confirmed cleanup.
                 _abandoned = true;
                 owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
+                owner._barrier.BeginOperation(_runId, item.Game);
+                var release = Task.Run(async () => { await run.DisposeAsync().ConfigureAwait(false); return true; });
+                _ = ObserveAbandonedAsync("DisposeAsync", release, null);
             }
         }
 

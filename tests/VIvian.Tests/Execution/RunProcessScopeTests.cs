@@ -1,3 +1,4 @@
+using VIvian.Core;
 using VIvian.Core.Execution;
 using Xunit;
 

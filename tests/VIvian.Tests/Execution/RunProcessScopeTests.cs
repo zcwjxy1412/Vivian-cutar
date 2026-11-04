@@ -6,6 +6,58 @@ namespace VIvian.Tests.Execution;
 
 public sealed class RunProcessScopeTests
 {
+    private sealed class Group(Guid id) : ISupervisedProcessGroup
+    {
+        public Guid RunId => id;
+        public int RootProcessId => 1;
+        public DateTimeOffset RootStartTime => DateTimeOffset.UtcNow;
+        public IAsyncEnumerable<string> OutputLines => Empty();
+        private static async IAsyncEnumerable<string> Empty() { await Task.CompletedTask; yield break; }
+        public int ActiveProcessCount => Terminated ? 0 : 1;
+        public bool Terminated;
+        public Task<int> WaitForRootExitAsync(CancellationToken ct) => Task.FromResult(0);
+        public Task<bool> SendInputLineAsync(string line, CancellationToken ct) => Task.FromResult(false);
+        public Task<CleanupState> TerminateAllAsync(TimeSpan timeout, CancellationToken ct)
+        {
+            Terminated = true;
+            return Task.FromResult(CleanupState.Confirmed);
+        }
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    private sealed class ContendedSupervisor(ManualResetEventSlim entered, ManualResetEventSlim release) : IProcessSupervisor
+    {
+        public Group? Started;
+        public Task<ISupervisedProcessGroup> StartAsync(ProcessLaunchSpec spec, Guid runId, CancellationToken ct)
+        {
+            entered.Set();
+            release.Wait();
+            Started = new Group(runId);
+            return Task.FromResult<ISupervisedProcessGroup>(Started);
+        }
+    }
+
+    [Fact]
+    public async Task RevokeConcurrentWithLaunchTerminatesRegisteredGroupAndRejectsLateRetry()
+    {
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var inner = new ContendedSupervisor(entered, release);
+        var id = Guid.NewGuid();
+        var scope = new RunProcessScope(inner, id);
+        var started = Task.Run(() => scope.StartAsync(Spec, id, default));
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+            var revoke = Task.Run(() => scope.RevokeAsync(TimeSpan.FromSeconds(1)));
+            release.Set();
+            await started.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(await revoke.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(inner.Started!.Terminated);
+            await Assert.ThrowsAsync<EngineStartException>(() => scope.StartAsync(Spec, id, default));
+        }
+        finally { release.Set(); }
+    }
     private sealed class UnreviewedRealAdapter : IGameAdapter
     {
         public GameId Game => GameId.Genshin;

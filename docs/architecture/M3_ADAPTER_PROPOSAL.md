@@ -89,7 +89,7 @@
 3.  ZzzOneDragonAdapter：
 
 - 修改 {Root}\config\env.yml，强制 auto_update: false。
-- 修改目标实例目录（如 config\01\\下的日常任务开关。
+- 修改目标实例目录（如 `config\01\`）下的日常任务开关。
 
 ### 2.3 启动参数构建器（Argument Builder）
 

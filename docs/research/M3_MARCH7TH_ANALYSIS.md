@@ -163,7 +163,7 @@
 
 1.  日志位置与格式：
 
-- 目录：{EngineRoot}\logs\\每日生成独立 log 文件。
+- 目录：`{EngineRoot}\logs\`，每日生成独立 log 文件。
 - 控制台流：进程启动时将 StandardOutput 与 StandardError 设为 UTF-8 重定向，可通过管道实时读取与 UI 展示。
 
 2.  退出码判断：

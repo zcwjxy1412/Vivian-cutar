@@ -77,3 +77,13 @@
 ## 构建记录
 
 （由预桌面阶段最后一次提交填写；之后的纯文档提交不改变二进制内容。）
+
+| 项 | 值 |
+|---|---|
+| 被测二进制的源提交 | `2799b3a1e892b20aa4f11d476c5d956e1da152f5`（分支 `feature/m3-dev-build`） |
+| 程序版本 | `0.4.0-dev+2799b3a1e892b20aa4f11d476c5d956e1da152f5` |
+| Windows CI（push） | [run 41933963065](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/41933963065)：346/346 测试通过，0 跳过；WPF 冒烟通过（模拟队列 3/3、紧急停止 241 ms、UI 最长响应 6 ms、引擎就绪状态、任务计划持久化、诊断包导出、163 个文本元素对比度合格） |
+| 产物 | `VIvian-dev-win-x64`（Artifact ID 13373181875）；证据 `VIvian-evidence`（13373321640，含每个标签页截图） |
+| `VIvian-win-x64.zip` SHA-256 | `dc6319d4644cf8c1fd2d99e976b4ca60022fda662cb7b3df75683495e2124912` |
+
+程序内会写入构建所用的提交号，所以之后的任何提交（包括只改本文件）都会产生提交号和摘要不同的新包。测试时以上表这个构建为准；如果产物已过期（GitHub 默认保留 90 天），在同一提交上重新运行 Windows validation 后按 `BUILD-INFO.txt` 核对。

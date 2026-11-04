@@ -17,6 +17,12 @@ public sealed class ScriptedAdapter(GameId game) : IGameAdapter
 
     public PreflightResult Preflight { get; set; } = PreflightResult.Ok();
     public Exception? StartException { get; set; }
+    public TaskCompletionSource? StartGate { get; set; }
+    /// <summary>Completed once StartAsync has been entered; <see cref="StartToken"/> is the token it received.</summary>
+    public TaskCompletionSource StartEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public CancellationToken StartToken { get; private set; }
+    /// <summary>A token linked to <see cref="StartToken"/>, the way a caller adding its own time limit would link it.</summary>
+    public CancellationToken LinkedStartToken { get; private set; }
     public Func<ScriptedRun, Task>? Script { get; set; }
     public StopReaction StopReaction { get; set; } = StopReaction.Honour;
     public CleanupState ReconcileResult { get; set; } = CleanupState.Confirmed;
@@ -28,15 +34,24 @@ public sealed class ScriptedAdapter(GameId game) : IGameAdapter
 
     public Task<PreflightResult> PreflightAsync(RunContext context, CancellationToken ct) => Task.FromResult(Preflight);
 
-    public Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+    public async Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
     {
         Interlocked.Increment(ref StartCount);
         JournalPhaseAtStart = Journal?.LastFor(context.RunId)?.Phase;
+        StartToken = ct;
+        LinkedStartToken = CancellationTokenSource.CreateLinkedTokenSource(ct).Token;
+        StartEntered.TrySetResult();
+        if (StartGate is { } gate)
+        {
+            await gate.Task.ConfigureAwait(false);
+            if (ct.IsCancellationRequested)
+                throw new EngineStartException(ReasonCodes.UserStop, nothingStarted: true, "Cancelled before process creation.");
+        }
         if (StartException is not null) throw StartException;
         var run = new ScriptedRun(context.RunId, StopReaction, ReconcileResult);
         LastRun = run;
         if (Script is not null) _ = Task.Run(() => Script(run));
-        return Task.FromResult<IEngineRun>(run);
+        return run;
     }
 }
 

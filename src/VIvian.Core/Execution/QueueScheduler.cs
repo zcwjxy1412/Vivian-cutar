@@ -52,7 +52,7 @@ public sealed class QueueScheduler(
 {
     private readonly SchedulerOptions _options = options ?? SchedulerOptions.Default;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
-    private TaskCompletionSource _emergency = NewSignal();
+    private StopSignal _stop = new();
     private int _running;
     private readonly SafetyBarrier _barrier = new();
 
@@ -131,25 +131,58 @@ public sealed class QueueScheduler(
     /// asynchronously (e.g. from a UI) should stop it by cancelling the token passed to <see cref="RunAsync"/>,
     /// which also works when cancelled before the queue has started.
     /// </summary>
-    public void EmergencyStop() => Volatile.Read(ref _emergency).TrySetResult();
+    public void EmergencyStop() => Volatile.Read(ref _stop).Trigger();
+
+    /// <summary>
+    /// One queue's stop request. <see cref="Trigger"/> cancels the adapters' token synchronously, so the stop is
+    /// observable when it returns — including tokens linked to it (e.g. a call's own time-limit token). Registered
+    /// callbacks therefore run on the caller's thread; a UI should call <see cref="EmergencyStop"/> or cancel the
+    /// RunAsync token off its UI thread so a slow adapter callback cannot freeze it.
+    /// </summary>
+    private sealed class StopSignal : IDisposable
+    {
+        private readonly CancellationTokenSource _token = new();
+        private readonly TaskCompletionSource _signal = NewSignal();
+        private int _disposed;
+
+        public Task Requested => _signal.Task;
+        public CancellationToken Token => _token.Token;
+
+        public void Trigger()
+        {
+            // The scheduler's own stop path (escalation, grace timers) is released first, so an adapter
+            // cancellation callback that blocks below can never hide or delay the emergency stop.
+            _signal.TrySetResult();
+            if (Volatile.Read(ref _disposed) == 0)
+            {
+                // Not CancelAsync: that would also defer cancellation of linked tokens to the thread pool.
+                try { _token.Cancel(); }
+                catch (ObjectDisposedException) { /* the queue already finished */ }
+                catch (AggregateException) { /* an adapter callback failed; the token is cancelled regardless */ }
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) _token.Dispose();
+        }
+    }
 
     public async Task<QueueResult> RunAsync(IReadOnlyList<QueueItem> items, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(items);
         if (items.Select(i => i.Game).Distinct().Count() != items.Count)
             throw new ArgumentException("每款游戏在一个队列中只能出现一次。", nameof(items));
-        if (Interlocked.Exchange(ref _running, 1) == 1)
+        if (Interlocked.CompareExchange(ref _running, 1, 0) == 1)
             throw new InvalidOperationException("已有队列在运行。");
         try
         {
-            var emergency = NewSignal();
-            Volatile.Write(ref _emergency, emergency);
-            using var stopToken = new CancellationTokenSource();
-            using var registration = ct.Register(() => emergency.TrySetResult());
-            _ = emergency.Task.ContinueWith(_ =>
-            {
-                try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
-            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            using var stopSignal = new StopSignal();
+            Volatile.Write(ref _stop, stopSignal);
+            var emergency = stopSignal.Requested;
+            // Cancelling the caller's token (e.g. application shutdown) is an emergency stop; if it is already
+            // cancelled, Register runs the trigger synchronously here, before anything starts.
+            using var registration = ct.Register(stopSignal.Trigger);
             var queueId = Guid.NewGuid();
             // In-session barrier first: it does not depend on the database being writable.
             if (!_barrier.IsClear)
@@ -173,13 +206,13 @@ public sealed class QueueScheduler(
             var notStarted = new List<GameId>();
             for (var i = 0; i < items.Count; i++)
             {
-                if (emergency.Task.IsCompleted)
+                if (emergency.IsCompleted)
                 {
                     status = QueueStatus.Cancelled;
                     notStarted.AddRange(items.Skip(i).Select(x => x.Game));
                     break;
                 }
-                var execution = new RunExecution(this, queueId, items[i], emergency.Task, stopToken.Token);
+                var execution = new RunExecution(this, queueId, items[i], emergency, stopSignal.Token);
                 RunUpdate last;
                 bool blocksQueue;
                 try
@@ -194,7 +227,7 @@ public sealed class QueueScheduler(
                 journalFaulted |= execution.JournalFaulted;
                 runs.Add(last);
                 var stop = blocksQueue ? QueueStatus.Blocked
-                    : last.Outcome == RunOutcome.Cancelled || emergency.Task.IsCompleted ? QueueStatus.Cancelled
+                    : last.Outcome == RunOutcome.Cancelled || emergency.IsCompleted ? QueueStatus.Cancelled
                     : (QueueStatus?)null;
                 if (stop is { } s)
                 {
@@ -602,9 +635,14 @@ public sealed class QueueScheduler(
         /// <summary>Applies the evidence rule: success only with explicit completion evidence for this run.</summary>
         private (RunOutcome, string) Judge(RunVerdict verdict)
         {
-            if (verdict.Outcome == RunOutcome.Success
-                && !verdict.Evidence.Any(e => e.RunId == _runId && e.Kind == EvidenceKind.CompletionReported))
-                return (RunOutcome.Indeterminate, ReasonCodes.SuccessWithoutEvidence);
+            if (verdict.Outcome == RunOutcome.Success)
+            {
+                var ownKinds = verdict.Evidence.Where(e => e.RunId == _runId && e.Kind != EvidenceKind.Note)
+                    .Select(e => e.Kind).Distinct().ToArray();
+                if (ownKinds.Length > 1) return (RunOutcome.Indeterminate, ReasonCodes.ConflictingEvidence);
+                if (!ownKinds.Contains(EvidenceKind.CompletionReported))
+                    return (RunOutcome.Indeterminate, ReasonCodes.SuccessWithoutEvidence);
+            }
             return (verdict.Outcome, verdict.ReasonCode);
         }
 

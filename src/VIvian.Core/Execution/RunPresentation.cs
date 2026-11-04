@@ -70,6 +70,8 @@ public static class RunPresentation
         ReasonCodes.JournalUnavailable => "无法写入运行记录",
         ReasonCodes.UnresolvedRuns => "有待确认的未清理运行",
         ReasonCodes.InternalError => "VIvian 内部错误，已保守处理",
+        ReasonCodes.AdapterUnresponsive => "适配器操作未在时限内结束，可能仍在运行",
+        ReasonCodes.RealAdapterUnverified => "真实适配器的进程归属尚未审核，已阻断执行",
         _ => "其他原因",
     };
 
@@ -85,7 +87,9 @@ public static class RunPresentation
     public static string Summary(GameId game, RunPhase phase, RunOutcome? outcome, CleanupState cleanup, string? reason, bool isSimulation)
     {
         var parts = new List<string> { (isSimulation ? SimulationLabel : "") + GameName(game) };
-        parts.Add(outcome is null ? Phase(phase) : Outcome(outcome, isSimulation: false));
+        // A completed task can still leave processes behind; the visible row must lead with the block.
+        parts.Add(phase == RunPhase.Blocked && cleanup == CleanupState.Unconfirmed
+            ? Phase(phase) : outcome is null ? Phase(phase) : Outcome(outcome, isSimulation: false));
         if (cleanup is not CleanupState.NotRequired) parts.Add(Cleanup(cleanup));
         if (Reason(reason) is { Length: > 0 } text) parts.Add(text);
         return string.Join(" · ", parts);

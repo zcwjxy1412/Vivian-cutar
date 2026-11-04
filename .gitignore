@@ -6,6 +6,7 @@ artifacts/
 *.db
 *.db-shm
 *.db-wal
+TestResults/
 
 # Test and diagnostic outputs (keep them as CI artifacts, never in Git)
 *.trx

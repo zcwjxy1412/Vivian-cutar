@@ -11,6 +11,11 @@ public sealed partial class LocalDatabase : IRunJournal, IRunHistory
 {
     public const int MaxEventMessageLength = 4000;
     public const int MaxAcknowledgementLength = 500;
+    // Unresolved: cleanup unconfirmed and not acknowledged, or a run that never reached a terminal phase (its final
+    // write failed or the app stopped). Single-instance + one queue at a time: at queue start no row is legitimately
+    // in progress, so a non-terminal row always means the outcome of an earlier run is unknown (#29).
+    private const string UnresolvedCondition =
+        "((cleanup='Unconfirmed' AND acknowledged_at IS NULL) OR phase NOT IN ('Finished','Blocked'))";
     private const string RunColumns = "run_id,queue_id,game,rule_version,is_simulation,phase,outcome,cleanup,reason_code,created_at,updated_at,acknowledged_at,acknowledgement_note";
 
     public async Task PublishAsync(RunUpdate update, CancellationToken ct)
@@ -74,7 +79,7 @@ public sealed partial class LocalDatabase : IRunJournal, IRunHistory
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT COUNT(*) FROM runs WHERE cleanup='Unconfirmed' AND acknowledged_at IS NULL;";
+        cmd.CommandText = $"SELECT COUNT(*) FROM runs WHERE {UnresolvedCondition};";
         return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct), CultureInfo.InvariantCulture);
     }
 
@@ -86,7 +91,7 @@ public sealed partial class LocalDatabase : IRunJournal, IRunHistory
     }
 
     public Task<IReadOnlyList<RunRecord>> ReadUnresolvedAsync(CancellationToken ct = default) =>
-        QueryRunsAsync($"SELECT {RunColumns} FROM runs WHERE cleanup='Unconfirmed' AND acknowledged_at IS NULL ORDER BY created_at;",
+        QueryRunsAsync($"SELECT {RunColumns} FROM runs WHERE {UnresolvedCondition} ORDER BY created_at;",
             _ => { }, ct);
 
     public async Task<IReadOnlyList<RunEvent>> ReadEventsAsync(Guid runId, int limit, CancellationToken ct = default)

@@ -91,7 +91,12 @@ public partial class App : Application
                             "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + contrastReport);
                         Shutdown(0);
                     }
-                    catch (Exception ex) { Log.Error("Smoke failed: {ErrorType}", ex.GetType().Name); Shutdown(1); }
+                    catch (Exception ex)
+                    {
+                        // Smoke-only: the messages are VIvian's own check descriptions (no user data).
+                        Log.Error("Smoke failed: {ErrorType}: {Message}", ex.GetType().Name, ex.Message);
+                        Shutdown(1);
+                    }
                 };
             }
             window.Show();
@@ -147,10 +152,18 @@ public partial class App : Application
             throw new InvalidOperationException("Emergency stop did not cancel the queue");
         if (stopLatency > TimeSpan.FromSeconds(3)) throw new InvalidOperationException("Emergency stop too slow: " + stopLatency);
 
+        // Shutdown coordination: closing while a queue runs stops it and waits for its final state.
+        var closing = queue.RunDemoAsync([(GameId.Genshin, DemoScenario.Stall)]);
+        while (!queue.LogLines.Any(l => l.Contains("模拟卡死", StringComparison.Ordinal))) await Task.Delay(20);
+        if (!await queue.StopForShutdownAsync(TimeSpan.FromSeconds(10)))
+            throw new InvalidOperationException("Shutdown stop did not end the queue");
+        var closed = await closing ?? throw new InvalidOperationException("Shutdown queue did not start");
+        if (closed.Status != QueueStatus.Cancelled) throw new InvalidOperationException("Shutdown stop did not cancel the queue");
+
         probeStop.Cancel();
         var worstUi = await probe;
         if (worstUi > TimeSpan.FromSeconds(1)) throw new InvalidOperationException("UI thread unresponsive: " + worstUi);
-        return $"simulation queue 3/3 success persisted; emergency stop {stopLatency.TotalMilliseconds:F0} ms; worst UI response {worstUi.TotalMilliseconds:F0} ms.";
+        return $"simulation queue 3/3 success persisted; emergency stop {stopLatency.TotalMilliseconds:F0} ms; shutdown stop ok; worst UI response {worstUi.TotalMilliseconds:F0} ms.";
     }
 
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>

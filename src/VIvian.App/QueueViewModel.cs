@@ -57,6 +57,7 @@ public sealed class QueueViewModel : ObservableObject
         _history = history;
         _dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _scheduler.RunChanged += update => Post(() => OnRunChanged(update));
+        _scheduler.HazardsChanged += () => Post(() => _ = RefreshSafeAsync());
         _scheduler.EventReceived += runEvent => Post(() => AppendLog(runEvent.At, runEvent.Message));
         StartCommand = new AsyncCommand(() => RunDemoAsync(), HandleError);
         StopCommand = new RelayCommand(EmergencyStop);
@@ -106,7 +107,9 @@ public sealed class QueueViewModel : ObservableObject
         Status = "模拟队列运行中…（可随时紧急停止）";
         try
         {
-            var result = await Task.Run(() => _scheduler.RunAsync(items, stop.Token));
+            var queueTask = Task.Run(() => _scheduler.RunAsync(items, stop.Token));
+            _queueTask = queueTask;
+            var result = await queueTask;
             Status = RunPresentation.SimulationLabel + RunPresentation.QueueStatusText(result)
                 + (result.NotStarted.Count > 0 ? "；未启动：" + string.Join("、", result.NotStarted.Select(RunPresentation.GameName)) : "");
             Serilog.Log.Information("Simulation queue finished: {Status} {Reason}", result.Status, result.BlockReason);
@@ -121,20 +124,60 @@ public sealed class QueueViewModel : ObservableObject
         }
     }
 
+    private Task? _queueTask;
+
+    /// <summary>
+    /// Application shutdown: requests the emergency stop and waits, bounded, for the queue to end so its final state
+    /// is recorded. Returns false when it did not end in time; the caller then exits anyway: every engine process
+    /// VIvian started is in a kill-on-close Job that Windows terminates when VIvian exits, and the next start
+    /// reconciles the unfinished run as Blocked with cleanup unconfirmed (never as cleaned up).
+    /// </summary>
+    public async Task<bool> StopForShutdownAsync(TimeSpan timeout)
+    {
+        if (_queueTask is not { IsCompleted: false } running) return true;
+        EmergencyStop();
+        var ended = await Task.WhenAny(running, Task.Delay(timeout)) == running;
+        Serilog.Log.Information("Shutdown stop: queue {State}", ended ? "ended" : "still running at exit");
+        return ended;
+    }
+
     public void EmergencyStop()
     {
         if (_stop is not { } stop) return;
-        // Sent immediately, no confirmation dialog or countdown.
-        stop.Cancel();
-        Status = "已发出紧急停止…";
+        // Sent immediately, no confirmation dialog or countdown. Cancelling runs adapter cancellation callbacks
+        // synchronously, so it is done off the UI thread: a slow callback must never freeze the window.
+        var ui = SynchronizationContext.Current;
+        _ = Task.Run(() =>
+        {
+            try { stop.Cancel(); }
+            catch (Exception ex) when (ex is ObjectDisposedException or AggregateException) { /* queue ended or callback failed */ }
+            // Delivered to the scheduler (its stop path is running); this is not a claim that anything has ended.
+            ui?.Post(_ => { if (IsRunning) Status = "紧急停止已送达调度器，正在等待引擎结束并核对清理…"; }, null);
+        });
+        // Only queued so far: the request may not have reached the scheduler yet.
+        Status = "正在发送紧急停止…";
         Serilog.Log.Information("Emergency stop requested from UI");
     }
 
     private async Task AcknowledgeAllAsync()
     {
+        // Goes through the scheduler: it refuses while an abandoned adapter call is still running, and only releases
+        // its in-session barrier after the acknowledgement has been stored.
+        var refused = 0;
         foreach (var row in Unresolved.ToList())
-            await Task.Run(() => _history.AcknowledgeAsync(row.RunId, "用户在界面上确认引擎和游戏均已关闭。", DateTimeOffset.UtcNow));
-        Status = "已记录你的确认。原判定结果保持不变。";
+        {
+            try
+            {
+                await Task.Run(() => _scheduler.AcknowledgeAsync(row.RunId, "用户在界面上确认引擎和游戏均已关闭。", _history, DateTimeOffset.UtcNow));
+            }
+            catch (InvalidOperationException)
+            {
+                refused++;
+            }
+        }
+        Status = refused == 0
+            ? "已记录你的确认。原判定结果保持不变。"
+            : $"有 {refused} 条运行暂时不能确认：适配器操作尚未结束，或记录尚未写入。请稍后重试，必要时重启 VIvian 完成对账。";
         await RefreshAsync();
     }
 
@@ -146,7 +189,21 @@ public sealed class QueueViewModel : ObservableObject
         foreach (var r in recent) Runs.Add(ToRow(r));
         Unresolved.Clear();
         foreach (var r in unresolved) Unresolved.Add(ToRow(r));
+        // In-session hazards the database may not know about (failed write, adapter call still running).
+        foreach (var h in _scheduler.SessionHazards.Where(h => unresolved.All(r => r.RunId != h.RunId)))
+            Unresolved.Add(new RunRow(h.RunId,
+                (h.LastKnown is { } u ? RunPresentation.Summary(u) : RunPresentation.GameName(h.Game))
+                    + (h.PendingOperations > 0 ? " · " + RunPresentation.Reason(ReasonCodes.AdapterUnresponsive) : "")
+                    + (h.TerminalPersisted ? "" : " · 记录尚未写入数据库"),
+                "本次会话", h.LastKnown?.IsSimulation ?? false, true));
         Raise(nameof(HasUnresolved));
+    }
+
+    private async Task RefreshSafeAsync()
+    {
+        if (IsRunning) return; // refreshed when the queue ends
+        try { await RefreshAsync(); }
+        catch (Exception ex) { Serilog.Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
     }
 
     private static RunRow ToRow(RunRecord r) => new(r.RunId, RunPresentation.Summary(r),

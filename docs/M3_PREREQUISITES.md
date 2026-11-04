@@ -2,7 +2,7 @@
 
 日期：2026-11-03　依据：`docs/reference/INTEGRATED_REVIEW.md` §4–§6、`docs/M2_ACCEPTANCE.md` §8
 
-> **状态更新（2026-11-04，只补充，不改动下表）**：C2 已由 PR #14 合并；C3 已由 PR #13 合并；C5 的证据索引已建立（`evidence/EVIDENCE_INDEX.md`），其中多数条目仍为 Pending；C1 的权限探针在 PR #23，桌面 UAC 验证 Pending；D3（处理评审发现的 Critical/High 问题）仍在进行，见 PR #30、#20、#33。A、B 两节全部未完成。当前进度见 [`README.md`](README.md) 第 5 节。
+> **状态更新（2026-11-04，只补充，不改动下表）**：C2 已由 PR #14 合并；C3 已由 PR #13 合并；C5 的证据索引已建立（`evidence/EVIDENCE_INDEX.md`），其中多数条目仍为 Pending；C1 的无害权限探针已随 PR #35 合并（PR #23），桌面 UAC 验证仍 Pending（#16）；D3 已完成：评审发现的 Critical/High 问题已在 PR #30、#33（含 #20）中修复并经 Codex 验收。B1 的星铁部分已有官方发布元数据与只读核对工具，官方包实际文件仍待核验（#25）。A 节与 B2～B12 全部未完成。当前进度见 [`README.md`](README.md) 第 5 节。
 
 M3 的目标是把 BetterGI（原神）、March7thAssistant（星穹铁道）、ZenlessZoneZero-OneDragon（绝区零）接入 M2 的执行内核。下表中的条件没有满足之前，**不编写生产适配器**，不把未经验证的命令行参数、配置键、端口或结束信号写进产品代码。
 

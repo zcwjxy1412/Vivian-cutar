@@ -48,20 +48,22 @@
 
 ## 5. 进行中的工作与安全门禁
 
-以 GitHub 上的 PR 列表为准。M3 安全整合（#32、#30、#33（含 #20）、#34）合并之后的状态：
+以 GitHub 上的 PR 和 Issue 列表为准。截至 2026-11-04，main 为 0.3.0-dev（PR #35 合并后）：
 
 | PR | 内容 | 状态 |
 | --- | --- | --- |
 | [#30](https://github.com/zcwjxy1412/Vivian-cutar/pull/30) | #28/#29 安全门禁（RunId 启动许可、有界调用） | 已合并 |
 | [#33](https://github.com/zcwjxy1412/Vivian-cutar/pull/33) | 运行归属、有界迟到清理、有界持久化、停止/启动许可（包含 #20） | 已合并；Codex 验收通过 |
-| [#20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20) | 调度器取消与矛盾证据 | 已随 #33 合并，不单独合并 |
+| [#20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20) | 调度器取消与矛盾证据 | 已随 #33 合并 |
 | [#32](https://github.com/zcwjxy1412/Vivian-cutar/pull/32) | Gemini 新报告与勘误 | 已合并；勘误优先于 Gemini 原文 |
 | [#34](https://github.com/zcwjxy1412/Vivian-cutar/pull/34) | 文档导航与仓库审计 | 已合并 |
-| [#23](https://github.com/zcwjxy1412/Vivian-cutar/pull/23) | Windows Job 与权限探针 | M3.1 继续；桌面 UAC 验证 Pending |
-| [#24](https://github.com/zcwjxy1412/Vivian-cutar/pull/24)、[#26](https://github.com/zcwjxy1412/Vivian-cutar/pull/26) | March7th 只读发现、官方发行包审计 | M3.2 在其基础上继续 |
+| [#35](https://github.com/zcwjxy1412/Vivian-cutar/pull/35) | 0.3.0-dev：引擎就绪检查、星铁官方发行包核对、Windows 开发版 | 已合并（Claude 自审，经用户授权） |
+| [#23](https://github.com/zcwjxy1412/Vivian-cutar/pull/23)、[#24](https://github.com/zcwjxy1412/Vivian-cutar/pull/24)、[#26](https://github.com/zcwjxy1412/Vivian-cutar/pull/26) | Job 归属检查、星铁只读发现、官方发行包审计 | 已随 #35 合并 |
 | [#27](https://github.com/zcwjxy1412/Vivian-cutar/pull/27) | Claude 独立审查报告（历史） | 保留为记录 |
-| [#31](https://github.com/zcwjxy1412/Vivian-cutar/pull/31) | #30 + #20 组合验证 | **只用于验证，禁止合并** |
+| [#31](https://github.com/zcwjxy1412/Vivian-cutar/pull/31) | #30 + #20 组合验证 | 已关闭，未合并 |
+
+仍然开放的阻断项：[#16](https://github.com/zcwjxy1412/Vivian-cutar/issues/16)（桌面 UAC 与提权进程归属）、[#22](https://github.com/zcwjxy1412/Vivian-cutar/issues/22)（星铁只读 CLI 查询的实测）、[#25](https://github.com/zcwjxy1412/Vivian-cutar/issues/25)（官方发行包实际文件的独立核验）。
 
 整合后的安全基线（仅限模拟引擎范围）：有界的适配器调用与状态写入、按 RunId 发放的启动许可、停止时先撤销启动许可、会话安全门禁。CI 通过不是 UAC、提权进程或真实游戏的证明。
 
-main 上目前没有任何真实适配器；#30 起，调度器还会用 `RealAdapterUnverified` 门禁阻断所有非模拟适配器，直到适配器通过独立审查。桌面 UAC、提权子进程、真实引擎和真实游戏都仍为 Pending。
+main 上目前没有任何真实适配器；调度器还会用 `RealAdapterUnverified` 门禁阻断所有非模拟适配器，直到适配器通过独立审查。桌面 UAC、提权子进程、真实引擎和真实游戏都仍为 Pending。

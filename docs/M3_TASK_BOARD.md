@@ -1,14 +1,16 @@
-# M3 任务与依赖（2026-11-04）
+# M3 任务与依赖（2026-11-04 更新）
 
-当前 main：`5c49461`；Windows CI 基线：PR #18 的 166 项通过（模拟 / 工程测试）。PR #20 为 170/170 通过，PR #23 为 168/168 通过，PR #24 为 169/169 通过；分别是独立分支，不能相加为一个 main 测试数。DeepSeek 的 `integration/deepseek-onboarding` 远端分支已存在，尚无 PR；该文档自述的本地无写权限是提交时的记录，远端推送已发生，但其后续 GitHub Issue/PR 写入权限未由本人验证。
+main：`7a73ebe`（0.3.0-dev）。Windows CI：[41921391010](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/41921391010)，267/267 通过，WPF 冒烟测试通过（模拟引擎与工程测试，不是真实游戏的证明）。
 
-| 任务 | 负责人 | 模块 / 验收 | 分支与 PR | 依赖 / 状态 |
-|---|---|---|---|---|
-| [#19](https://github.com/zcwjxy1412/Vivian-cutar/issues/19) 调度器风险 | Codex 开发；DeepSeek 独立复核 | 取消状态复位、停止时序、证据冲突和阻断显示；Windows 全量测试 | `fix/m3-scheduler-hardening`；[PR #20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20) | CI 与复核待完成 |
-| [#21](https://github.com/zcwjxy1412/Vivian-cutar/issues/21) 对抗测试 | DeepSeek | 新增 `tests/VIvian.Adversarial/**`，Job、SQLite、CLI、适配器异常；可复现证据和独立审查 | `tests/m3-deepseek-adversarial`；PR 待创建 | DeepSeek onboarding PR / #19；不修改 Codex 生产文件 |
-| [#16](https://github.com/zcwjxy1412/Vivian-cutar/issues/16) 权限与 Job | Codex 无害原型；DeepSeek 审核 | SID、Job、同名隔离、崩溃恢复；桌面 UAC 拒绝/同意、跨权限和执行器杀死单独验收 | `spike/m3-privilege-validation`；[PR #23](https://github.com/zcwjxy1412/Vivian-cutar/pull/23) | CI 可做部分；桌面 UAC 授权待提供，ADR-007 保持提案 |
-| [#22](https://github.com/zcwjxy1412/Vivian-cutar/issues/22) 星铁只读发现 | Codex；DeepSeek 审核 | 安装路径、CLI、版本、完整哈希、预检；发行包上只读参数验证后才开放状态/任务查询 | `feature/m3-m7a-readonly`；[PR #24](https://github.com/zcwjxy1412/Vivian-cutar/pull/24) | #16 / #19 / 精确发行包证据；发现代码已提交，CLI 参数 Pending |
-| BetterGI 适配器 | Codex；DeepSeek 审核 | 独立版本与生命周期证据、测试、实机验收 | `feature/m3-bettergi-adapter`；PR 待创建 | 星铁安全门槛和独立上游实测 |
-| OneDragon 适配器 | Codex；DeepSeek 审核 | 独立版本与生命周期证据、测试、实机验收 | `feature/m3-onedragon-adapter`；PR 待创建 | BetterGI 后，不能复制其权限/进程假设 |
+分工：Claude 负责实现；Codex 负责每个实现 PR 的一次聚焦独立审查和整合验收；Gemini 只在具体的上游技术问题上做研究；DeepSeek 不再参与常规审查。
 
-DeepSeek onboarding 分支的原文件独立保留，不覆盖或代其合并。发布之前关闭全部 Critical / High 缺陷。没有完成确认的进程清理时，不进入下一任务。
+| 任务 | 状态 | 下一步 / 阻断 |
+|---|---|---|
+| 调度器安全门禁（#19、#28、#29、H-30、P0） | 已完成：PR #20、#30、#33 已合并，Codex 验收通过 | — |
+| [#16](https://github.com/zcwjxy1412/Vivian-cutar/issues/16) 权限与 Job 边界 | 无害探针与 `OwnsProcess` 已合并（PR #23） | 桌面 UAC 同意/拒绝、提权子进程归属、执行器被杀：需要用户提供桌面并授权 |
+| [#22](https://github.com/zcwjxy1412/Vivian-cutar/issues/22) 星铁只读发现 | 只读发现、版本识别、链接与 TOCTOU 防护、有界查询、界面状态已合并（PR #24、#35） | 在隔离副本中实测 `--version`、`--list --json`、`--status` 的输出与副作用，之后才开放受哈希门禁保护的查询 |
+| [#25](https://github.com/zcwjxy1412/Vivian-cutar/issues/25) 星铁官方发行包证据 | 官方摘要已固定；核对工具已合并（PR #26、#35） | 用真实下载的官方 zip 实测核对，并记录独立计算的哈希 |
+| BetterGI 适配器 | 只读发现程序文件，状态“不支持” | 独立的版本与生命周期证据、实机验收；排在星铁之后 |
+| OneDragon 适配器 | 只读发现程序文件，状态“不支持” | 排在 BetterGI 之后；不能照搬其他引擎的权限与进程假设 |
+
+发布之前关闭全部 Critical / High 缺陷；没有完成确认的进程清理时，不进入下一任务。

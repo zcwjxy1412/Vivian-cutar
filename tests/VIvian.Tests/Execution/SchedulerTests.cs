@@ -362,6 +362,7 @@ public sealed class SchedulerTests
 
             if (viaCallerToken) caller.Cancel(); else scheduler.EmergencyStop();
             var visible = adapter.StartToken.IsCancellationRequested; // read immediately, no waiting
+            visible &= adapter.LinkedStartToken.IsCancellationRequested; // a token linked to it is cancelled too
 
             gate.SetResult();
             await queue.WaitAsync(TimeSpan.FromSeconds(5));

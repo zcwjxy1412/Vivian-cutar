@@ -21,6 +21,8 @@ public sealed class ScriptedAdapter(GameId game) : IGameAdapter
     /// <summary>Completed once StartAsync has been entered; <see cref="StartToken"/> is the token it received.</summary>
     public TaskCompletionSource StartEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public CancellationToken StartToken { get; private set; }
+    /// <summary>A token linked to <see cref="StartToken"/>, the way a caller adding its own time limit would link it.</summary>
+    public CancellationToken LinkedStartToken { get; private set; }
     public Func<ScriptedRun, Task>? Script { get; set; }
     public StopReaction StopReaction { get; set; } = StopReaction.Honour;
     public CleanupState ReconcileResult { get; set; } = CleanupState.Confirmed;
@@ -37,6 +39,7 @@ public sealed class ScriptedAdapter(GameId game) : IGameAdapter
         Interlocked.Increment(ref StartCount);
         JournalPhaseAtStart = Journal?.LastFor(context.RunId)?.Phase;
         StartToken = ct;
+        LinkedStartToken = CancellationTokenSource.CreateLinkedTokenSource(ct).Token;
         StartEntered.TrySetResult();
         if (StartGate is { } gate)
         {

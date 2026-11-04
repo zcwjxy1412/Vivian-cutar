@@ -59,9 +59,10 @@ public sealed class QueueScheduler(
     public void EmergencyStop() => Volatile.Read(ref _stop).Trigger();
 
     /// <summary>
-    /// One queue's stop request. <see cref="Trigger"/> marks the adapters' token cancelled before it returns, so the
-    /// stop is observable at that boundary; registered cancellation callbacks run asynchronously
-    /// (<see cref="CancellationTokenSource.CancelAsync"/>), so a slow adapter callback cannot block the caller (e.g. UI).
+    /// One queue's stop request. <see cref="Trigger"/> cancels the adapters' token synchronously, so the stop is
+    /// observable when it returns — including tokens linked to it (e.g. a call's own time-limit token). Registered
+    /// callbacks therefore run on the caller's thread; a UI should call <see cref="EmergencyStop"/> or cancel the
+    /// RunAsync token off its UI thread so a slow adapter callback cannot freeze it.
     /// </summary>
     private sealed class StopSignal : IDisposable
     {
@@ -76,17 +77,10 @@ public sealed class QueueScheduler(
         {
             if (Volatile.Read(ref _disposed) == 0)
             {
-                try
-                {
-                    // IsCancellationRequested is true when CancelAsync returns; callbacks run on the thread pool.
-                    var callbacks = _token.CancelAsync();
-                    _ = callbacks.ContinueWith(t => _ = t.Exception, CancellationToken.None,
-                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
-                }
-                catch (ObjectDisposedException)
-                {
-                    // The queue already finished.
-                }
+                // Not CancelAsync: that would also defer cancellation of linked tokens to the thread pool.
+                try { _token.Cancel(); }
+                catch (ObjectDisposedException) { /* the queue already finished */ }
+                catch (AggregateException) { /* an adapter callback failed; the token is cancelled regardless */ }
             }
             _signal.TrySetResult();
         }

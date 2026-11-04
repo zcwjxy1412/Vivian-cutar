@@ -20,9 +20,15 @@ public sealed class AdapterHangTests : IDisposable
 
     private static readonly DateTimeOffset Start = new(2026, 11, 4, 4, 0, 0, TimeSpan.Zero);
 
+    // The virtual clock runs far ahead of real I/O (one virtual second per ~2 ms), so a real SQLite write would
+    // "time out" in virtual time. Tests that are not about journal timeouts use a limit beyond their virtual budget;
+    // tests that are use an explicit JournalTimeout and drive the clock only while no healthy write is in flight.
     private static SchedulerOptions Options => new(
         GracefulStopTimeout: TimeSpan.FromSeconds(30), EmergencyStopTimeout: TimeSpan.FromSeconds(15),
-        ReconcileTimeout: TimeSpan.FromSeconds(30), DefaultLimits: new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)));
+        ReconcileTimeout: TimeSpan.FromSeconds(30), DefaultLimits: new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)))
+    {
+        JournalTimeout = TimeSpan.FromDays(1),
+    };
 
     private static ScriptedAdapter Completes(GameId game) =>
         new(game) { Script = r => { r.End(EvidenceKind.CompletionReported); return Task.CompletedTask; } };
@@ -107,10 +113,12 @@ public sealed class AdapterHangTests : IDisposable
     }
 
     /// <summary>Advances virtual time in one-second steps until the queue finishes or the budget is spent.</summary>
-    private static async Task<QueueResult?> DriveAsync(Task<QueueResult> queue, FakeTimeProvider time, TimeSpan budget)
+    private static async Task<QueueResult?> DriveAsync(Task<QueueResult> queue, FakeTimeProvider time, TimeSpan budget,
+        QueueScheduler scheduler)
     {
         for (var elapsed = TimeSpan.Zero; elapsed < budget && !queue.IsCompleted; elapsed += TimeSpan.FromSeconds(1))
         {
+            await VirtualClock.WaitForHealthyWritesAsync(scheduler);
             await Task.Delay(2);
             time.Advance(TimeSpan.FromSeconds(1));
         }
@@ -133,7 +141,7 @@ public sealed class AdapterHangTests : IDisposable
         var next = Completes(GameId.StarRail);
         var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, hanging, HangLimits), new QueueItem(GameId.StarRail, next)]);
 
-        var result = await DriveAsync(queue, time, TimeSpan.FromHours(3));
+        var result = await DriveAsync(queue, time, TimeSpan.FromHours(3), scheduler);
 
         Assert.True(result is not null, $"queue still running after 3 virtual hours (hang at {point})");
         Assert.Equal(QueueStatus.Blocked, result!.Status);
@@ -166,7 +174,7 @@ public sealed class AdapterHangTests : IDisposable
         stop.Cancel();
 
         // Must end within the emergency grace (15 s) plus at most one 30 s bound, far below the 60 s preflight / 120 s start limits.
-        var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(45));
+        var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(45), scheduler);
 
         Assert.True(result is not null, $"emergency stop did not end the queue within 45 virtual seconds (hang at {point})");
         Assert.Equal(CleanupState.Unconfirmed, result!.Runs.Single().Cleanup);
@@ -193,7 +201,7 @@ public sealed class AdapterHangTests : IDisposable
         var time = new FakeTimeProvider(Start);
         var scheduler = new QueueScheduler(db, new NoProcessSupervisor(), Options, time);
         var hanging = new HangingAdapter(GameId.Genshin, point);
-        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, hanging, HangLimits)]), time, TimeSpan.FromHours(1));
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, hanging, HangLimits)]), time, TimeSpan.FromHours(1), scheduler);
         Assert.NotNull(result);
         return (db, scheduler, time, hanging, result!.Runs.Single().RunId);
     }
@@ -302,7 +310,7 @@ public sealed class AdapterHangTests : IDisposable
         try
         {
             await WaitUntilAsync(() => adapter.Run?.DisposeEntered.Task.IsCompleted == true, "dispose entered");
-            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(10));
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(10), scheduler);
             Assert.NotNull(result);
             Assert.Equal(QueueStatus.Blocked, result!.Status);
             Assert.Equal(CleanupState.Unconfirmed, result.Runs.Single().Cleanup);
@@ -324,7 +332,7 @@ public sealed class AdapterHangTests : IDisposable
         var scheduler = new QueueScheduler(db, new NoProcessSupervisor(),
             Options with { StartTimeout = TimeSpan.FromSeconds(2), DisposeTimeout = TimeSpan.FromSeconds(2) }, time);
         var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]),
-            time, TimeSpan.FromSeconds(15));
+            time, TimeSpan.FromSeconds(15), scheduler);
         Assert.NotNull(result);
         Assert.True(Assert.Single(scheduler.SessionHazards).PendingOperations > 0);
         adapter.ReleaseStart.TrySetResult();
@@ -367,7 +375,7 @@ public sealed class AdapterHangTests : IDisposable
         var scheduler = new QueueScheduler(new HangingJournal(hangCount: true, hangEvents: false),
             new NoProcessSupervisor(), Options with { JournalTimeout = TimeSpan.FromSeconds(2) }, time);
         var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]),
-            time, TimeSpan.FromSeconds(10));
+            time, TimeSpan.FromSeconds(10), scheduler);
         Assert.NotNull(result);
         Assert.Equal(QueueStatus.Blocked, result!.Status);
         Assert.Equal(ReasonCodes.JournalUnavailable, result.BlockReason);
@@ -384,7 +392,7 @@ public sealed class AdapterHangTests : IDisposable
             Options with { PreflightTimeout = TimeSpan.FromSeconds(2), JournalTimeout = TimeSpan.FromSeconds(2) }, time);
         var hanging = new HangingAdapter(GameId.Genshin, HangPoint.Preflight);
         var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, hanging)]),
-            time, TimeSpan.FromSeconds(10));
+            time, TimeSpan.FromSeconds(10), scheduler);
         Assert.NotNull(result);
         hanging.Release.TrySetResult();
         for (var i = 0; i < 10 && scheduler.SessionHazards.Any(h => h.PendingOperations > 0); i++)
@@ -453,7 +461,7 @@ public sealed class AdapterHangTests : IDisposable
         var adapter = new SynchronouslyBlockingAdapter(gate);
         try
         {
-            var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromMinutes(5));
+            var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromMinutes(5), scheduler);
             Assert.NotNull(result);
             Assert.Equal(QueueStatus.Blocked, result!.Status);
             Assert.Equal(ReasonCodes.AdapterUnresponsive, result.Runs.Single().ReasonCode);
@@ -555,7 +563,7 @@ public sealed class AdapterHangTests : IDisposable
                 Task.Run(stop.Cancel), Task.Run(scheduler.EmergencyStop));
             await stops.WaitAsync(TimeSpan.FromSeconds(5));
             // The launch is still blocked: the queue must end anyway (emergency grace + bounded revoke).
-            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60));
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60), scheduler);
             Assert.True(result is not null, "queue waited for a launch in progress");
             Assert.False(entered.IsSet && release.IsSet);
             var run = result!.Runs.Single();
@@ -593,7 +601,7 @@ public sealed class AdapterHangTests : IDisposable
                 time.Advance(TimeSpan.FromSeconds(1));
                 await Task.Delay(5);
             }
-            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60));
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60), scheduler);
             Assert.NotNull(result);
             Assert.Equal(CleanupState.Unconfirmed, result!.Runs.Single().Cleanup);
             Assert.Equal(1, hanging.Run!.StopRequests); // escalation happens once, not once per click
@@ -621,7 +629,7 @@ public sealed class AdapterHangTests : IDisposable
         {
             StartTimeout = TimeSpan.FromSeconds(2), DisposeTimeout = TimeSpan.FromSeconds(2), JournalTimeout = TimeSpan.FromSeconds(2),
         }, time);
-        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20), scheduler);
         try
         {
             Assert.NotNull(result);
@@ -707,7 +715,7 @@ public sealed class AdapterHangTests : IDisposable
             Options with { StartTimeout = TimeSpan.FromSeconds(2) }, time);
         try
         {
-            var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
+            var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20), scheduler);
             Assert.NotNull(result);
             Assert.True(Assert.Single(scheduler.SessionHazards).PendingOperations > 0);
 
@@ -764,7 +772,7 @@ public sealed class AdapterHangTests : IDisposable
         var startRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var adapter = new LaunchingAdapter(startRelease.Task);
         var scheduler = new QueueScheduler(db, supervisor, Options with { StartTimeout = TimeSpan.FromSeconds(2) }, time);
-        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20), scheduler);
         Assert.NotNull(result);
         var runId = result!.Runs.Single().RunId;
         Assert.True(Assert.Single(scheduler.SessionHazards).RequiresVerifiedRecovery);

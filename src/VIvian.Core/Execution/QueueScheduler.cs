@@ -57,6 +57,12 @@ public sealed class QueueScheduler(
     private readonly SafetyBarrier _barrier = new();
     private readonly JournalWriter _writer = new(journal);
 
+    /// <summary>State writes queued or running; for deterministic tests that drive a virtual clock.</summary>
+    internal int StateWritesInFlight => _writer.InFlight;
+
+    /// <summary>A state write's bounded wait has given up and the write has not completed.</summary>
+    internal bool JournalStalled => _writer.IsStalled;
+
     /// <summary>Raised on a background thread whenever a run changes phase, outcome or cleanup state.</summary>
     public event Action<RunUpdate>? RunChanged;
     /// <summary>Raised on a background thread for each event that belongs to the current run.</summary>

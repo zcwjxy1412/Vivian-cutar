@@ -35,6 +35,9 @@ public sealed class JournalStallTests
         public bool FailStalledWritesOnRelease { get; set; }
         public ConcurrentQueue<RunUpdate> Committed { get; } = new();
         public int Concurrent;
+        private int _stalled;
+        /// <summary>Writes currently held at the stall gate on purpose.</summary>
+        public int Stalled => Volatile.Read(ref _stalled);
         public int MaxConcurrent;
 
         public async Task PublishAsync(RunUpdate update, CancellationToken ct)
@@ -45,8 +48,10 @@ public sealed class JournalStallTests
             {
                 if (stallPhases.Contains(update.Phase) && !Release.Task.IsCompleted)
                 {
+                    Interlocked.Increment(ref _stalled);
                     StallEntered.TrySetResult();
-                    await Release.Task.ConfigureAwait(false); // ignores ct on purpose
+                    try { await Release.Task.ConfigureAwait(false); } // ignores ct on purpose
+                    finally { Interlocked.Decrement(ref _stalled); }
                     if (FailStalledWritesOnRelease) throw new IOException("stalled write failed");
                 }
                 if (update.Phase == FailPhase) throw new IOException("write failed");
@@ -66,10 +71,16 @@ public sealed class JournalStallTests
         }
     }
 
-    private static async Task<QueueResult?> DriveAsync(Task<QueueResult> queue, FakeTimeProvider time, TimeSpan budget)
+    /// <summary>
+    /// Advances virtual time one second per step, but only once every write that is not deliberately stalled has
+    /// finished: healthy writes never race the virtual clock, so only the injected stalls can time out.
+    /// </summary>
+    private static async Task<QueueResult?> DriveAsync(Task<QueueResult> queue, FakeTimeProvider time, TimeSpan budget,
+        QueueScheduler scheduler, Func<int>? deliberatelyStalled = null)
     {
         for (var elapsed = TimeSpan.Zero; elapsed < budget && !queue.IsCompleted; elapsed += TimeSpan.FromSeconds(1))
         {
+            await VirtualClock.WaitForHealthyWritesAsync(scheduler, deliberatelyStalled);
             await Task.Delay(2);
             time.Advance(TimeSpan.FromSeconds(1));
         }
@@ -121,7 +132,7 @@ public sealed class JournalStallTests
             await journal.StallEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             // Application shutdown (caller token) or the stop button, while SQLite is stalled.
             if (viaCallerToken) await Task.Run(caller.Cancel); else scheduler.EmergencyStop();
-            var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(3));
+            var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(3), scheduler, () => journal.Stalled);
 
             Assert.True(result is not null, "queue stayed occupied behind a stalled journal write");
             Assert.False(scheduler.IsRunning);
@@ -157,7 +168,7 @@ public sealed class JournalStallTests
         var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter, new RunLimits(TimeSpan.FromSeconds(30), TimeSpan.FromHours(1)))]);
         try
         {
-            var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(5)); // task timeout → graceful → emergency
+            var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(5), scheduler, () => journal.Stalled); // task timeout → graceful → emergency
             Assert.True(result is not null, "queue stayed occupied behind a stalled Stopping write");
             var run = adapter.LastRun!;
             Assert.Contains(run.StopRequests, r => r.Mode == StopMode.Graceful);
@@ -178,7 +189,7 @@ public sealed class JournalStallTests
         var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]);
         try
         {
-            var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(2));
+            var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(2), scheduler, () => journal.Stalled);
             Assert.True(result is not null);
             Assert.True(adapter.LastRun!.Disposed);
             Assert.True(result!.JournalFaulted);
@@ -198,7 +209,7 @@ public sealed class JournalStallTests
         var journal = new StallingJournal(RunPhase.Finished);
         var scheduler = new QueueScheduler(journal, new NoProcessSupervisor(), Options, time);
         var adapter = Completes(GameId.Genshin);
-        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromMinutes(2));
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromMinutes(2), scheduler, () => journal.Stalled);
         Assert.True(result is not null);
         var next = Completes(GameId.StarRail);
         Assert.Equal(QueueStatus.Blocked, (await scheduler.RunAsync([new QueueItem(GameId.StarRail, next)])).Status);
@@ -218,7 +229,7 @@ public sealed class JournalStallTests
         var journal = new StallingJournal(RunPhase.Running) { FailStalledWritesOnRelease = true };
         var scheduler = new QueueScheduler(journal, new NoProcessSupervisor(), Options, time);
         var adapter = Completes(GameId.Genshin);
-        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromMinutes(2));
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromMinutes(2), scheduler, () => journal.Stalled);
         Assert.True(result is not null);
         journal.Release.TrySetResult();
         await WaitUntilAsync(() => scheduler.SessionHazards.All(h => h.PersistencePending == 0), "late failure observed");
@@ -354,7 +365,7 @@ public sealed class JournalStallTests
             Assert.True(refused.NothingStarted);
             Assert.Equal(0, supervisor.Calls);
             // 5. The scheduler stays responsive: the queue ends while the callback is still blocked.
-            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60));
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60), scheduler);
             Assert.True(result is not null, "queue did not end while a cancellation callback blocked");
             Assert.False(trigger.IsCompleted);
         }

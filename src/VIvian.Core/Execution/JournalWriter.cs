@@ -16,6 +16,10 @@ internal sealed class JournalWriter(IRunJournal journal)
     private readonly Lock _gate = new();
     private Task _tail = Task.CompletedTask;
     private int _overdue;
+    private int _inFlight;
+
+    /// <summary>Writes queued or running (diagnostics and deterministic tests).</summary>
+    public int InFlight => Volatile.Read(ref _inFlight);
 
     /// <summary>True while a write whose bounded wait gave up has not completed yet.</summary>
     public bool IsStalled => Volatile.Read(ref _overdue) > 0;
@@ -25,11 +29,12 @@ internal sealed class JournalWriter(IRunJournal journal)
     {
         lock (_gate)
         {
+            Interlocked.Increment(ref _inFlight);
             // Not ExecuteSynchronously: the journal (which may block) never runs inline or under this lock.
             var write = _tail.ContinueWith(_ => journal.PublishAsync(update, CancellationToken.None),
                 CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.Default).Unwrap();
             // The chain itself never faults, so one failed write does not stop later ones.
-            _tail = write.ContinueWith(static _ => { }, CancellationToken.None,
+            _tail = write.ContinueWith(_ => Interlocked.Decrement(ref _inFlight), CancellationToken.None,
                 TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             return write;
         }

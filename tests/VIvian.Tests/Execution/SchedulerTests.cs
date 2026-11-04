@@ -20,7 +20,11 @@ public sealed class SchedulerTests
         GracefulStopTimeout: TimeSpan.FromMilliseconds(300),
         EmergencyStopTimeout: TimeSpan.FromMilliseconds(300),
         ReconcileTimeout: TimeSpan.FromSeconds(1),
-        DefaultLimits: new RunLimits(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)));
+        DefaultLimits: new RunLimits(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10)))
+    {
+        // Some tests advance a virtual clock in large steps; a healthy in-memory write must never "time out" there.
+        JournalTimeout = TimeSpan.FromDays(1),
+    };
 
     private readonly InMemoryJournal _journal = new();
 

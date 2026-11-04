@@ -7,6 +7,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Security.Principal;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 var arguments = ParseArguments(args);
@@ -99,6 +100,12 @@ switch (scenario)
         Emit("evidence", "completion");
         return 0;
 
+    case "probe-identity":
+        Emit("info", "user-sid=" + WindowsIdentity.GetCurrent().User?.Value);
+        Emit("info", "in-job=" + JobProbe.IsProcessInJob(IntPtr.Zero, IntPtr.Zero, out var insideJob));
+        Emit("info", "job-member=" + insideJob);
+        return 0;
+
     case "sleep-forever":
         Thread.Sleep(Timeout.Infinite);
         return 0;
@@ -120,4 +127,12 @@ internal static class HandleProbe
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetHandleInformation(IntPtr handle, out uint flags);
+}
+
+internal static class JobProbe
+{
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsProcessInJob(IntPtr processHandle, IntPtr jobHandle,
+        [MarshalAs(UnmanagedType.Bool)] out bool result);
 }

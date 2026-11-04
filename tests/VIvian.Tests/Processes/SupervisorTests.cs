@@ -1,5 +1,7 @@
 using System.Runtime.Versioning;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Diagnostics;
 using Microsoft.Win32.SafeHandles;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Processes;
@@ -65,6 +67,42 @@ public sealed class SupervisorTests : IAsyncLifetime
         Assert.Contains(lines, l => l.EndsWith($"|info|pid={group.RootProcessId}", StringComparison.Ordinal));
         Assert.Contains("任务失败？不，已恢复。成功！", lines);
         Assert.InRange(DateTimeOffset.Now - group.RootStartTime, TimeSpan.Zero, TimeSpan.FromMinutes(2));
+    }
+
+    [WindowsFact]
+    public async Task HarmlessChildKeepsCallerIdentityAndBelongsToJob()
+    {
+        var caller = WindowsIdentity.GetCurrent().User?.Value;
+        Assert.NotNull(caller);
+        await using var group = await StartAsync("probe-identity");
+        var lines = await ReadAllAsync(group);
+        Assert.Contains(lines, l => l.EndsWith("|info|user-sid=" + caller, StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.EndsWith("|info|in-job=True", StringComparison.Ordinal));
+        Assert.Contains(lines, l => l.EndsWith("|info|job-member=True", StringComparison.Ordinal));
+        Assert.Equal(0, await group.WaitForRootExitAsync(default));
+    }
+
+    [WindowsFact]
+    public async Task SameNamedExternalProcessSurvivesJobTermination()
+    {
+        using var external = Process.Start(new ProcessStartInfo(FakeEngine)
+        {
+            ArgumentList = { "--scenario", "sleep-forever" },
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        try
+        {
+            await using var group = await StartAsync("sleep-forever");
+            Assert.Equal(CleanupState.Confirmed, await group.TerminateAllAsync(TimeSpan.FromSeconds(10), default));
+            Assert.False(HasExitedWithin(external.Id, TimeSpan.FromMilliseconds(300)),
+                "terminating our Job must not touch an independently launched process with the same name");
+        }
+        finally
+        {
+            if (!external.HasExited) external.Kill(); // exact test-owned process object, never lookup by name
+            await external.WaitForExitAsync();
+        }
     }
 
     [WindowsFact]

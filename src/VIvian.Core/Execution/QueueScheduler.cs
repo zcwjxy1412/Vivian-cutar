@@ -225,19 +225,18 @@ public sealed class QueueScheduler(
             var context = new RunContext(_runId, queueId, item.Game, Time.GetUtcNow());
             await PublishAsync().ConfigureAwait(false);
 
+            if (emergency.IsCompleted) return await CancelBeforeStartAsync().ConfigureAwait(false);
+            _sm.MoveTo(RunPhase.Preflight);
+            await PublishAsync().ConfigureAwait(false);
+
             // No real adapter has passed process-ownership admission yet. A third-party adapter can
             // ignore our supervisor and launch on its own; the scoped gate cannot contain such code.
-            // Replace this gate only when a specific adapter and release are audited and admitted.
             if (!Adapter.IsSimulation)
             {
                 _sm.SetBlockReason(ReasonCodes.RealAdapterUnverified);
                 _sm.MoveTo(RunPhase.Blocked);
                 return (await PublishAsync().ConfigureAwait(false), true);
             }
-
-            if (emergency.IsCompleted) return await CancelBeforeStartAsync().ConfigureAwait(false);
-            _sm.MoveTo(RunPhase.Preflight);
-            await PublishAsync().ConfigureAwait(false);
 
             var pre = await BoundAsync("PreflightAsync", t => Adapter.PreflightAsync(context, t),
                 Options.PreflightTimeout, emergencyShortens: true).ConfigureAwait(false);

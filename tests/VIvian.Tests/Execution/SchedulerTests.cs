@@ -371,6 +371,33 @@ public sealed class SchedulerTests
     }
 
     [Fact]
+    public async Task EmergencyStopIsDeliveredWhileAnAdapterCancellationCallbackBlocks()
+    {
+        var adapter = Adapter(GameId.Genshin); // no script: the run only ends when stopped
+        var scheduler = NewScheduler();
+        // Long limits: only the emergency stop may produce a stop request in this test.
+        var queue = scheduler.RunAsync([Item(adapter, new RunLimits(TimeSpan.FromMinutes(30), TimeSpan.FromMinutes(30)))]);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (adapter.LastRun is null && DateTime.UtcNow < deadline) await Task.Delay(5);
+        var run = Assert.IsType<ScriptedRun>(adapter.LastRun);
+
+        using var block = new ManualResetEventSlim();
+        using var registration = adapter.StartToken.Register(() => block.Wait(TimeSpan.FromSeconds(30)));
+        var trigger = Task.Run(scheduler.EmergencyStop); // blocks inside the adapter's callback
+        try
+        {
+            deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+            while (run.StopRequests.IsEmpty && DateTime.UtcNow < deadline) await Task.Delay(5);
+            Assert.False(trigger.IsCompleted, "the callback should still be blocking the trigger");
+            Assert.True(run.StopRequests.TryPeek(out var first), "stop request not delivered while a cancellation callback blocked");
+            Assert.Equal(StopMode.Emergency, first.Mode);
+        }
+        finally { block.Set(); }
+        await trigger.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(QueueStatus.Cancelled, (await queue.WaitAsync(TimeSpan.FromSeconds(10))).Status);
+    }
+
+    [Fact]
     public async Task BlockingPreflightStopsQueueWithoutStarting()
     {
         var first = Adapter(GameId.Genshin);

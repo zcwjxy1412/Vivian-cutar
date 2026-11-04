@@ -75,6 +75,9 @@ public sealed class QueueScheduler(
 
         public void Trigger()
         {
+            // The scheduler's own stop path (escalation, grace timers) is released first, so an adapter
+            // cancellation callback that blocks below can never hide or delay the emergency stop.
+            _signal.TrySetResult();
             if (Volatile.Read(ref _disposed) == 0)
             {
                 // Not CancelAsync: that would also defer cancellation of linked tokens to the thread pool.
@@ -82,7 +85,6 @@ public sealed class QueueScheduler(
                 catch (ObjectDisposedException) { /* the queue already finished */ }
                 catch (AggregateException) { /* an adapter callback failed; the token is cancelled regardless */ }
             }
-            _signal.TrySetResult();
         }
 
         public void Dispose()

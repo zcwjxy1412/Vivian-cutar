@@ -272,7 +272,7 @@ public sealed class QueueScheduler(
 
             // A run that arrives after the limit is still released (e.g. its job handle closed), but that is never
             // taken as proof that its processes have ended.
-            _processScope = new RunProcessScope(owner._supervisor, _runId);
+            _processScope = new RunProcessScope(owner._supervisor, _runId, Time);
             using var stopRegistration = stopToken.Register(() => _processScope.RevokeLaunches());
             var started = await BoundAsync("StartAsync", t => Adapter.StartAsync(context, _processScope, t),
                 Options.StartTimeout, emergencyShortens: true,

@@ -1,65 +1,62 @@
 using System.Collections.ObjectModel;
+using System.IO;
+using System.Reflection;
 using Serilog;
 using VIvian.Core;
+using VIvian.Core.Engines;
+using VIvian.Core.Execution;
+using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Engines;
 namespace VIvian.App;
 
-public sealed class EngineCard(GameId id, string name, string engine, string glyph) : ObservableObject
+/// <summary>Where VIvian keeps its own files. Nothing outside these folders is written by the application.</summary>
+public sealed record AppPaths(string DataDirectory)
 {
-    public GameId Id { get; } = id;
-    public string Name { get; } = name;
-    public string Engine { get; } = engine;
-    public string Glyph { get; } = glyph;
-    public long Revision { get; set; }
-    private string _installPath = "";
-    public string InstallPath { get => _installPath; set => Set(ref _installPath, value); }
-    private string _compatibility = "尚未检查";
-    /// <summary>Short state shown on the card: 已验证 / 未验证 / 不支持 / 未安装 / 无法访问.</summary>
-    public string Compatibility { get => _compatibility; set => Set(ref _compatibility, value); }
-    private string _evidence = "保存安装目录后，VIvian 会只读检查引擎文件。";
-    public string Evidence { get => _evidence; set => Set(ref _evidence, value); }
-    private string _stateBrush = StateColors.Neutral;
-    /// <summary>Text colour of the state (hex), chosen together with the state text.</summary>
-    public string StateBrush { get => _stateBrush; set => Set(ref _stateBrush, value); }
-
-    /// <summary>Real task execution is not available for any engine in this build.</summary>
-    public string Execution => Id == GameId.StarRail
-        ? "真实任务执行：未开放（只做只读检查和官方发行包核对）"
-        : "真实任务执行：未开放（该引擎尚未接入）";
-
-    public void Show(string state, string brush, string detail)
-    {
-        Compatibility = state; StateBrush = brush; Evidence = detail;
-    }
+    public string LogDirectory => Path.Combine(DataDirectory, "logs");
+    public string ExportDirectory => Path.Combine(DataDirectory, "exports");
+    public static string Version { get; } =
+        typeof(AppPaths).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "dev";
 }
 
-public static class StateColors
-{
-    public const string Verified = "#7FD49B";
-    public const string Warning = "#E5BF76";
-    public const string Error = "#F09A8E";
-    public const string Neutral = "#A9B6CB";
-}
 public sealed class MainViewModel : ObservableObject
 {
     private readonly ISettingsStore _settings;
     private readonly IDiagnosticStore _history;
+    private readonly ITaskPlanStore _plans;
+    private readonly IPreferenceStore _preferences;
+    private readonly IRunHistory _runs;
+    private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
-    private string _status = "就绪。真实引擎尚未接入，可在“模拟队列”中体验调度流程。";
+    private string _status = "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
     public string Status { get => _status; private set => Set(ref _status, value); }
     private bool _busy;
     public bool IsIdle => !_busy;
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
+    public string VersionText => $"VIvian {AppPaths.Version} · 预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）";
+    public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
     public ObservableCollection<EngineCard> Engines { get; } =
     [new(GameId.Genshin, "原神", "BetterGI", "01"), new(GameId.StarRail, "崩坏：星穹铁道", "March7thAssistant", "02"), new(GameId.ZenlessZoneZero, "绝区零", "OneDragon", "03")];
     public ObservableCollection<DiagnosticRecord> History { get; } = [];
+    public ObservableCollection<TaskPlanViewModel> TaskPlans { get; } = [];
+    private TaskPlanViewModel? _selectedPlan;
+    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set => Set(ref _selectedPlan, value); }
+    private EngineCard? _selectedEngine;
+    public EngineCard? SelectedEngine { get => _selectedEngine; set => Set(ref _selectedEngine, value); }
+
     public AsyncCommand SaveCommand { get; }
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand CheckCommand { get; }
     public AsyncCommand InspectMarch7thCommand { get; }
     public AsyncCommand CheckEnginesCommand { get; }
     public AsyncCommand VerifyReleaseCommand { get; }
+    public AsyncCommand SaveTasksCommand { get; }
+    public AsyncCommand ReloadTasksCommand { get; }
+    public RelayCommand MoveUpCommand { get; }
+    public RelayCommand MoveDownCommand { get; }
+    public AsyncCommand SavePreferencesCommand { get; }
+    public AsyncCommand ExportDiagnosticsCommand { get; }
+
     private string _releaseArchivePath = "";
     /// <summary>A March7thAssistant release archive the user downloaded from the official GitHub release.</summary>
     public string ReleaseArchivePath { get => _releaseArchivePath; set => Set(ref _releaseArchivePath, value); }
@@ -67,18 +64,40 @@ public sealed class MainViewModel : ObservableObject
     public string ReleaseStatus { get => _releaseStatus; private set => Set(ref _releaseStatus, value); }
     // Session only: a verified official archive's m7a.exe hash. Not stored; verify again after restarting.
     private March7thReleaseEvidence? _march7thEvidence;
+
+    private AppPreferences _prefs = AppPreferences.Default;
+    private int _logRetentionDays = AppPreferences.Default.LogRetentionDays;
+    public int LogRetentionDays { get => _logRetentionDays; set => Set(ref _logRetentionDays, value); }
+    private bool _includeRunHistory = true;
+    public bool IncludeRunHistory { get => _includeRunHistory; set => Set(ref _includeRunHistory, value); }
+    private string _exportStatus = "诊断包只保存在本机，已脱敏；是否发送给他人由你决定。";
+    public string ExportStatus { get => _exportStatus; private set => Set(ref _exportStatus, value); }
+    public string? LastExportPath { get; private set; }
+
     public QueueViewModel Queue { get; }
-    public MainViewModel(ISettingsStore settings, IDiagnosticStore history, QueueViewModel queue)
+
+    public MainViewModel(ISettingsStore settings, IDiagnosticStore history, ITaskPlanStore plans, IPreferenceStore preferences,
+        IRunHistory runs, AppPaths paths, QueueViewModel queue)
     {
-        _settings = settings; _history = history; Queue = queue;
+        _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
-        ReloadCommand = new(() => RunAsync(async () => { await InitializeAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
+        ReloadCommand = new(() => RunAsync(async () => { await InitializeCoreAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
-        InspectMarch7thCommand = new(() => RunAsync(InspectMarch7thAsync), HandleError);
+        InspectMarch7thCommand = new(() => RunAsync(() => InspectAsync(Engines.Single(e => e.Id == GameId.StarRail))), HandleError);
         CheckEnginesCommand = new(() => RunAsync(CheckEnginesCoreAsync), HandleError);
         VerifyReleaseCommand = new(() => RunAsync(VerifyReleaseAsync), HandleError);
+        SaveTasksCommand = new(() => RunAsync(SaveTasksAsync), HandleError);
+        ReloadTasksCommand = new(() => RunAsync(LoadTasksAsync), HandleError);
+        MoveUpCommand = new(() => SelectedPlan?.Move(-1));
+        MoveDownCommand = new(() => SelectedPlan?.Move(1));
+        SavePreferencesCommand = new(() => RunAsync(SavePreferencesAsync), HandleError);
+        ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
+        SelectedEngine = Engines[0];
     }
-    public async Task InitializeAsync()
+
+    public Task InitializeAsync() => InitializeCoreAsync();
+
+    private async Task InitializeCoreAsync()
     {
         var settings = await Task.Run(() => _settings.LoadSettingsAsync());
         foreach (var value in settings)
@@ -86,8 +105,11 @@ public sealed class MainViewModel : ObservableObject
             var card = Engines.Single(x => x.Id == value.Game);
             card.InstallPath = value.InstallPath; card.Revision = value.Revision;
         }
+        await LoadPreferencesAsync();
+        await LoadTasksAsync();
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
+        await RefreshLastRunsAsync();
         await CheckEnginesCoreAsync();
     }
 
@@ -96,31 +118,24 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task CheckEnginesCoreAsync()
     {
-        foreach (var card in Engines)
-        {
-            if (card.Id == GameId.StarRail) await InspectMarch7thAsync();
-            else await DiscoverAsync(card);
-        }
+        foreach (var card in Engines) await InspectAsync(card);
         Status = "已只读检查三个引擎目录；没有运行任何程序，也没有修改任何文件。";
     }
 
-    private static async Task DiscoverAsync(EngineCard card)
+    private async Task InspectAsync(EngineCard card)
     {
-        var path = card.InstallPath.Trim();
-        if (path.Length == 0) { card.Show("未设置路径", StateColors.Neutral, "在“引擎设置”中填写安装目录。"); return; }
-        var found = await Task.Run(() => EngineFileDiscovery.InspectAsync(card.Id, path));
-        switch (found.State)
-        {
-            case DiscoveryState.Found:
-                card.Show("不支持（尚未接入）", StateColors.Warning, found.Detail + " VIvian 还没有这个引擎的适配器，只显示检查结果。");
-                break;
-            case DiscoveryState.NotInstalled:
-                card.Show("未安装", StateColors.Neutral, found.Detail);
-                break;
-            default:
-                card.Show("无法访问", StateColors.Error, found.Detail);
-                break;
-        }
+        var path = card.InstallPath;
+        var evidence = card.Id == GameId.StarRail ? _march7thEvidence : null;
+        // Off the UI thread: a network path or hashing a large file must not freeze the window.
+        var report = await Task.Run(() => EngineReadinessInspector.InspectAsync(card.Id, path, evidence, TimeProvider.System));
+        card.Show(report);
+        Log.Information("Engine readiness {Game}: {Compatibility} ({Error})", card.Id, report.Compatibility, report.PrimaryError);
+    }
+
+    private async Task RefreshLastRunsAsync()
+    {
+        var recent = await Task.Run(() => _runs.ReadRecentRunsAsync(50));
+        foreach (var card in Engines) card.ShowLastRun(recent.FirstOrDefault(r => r.Game == card.Id));
     }
 
     private async Task VerifyReleaseAsync()
@@ -138,12 +153,24 @@ public sealed class MainViewModel : ObservableObject
             _ => "无法核对：" + result.Detail,
         };
         Log.Information("Release archive check: {Check}", result.Check);
-        await InspectMarch7thAsync();
+        if (path.Length > 0 && path != _prefs.ReleaseArchivePath && result.Check != ReleaseCheck.Unavailable)
+        {
+            // Remembering the archive location is a convenience; failing to store it never affects the check.
+            try
+            {
+                await Task.Run(() => _preferences.SavePreferencesAsync(_prefs with { ReleaseArchivePath = path }));
+                await LoadPreferencesAsync();
+            }
+            catch (Exception ex) when (ex is SettingsConflictException or ArgumentException) { }
+        }
+        await InspectAsync(Engines.Single(e => e.Id == GameId.StarRail));
     }
+
     public void ReportReconciled(int count)
     {
-        if (count > 0) Status = $"上次 VIvian 意外退出，{count} 条运行已标记为结果未知，请在“模拟队列”中查看并确认。";
+        if (count > 0) Status = $"上次 VIvian 意外退出，{count} 条运行已标记为结果未知，请在“调度与监控”中查看并确认。";
     }
+
     private async Task RunAsync(Func<Task> action)
     {
         if (!await _operation.WaitAsync(0)) return;
@@ -151,39 +178,80 @@ public sealed class MainViewModel : ObservableObject
         try { await action(); }
         finally { Busy(false); _operation.Release(); }
     }
+
     private async Task SaveAsync()
     {
-        var snapshot = Engines.Select(x => new EngineSetting(x.Id, x.InstallPath.Trim(), x.Revision)).ToList();
+        var snapshot = Engines.Select(x => new EngineSetting(x.Id, x.InstallPath.Trim().Trim('"'), x.Revision)).ToList();
         await Task.Run(() => _settings.SaveSettingsAsync(snapshot));
-        await InitializeAsync();
-        Status = "路径已保存到 VIvian；未校验引擎兼容性，也未改动上游配置。";
+        var reloaded = await Task.Run(() => _settings.LoadSettingsAsync());
+        foreach (var value in reloaded)
+        {
+            var card = Engines.Single(x => x.Id == value.Game);
+            card.InstallPath = value.InstallPath; card.Revision = value.Revision;
+        }
+        await CheckEnginesCoreAsync();
+        Status = "路径已保存并完成只读检查；未运行引擎，也未改动上游配置。";
         Log.Information("Local settings saved for {Count} games", snapshot.Count);
     }
+
+    private async Task LoadTasksAsync()
+    {
+        var plans = await Task.Run(() => _plans.LoadTaskPlansAsync());
+        var selected = SelectedPlan?.Game;
+        TaskPlans.Clear();
+        foreach (var plan in plans) TaskPlans.Add(new TaskPlanViewModel(plan));
+        SelectedPlan = TaskPlans.FirstOrDefault(p => p.Game == selected) ?? TaskPlans.FirstOrDefault();
+    }
+
+    /// <summary>Saves the task plans (used by the smoke test; the button uses the same path).</summary>
+    public Task SaveTasksCommandAsync() => RunAsync(SaveTasksAsync);
+
+    private async Task SaveTasksAsync()
+    {
+        foreach (var plan in TaskPlans.Where(p => p.IsDirty).ToList())
+            await Task.Run(() => _plans.SaveTaskPlanAsync(plan.ToPlan()));
+        await LoadTasksAsync();
+        Status = "任务选择已保存。所选任务只是计划：真实任务在此开发版中不会执行。";
+        Log.Information("Task plans saved");
+    }
+
+    private async Task LoadPreferencesAsync()
+    {
+        _prefs = await Task.Run(() => _preferences.LoadPreferencesAsync());
+        LogRetentionDays = _prefs.LogRetentionDays;
+        IncludeRunHistory = _prefs.DiagnosticsIncludeRunHistory;
+        if (ReleaseArchivePath.Length == 0) ReleaseArchivePath = _prefs.ReleaseArchivePath;
+    }
+
+    private async Task SavePreferencesAsync()
+    {
+        var next = _prefs with { LogRetentionDays = LogRetentionDays, DiagnosticsIncludeRunHistory = IncludeRunHistory };
+        await Task.Run(() => _preferences.SavePreferencesAsync(next));
+        await LoadPreferencesAsync();
+        var removed = await Task.Run(() => LogMaintenance.Prune(_paths.LogDirectory, _prefs.LogRetentionDays, 200L * 1024 * 1024, DateTime.UtcNow));
+        Status = $"设置已保存。已按新的保留期清理 {removed.Count} 个旧日志文件。";
+    }
+
+    public async Task ExportDiagnosticsAsync()
+    {
+        ExportStatus = "正在生成诊断包…";
+        var reports = Engines.Select(e => e.Report).OfType<EngineReadinessReport>().ToList();
+        var runs = IncludeRunHistory ? await Task.Run(() => _runs.ReadRecentRunsAsync(200)) : [];
+        var checks = await Task.Run(() => _history.ReadRecentAsync(50));
+        var input = new DiagnosticBundleInput(AppPaths.Version, _paths.DataDirectory, reports, runs, checks, _paths.LogDirectory,
+            IncludeRunHistory, DateTimeOffset.UtcNow);
+        var result = await Task.Run(() => DiagnosticBundle.CreateAsync(input, _paths.ExportDirectory, Redactor.ForCurrentUser()));
+        LastExportPath = result.Path;
+        ExportStatus = result.Success ? result.Detail + " 位置：" + result.Path : result.Detail;
+        Log.Information("Diagnostic export: {Success}", result.Success);
+    }
+
     private async Task RefreshHistoryAsync()
     {
         var items = await Task.Run(() => _history.ReadRecentAsync(50));
         History.Clear(); foreach (var item in items) History.Add(item);
     }
-    private async Task InspectMarch7thAsync()
-    {
-        var card = Engines.Single(x => x.Id == GameId.StarRail);
-        var path = card.InstallPath.Trim();
-        if (path.Length == 0) { card.Show("未设置路径", StateColors.Neutral, "在“引擎设置”中填写安装目录。"); return; }
-        var evidence = _march7thEvidence;
-        // Off the UI thread: existence checks on a network path or hashing a large file must not freeze the window.
-        var result = await Task.Run(() => March7thReadOnlyInspector.InspectAsync(path, evidence));
-        var (state, brush) = result.Compatibility switch
-        {
-            March7thCompatibility.Verified => ("已验证（官方发行包）", StateColors.Verified),
-            March7thCompatibility.Unverified => ("未验证", StateColors.Warning),
-            March7thCompatibility.UnsupportedVersion => ("不支持（版本）", StateColors.Warning),
-            March7thCompatibility.MissingCli => ("不支持（缺少 m7a.exe）", StateColors.Warning),
-            March7thCompatibility.NotInstalled => ("未安装", StateColors.Neutral),
-            _ => ("无法访问", StateColors.Error),
-        };
-        card.Show(state, brush, result.Detail);
-        Status = "星铁只读检查完成；未运行上游程序或游戏。";
-    }
+
     public async Task CheckFoundationAsync()
     {
         LastCheckPassed = false;
@@ -201,9 +269,43 @@ public sealed class MainViewModel : ObservableObject
             Log.Information("Foundation diagnostic passed: {DiagnosticId}", record.Id);
         });
     }
+
+    /// <summary>
+    /// Path of one of VIvian's own folders (created if missing). VIvian does not launch Explorer: every process start is
+    /// confined to the Job Object supervisor, so the user opens the copied path themselves.
+    /// </summary>
+    public string? FolderPath(string which)
+    {
+        var path = which == "exports" ? _paths.ExportDirectory : _paths.LogDirectory;
+        try { Directory.CreateDirectory(path); return path; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Status = "无法访问文件夹：" + path;
+            return null;
+        }
+    }
+
+    public void ReportCopied(string path) => Status = "已复制路径：" + path + "（可粘贴到资源管理器地址栏）";
+
     private void HandleError(Exception ex)
     {
-        Status = ex is SettingsConflictException ? ex.Message : ex is ArgumentException ? "配置无效：路径过长或包含控制字符。" : "操作失败。请检查数据目录权限与磁盘空间，或查看日志。";
+        Status = UserFacingError.Describe(ex);
         Log.Warning("Operation failed: {ErrorType}", ex.GetType().Name);
     }
+}
+
+/// <summary>Turns exceptions into actionable Chinese messages. Never shows stack traces or file contents.</summary>
+public static class UserFacingError
+{
+    public static string Describe(Exception ex) => ex switch
+    {
+        SettingsConflictException => ex.Message,
+        ArgumentException a when a.Message.Length is > 0 and < 120 && !a.Message.Contains("Parameter", StringComparison.Ordinal)
+            => "配置无效：" + a.Message,
+        ArgumentException => "配置无效：路径过长或包含控制字符。",
+        Microsoft.Data.Sqlite.SqliteException => "本地数据库暂时不可用（可能被占用或磁盘已满）。数据没有被修改；请稍后重试，必要时导出诊断包。",
+        UnauthorizedAccessException => "没有访问权限。VIvian 不需要管理员权限；请确认数据目录可写。",
+        IOException => "文件读写失败。请检查磁盘空间与数据目录权限后重试。",
+        _ => "操作失败。请查看日志或导出诊断包。",
+    };
 }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using VIvian.Core;
+using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Simulation;
@@ -57,6 +58,9 @@ public partial class App : Application
                 services.AddSingleton<IDiagnosticStore>(database);
                 services.AddSingleton<IRunJournal>(database);
                 services.AddSingleton<IRunHistory>(database);
+                services.AddSingleton<ITaskPlanStore>(database);
+                services.AddSingleton<IPreferenceStore>(database);
+                services.AddSingleton(new AppPaths(root));
                 // M2 simulation mode: the only supervisor available refuses to start processes.
                 services.AddSingleton<IProcessSupervisor, RefusingProcessSupervisor>();
                 services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(), sp.GetRequiredService<IProcessSupervisor>()));
@@ -66,6 +70,11 @@ public partial class App : Application
             }).Build();
             await _host.StartAsync();
             await Task.Run(() => database.InitializeAsync());
+            // Log retention follows the user's preference; only VIvian's own log files are considered.
+            var prefs = await Task.Run(() => database.LoadPreferencesAsync());
+            var pruned = await Task.Run(() => VIvian.Infrastructure.Diagnostics.LogMaintenance.Prune(
+                Path.Combine(root, "logs"), prefs.LogRetentionDays, 200L * 1024 * 1024, DateTime.UtcNow));
+            if (pruned.Count > 0) Log.Information("Removed {Count} old log files", pruned.Count);
             // Safe only while holding the instance lock: no other VIvian can have a run in progress.
             var reconciled = await Task.Run(() => database.ReconcileInterruptedRunsAsync(DateTimeOffset.UtcNow));
             if (reconciled.Count > 0)
@@ -87,9 +96,10 @@ public partial class App : Application
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
                         var engineReport = await SmokeEngineDiscoveryAsync(vm, root);
+                        var tasksReport = await SmokeTasksAndDiagnosticsAsync(vm, database);
                         var contrastReport = SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
-                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + engineReport + " " + contrastReport);
+                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + engineReport + " " + tasksReport + " " + contrastReport);
                         Shutdown(0);
                     }
                     catch (Exception ex)
@@ -101,7 +111,7 @@ public partial class App : Application
                 };
             }
             window.Show();
-            Log.Information("M1 application started. Real engines are not enabled.");
+            Log.Information("VIvian {Version} started. Real engines are not enabled.", AppPaths.Version);
         }
         catch (Exception ex)
         {
@@ -185,11 +195,34 @@ public partial class App : Application
         vm.Engines.Single(e => e.Id == GameId.ZenlessZoneZero).InstallPath = "";
         await vm.CheckEnginesAsync();
         var states = vm.Engines.ToDictionary(e => e.Id, e => e.Compatibility);
-        if (states[GameId.Genshin] != "不支持（尚未接入）" || states[GameId.StarRail] != "未验证" || states[GameId.ZenlessZoneZero] != "未设置路径")
+        if (states[GameId.Genshin] != "版本未知" || states[GameId.StarRail] != "待桌面验证" || states[GameId.ZenlessZoneZero] != "未设置路径")
             throw new InvalidOperationException("Engine discovery states unexpected: " + string.Join(", ", states.Select(kv => kv.Key + "=" + kv.Value)));
         if (vm.Engines.Any(e => !e.Execution.Contains("未开放", StringComparison.Ordinal)))
             throw new InvalidOperationException("An engine card does not state that real execution is unavailable");
-        return "engine discovery: 原神=不支持, 星铁=未验证, 绝区零=未设置 (read-only fixtures).";
+        if (vm.Engines.Any(e => e.Report is null || e.Report.RealExecutionAllowed))
+            throw new InvalidOperationException("An engine report is missing or allows real execution");
+        return "engine readiness: 原神=版本未知, 星铁=待桌面验证, 绝区零=未设置 (read-only fixtures).";
+    }
+
+    /// <summary>Smoke check: task plans persist and stay non-executable; a redacted diagnostic bundle is exported.</summary>
+    private static async Task<string> SmokeTasksAndDiagnosticsAsync(MainViewModel vm, LocalDatabase database)
+    {
+        var plan = vm.TaskPlans.Single(p => p.Game == GameId.StarRail);
+        vm.SelectedPlan = plan;
+        plan.Rows[1].Enabled = true;
+        plan.Selected = plan.Rows[1];
+        plan.Move(-1);
+        plan.Selected = null; // no list selection highlight in the screenshots
+        if (!plan.Validation.StartsWith("不能执行", StringComparison.Ordinal))
+            throw new InvalidOperationException("A selected candidate task was shown as executable");
+        await vm.SaveTasksCommandAsync();
+        var stored = (await database.LoadTaskPlansAsync()).Single(p => p.Game == GameId.StarRail);
+        if (stored.Revision != 1 || !stored.Entries[0].Enabled || stored.Entries[0].TaskId != EngineCatalog.March7th.Tasks[1].Id)
+            throw new InvalidOperationException("Task plan was not persisted in order");
+        await vm.ExportDiagnosticsAsync();
+        if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
+            throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
+        return "task plan persisted (non-executable); diagnostic bundle exported.";
     }
 
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>

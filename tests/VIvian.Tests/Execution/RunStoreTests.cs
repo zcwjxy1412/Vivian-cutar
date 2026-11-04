@@ -59,7 +59,7 @@ public sealed class RunStoreTests : IDisposable
 
         var db = await CreateAsync();
 
-        Assert.Equal(2, await ScalarAsync("PRAGMA user_version;"));
+        Assert.Equal(LocalDatabase.CurrentSchemaVersion, await ScalarAsync("PRAGMA user_version;"));
         var settings = await db.LoadSettingsAsync();
         Assert.Equal(@"E:\游戏 目录\原神", settings[0].InstallPath);
         Assert.Equal(3, settings[0].Revision);
@@ -110,11 +110,11 @@ public sealed class RunStoreTests : IDisposable
         {
             await c.OpenAsync();
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "PRAGMA user_version=3;";
+            cmd.CommandText = $"PRAGMA user_version={LocalDatabase.CurrentSchemaVersion + 1};";
             await cmd.ExecuteNonQueryAsync();
         }
         await Assert.ThrowsAsync<InvalidOperationException>(() => new LocalDatabase(DbPath).InitializeAsync());
-        Assert.Equal(3, await ScalarAsync("PRAGMA user_version;"));
+        Assert.Equal(LocalDatabase.CurrentSchemaVersion + 1, await ScalarAsync("PRAGMA user_version;"));
     }
 
     [Fact]

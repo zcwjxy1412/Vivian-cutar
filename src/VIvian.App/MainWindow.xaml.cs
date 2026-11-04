@@ -37,6 +37,23 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true && DataContext is MainViewModel vm) vm.ReleaseArchivePath = dialog.FileName;
     }
 
+    private void BrowseEngineFolder(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.Tag is not EngineCard card) return;
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = $"选择 {card.Engine} 的安装目录", Multiselect = false };
+        if (dialog.ShowDialog(this) == true) card.InstallPath = dialog.FolderName;
+    }
+
+    private void CopyExportsPath(object sender, RoutedEventArgs e) => CopyFolder("exports");
+    private void CopyLogsPath(object sender, RoutedEventArgs e) => CopyFolder("logs");
+
+    private void CopyFolder(string which)
+    {
+        if (DataContext is not MainViewModel vm || vm.FolderPath(which) is not { } path) return;
+        try { Clipboard.SetText(path); vm.ReportCopied(path); }
+        catch (System.Runtime.InteropServices.ExternalException) { /* clipboard busy: the path is still shown below */ }
+    }
+
     private static readonly TimeSpan ShutdownStopTimeout = TimeSpan.FromSeconds(30);
     private bool _stopping;
     private bool _closeAfterStop;

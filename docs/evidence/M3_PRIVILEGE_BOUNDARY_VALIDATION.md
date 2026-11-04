@@ -13,7 +13,7 @@
 | UI/宿主强制结束与数据库恢复 | `FakeEngineScenarioTests.S10` 强制结束测试宿主，检查 Job kill-on-close、SQLite 对账与后续任务阻断 | 非真实 WPF 界面、非提权执行器 |
 | 停止与未知清理 | `FakeEngineScenarioTests.S08/S09` 及 `SchedulerTests` 的未确认清理场景 | 未确认则阻断，不表示桌面上的一切关联进程已结束 |
 
-Windows CI 的具体运行编号和测试数应在 PR 检查完成后填写，不能预先标记通过。
+[PR #23 Windows CI](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/41785327652)：168/168 通过，0 失败/跳过，构建和 WPF smoke 完成。此前失败运行 `41784998546` 暴露测试探针错误：`IsProcessInJob` 不能用空的进程句柄；已改用 `GetCurrentProcess` 并由上述运行验证。此记录仅适用于 Windows CI 的同权限环境。
 
 ## 桌面 Windows 10/11 待授权验证
 

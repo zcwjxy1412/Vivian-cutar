@@ -71,6 +71,7 @@ public static class RunPresentation
         ReasonCodes.UnresolvedRuns => "有待确认的未清理运行",
         ReasonCodes.InternalError => "VIvian 内部错误，已保守处理",
         ReasonCodes.AdapterUnresponsive => "适配器操作未在时限内结束，可能仍在运行",
+        ReasonCodes.RealAdapterUnverified => "真实适配器的进程归属尚未审核，已阻断执行",
         _ => "其他原因",
     };
 

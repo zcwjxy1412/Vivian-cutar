@@ -559,8 +559,8 @@ public sealed class AdapterHangTests : IDisposable
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "launch not reached");
             // Repeated, concurrent stop requests from the UI token and the scheduler API.
-            var stops = Task.WhenAll(Task.Run(stop.Cancel), Task.Run(scheduler.EmergencyStop),
-                Task.Run(stop.Cancel), Task.Run(scheduler.EmergencyStop));
+            var stops = Task.WhenAll(DedicatedThread.Run(stop.Cancel), DedicatedThread.Run(scheduler.EmergencyStop),
+                DedicatedThread.Run(stop.Cancel), DedicatedThread.Run(scheduler.EmergencyStop));
             await stops.WaitAsync(TimeSpan.FromSeconds(5));
             // The launch is still blocked: the queue must end anyway (emergency grace + bounded revoke).
             var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60), scheduler);

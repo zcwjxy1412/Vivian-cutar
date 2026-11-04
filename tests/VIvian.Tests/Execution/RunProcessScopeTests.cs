@@ -58,12 +58,13 @@ public sealed class RunProcessScopeTests
         var inner = new ContendedSupervisor(entered, release);
         var id = Guid.NewGuid();
         var scope = new RunProcessScope(inner, id);
-        var started = Task.Run(() => scope.StartAsync(Spec, id, default));
+        var started = DedicatedThread.Run(() => scope.StartAsync(Spec, id, default));
         try
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
-            var revoke = Task.Run(() => scope.RevokeAsync(TimeSpan.FromSeconds(5)));
-            Assert.True(SpinWait.SpinUntil(() => scope.IsRevoked, TimeSpan.FromSeconds(5)));
+            // Revocation takes effect synchronously, before RevokeAsync's first wait.
+            var revoke = scope.RevokeAsync(TimeSpan.FromSeconds(5));
+            Assert.True(scope.IsRevoked);
             release.Set();
             // The launch completed after revocation: the adapter never receives the group, and is told that
             // something may have started.
@@ -145,11 +146,11 @@ public sealed class RunProcessScopeTests
         var inner = new ContendedSupervisor(entered, release);
         var id = Guid.NewGuid();
         var scope = new RunProcessScope(inner, id);
-        var started = Task.Run(() => scope.StartAsync(Spec, id, CancellationToken.None));
+        var started = DedicatedThread.Run(() => scope.StartAsync(Spec, id, CancellationToken.None));
         try
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
-            var revoke = Task.Run(scope.RevokeLaunches);
+            var revoke = DedicatedThread.Run(scope.RevokeLaunches);
             await revoke.WaitAsync(TimeSpan.FromSeconds(5)); // would deadlock if revoke waited for the launch
             Assert.True(scope.IsRevoked);
             Assert.False(started.IsCompleted);
@@ -173,7 +174,7 @@ public sealed class RunProcessScopeTests
         var time = new FakeTimeProvider();
         var id = Guid.NewGuid();
         var scope = new RunProcessScope(inner, id, time);
-        var started = Task.Run(() => scope.StartAsync(Spec, id, default));
+        var started = DedicatedThread.Run(() => scope.StartAsync(Spec, id, default));
         try
         {
             Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));

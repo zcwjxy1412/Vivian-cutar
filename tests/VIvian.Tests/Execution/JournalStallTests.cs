@@ -131,7 +131,7 @@ public sealed class JournalStallTests
         {
             await journal.StallEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             // Application shutdown (caller token) or the stop button, while SQLite is stalled.
-            if (viaCallerToken) await Task.Run(caller.Cancel); else scheduler.EmergencyStop();
+            if (viaCallerToken) await DedicatedThread.Run(caller.Cancel); else scheduler.EmergencyStop();
             var result = await DriveAsync(queue, time, TimeSpan.FromMinutes(3), scheduler, () => journal.Stalled);
 
             Assert.True(result is not null, "queue stayed occupied behind a stalled journal write");
@@ -354,7 +354,7 @@ public sealed class JournalStallTests
         {
             await adapter.Registered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             // 1. The stop request begins; 2. the adapter's callback blocks the cancellation inside it.
-            trigger = Task.Run(scheduler.EmergencyStop);
+            trigger = DedicatedThread.Run(scheduler.EmergencyStop);
             await adapter.CallbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.False(trigger.IsCompleted);
             // 3. A concurrent StartAsync asks for a process while the callback is still blocked.

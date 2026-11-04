@@ -388,7 +388,7 @@ public sealed class SchedulerTests
 
         using var block = new ManualResetEventSlim();
         using var registration = adapter.StartToken.Register(() => block.Wait(TimeSpan.FromSeconds(30)));
-        var trigger = Task.Run(scheduler.EmergencyStop); // blocks inside the adapter's callback
+        var trigger = DedicatedThread.Run(scheduler.EmergencyStop); // blocks inside the adapter's callback
         try
         {
             var result = await queue.WaitAsync(TimeSpan.FromSeconds(5)); // 300 ms emergency grace, not the 120 s start limit

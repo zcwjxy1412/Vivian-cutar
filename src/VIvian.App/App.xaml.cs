@@ -86,9 +86,10 @@ public partial class App : Application
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
+                        var engineReport = await SmokeEngineDiscoveryAsync(vm, root);
                         var contrastReport = SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
-                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + contrastReport);
+                            "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + engineReport + " " + contrastReport);
                         Shutdown(0);
                     }
                     catch (Exception ex)
@@ -164,6 +165,31 @@ public partial class App : Application
         var worstUi = await probe;
         if (worstUi > TimeSpan.FromSeconds(1)) throw new InvalidOperationException("UI thread unresponsive: " + worstUi);
         return $"simulation queue 3/3 success persisted; emergency stop {stopLatency.TotalMilliseconds:F0} ms; shutdown stop ok; worst UI response {worstUi.TotalMilliseconds:F0} ms.";
+    }
+
+    /// <summary>
+    /// Smoke check for M3: the read-only engine check shows understandable states for harmless fixture folders.
+    /// The fixtures are plain text files named like the engine programs; nothing is executed.
+    /// </summary>
+    private static async Task<string> SmokeEngineDiscoveryAsync(MainViewModel vm, string root)
+    {
+        var fixtures = Path.Combine(root, "engine-fixtures");
+        var bgi = Directory.CreateDirectory(Path.Combine(fixtures, "BetterGI")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(bgi, "BetterGI.exe"), "harmless fixture, never executed");
+        var m7a = Directory.CreateDirectory(Path.Combine(fixtures, "March7thAssistant")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(m7a, "m7a.exe"), "harmless fixture, never executed");
+        Directory.CreateDirectory(Path.Combine(m7a, "assets", "config"));
+        await File.WriteAllTextAsync(Path.Combine(m7a, "assets", "config", "version.txt"), "v2026.10.31\n");
+        vm.Engines.Single(e => e.Id == GameId.Genshin).InstallPath = bgi;
+        vm.Engines.Single(e => e.Id == GameId.StarRail).InstallPath = m7a;
+        vm.Engines.Single(e => e.Id == GameId.ZenlessZoneZero).InstallPath = "";
+        await vm.CheckEnginesAsync();
+        var states = vm.Engines.ToDictionary(e => e.Id, e => e.Compatibility);
+        if (states[GameId.Genshin] != "不支持（尚未接入）" || states[GameId.StarRail] != "未验证" || states[GameId.ZenlessZoneZero] != "未设置路径")
+            throw new InvalidOperationException("Engine discovery states unexpected: " + string.Join(", ", states.Select(kv => kv.Key + "=" + kv.Value)));
+        if (vm.Engines.Any(e => !e.Execution.Contains("未开放", StringComparison.Ordinal)))
+            throw new InvalidOperationException("An engine card does not state that real execution is unavailable");
+        return "engine discovery: 原神=不支持, 星铁=未验证, 绝区零=未设置 (read-only fixtures).";
     }
 
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>

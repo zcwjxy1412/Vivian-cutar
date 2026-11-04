@@ -37,6 +37,8 @@
 
 ## 星铁只读发现进度（2026-11-04）
 
+- 0.3.0-dev（分支 `feature/m3-engine-readiness`）：整个路径链拒绝链接；读取时禁止其他程序写入；读取前后核对文件身份；所有文件系统查询都有时限；读取 `assets/config/version.txt`。只有当 m7a.exe 与用户提供的、和官方 v2026.10.31 发布摘要完全一致的 `March7thAssistant_full.zip` 包内文件逐字节相同时，才显示“已验证”。官方摘要来自 GitHub 发布元数据（见发行包审计），**本项目尚未独立下载并重新计算**。“已验证”不会开放任何 CLI 查询或任务。
+
 - [March7thAssistant 发行包门禁](M3_MARCH7TH_READONLY_EVIDENCE.md)：本地路径、`m7a.exe`、版本元数据与 SHA-256 的只读发现；官方完整发行包、CLI 只读输出及任务清单仍待核验。未验证时不启动查询或游戏。
 
 ## Gemini M3 原始研究

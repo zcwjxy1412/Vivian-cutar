@@ -13,10 +13,32 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public long Revision { get; set; }
     private string _installPath = "";
     public string InstallPath { get => _installPath; set => Set(ref _installPath, value); }
-    private string _compatibility = id == GameId.StarRail ? "尚未检查" : "尚未接入";
+    private string _compatibility = "尚未检查";
+    /// <summary>Short state shown on the card: 已验证 / 未验证 / 不支持 / 未安装 / 无法访问.</summary>
     public string Compatibility { get => _compatibility; set => Set(ref _compatibility, value); }
-    private string _evidence = "";
+    private string _evidence = "保存安装目录后，VIvian 会只读检查引擎文件。";
     public string Evidence { get => _evidence; set => Set(ref _evidence, value); }
+    private string _stateBrush = StateColors.Neutral;
+    /// <summary>Text colour of the state (hex), chosen together with the state text.</summary>
+    public string StateBrush { get => _stateBrush; set => Set(ref _stateBrush, value); }
+
+    /// <summary>Real task execution is not available for any engine in this build.</summary>
+    public string Execution => Id == GameId.StarRail
+        ? "真实任务执行：未开放（只做只读检查和官方发行包核对）"
+        : "真实任务执行：未开放（该引擎尚未接入）";
+
+    public void Show(string state, string brush, string detail)
+    {
+        Compatibility = state; StateBrush = brush; Evidence = detail;
+    }
+}
+
+public static class StateColors
+{
+    public const string Verified = "#7FD49B";
+    public const string Warning = "#E5BF76";
+    public const string Error = "#F09A8E";
+    public const string Neutral = "#A9B6CB";
 }
 public sealed class MainViewModel : ObservableObject
 {
@@ -36,6 +58,15 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand CheckCommand { get; }
     public AsyncCommand InspectMarch7thCommand { get; }
+    public AsyncCommand CheckEnginesCommand { get; }
+    public AsyncCommand VerifyReleaseCommand { get; }
+    private string _releaseArchivePath = "";
+    /// <summary>A March7thAssistant release archive the user downloaded from the official GitHub release.</summary>
+    public string ReleaseArchivePath { get => _releaseArchivePath; set => Set(ref _releaseArchivePath, value); }
+    private string _releaseStatus = "尚未核对官方发行包。";
+    public string ReleaseStatus { get => _releaseStatus; private set => Set(ref _releaseStatus, value); }
+    // Session only: a verified official archive's m7a.exe hash. Not stored; verify again after restarting.
+    private March7thReleaseEvidence? _march7thEvidence;
     public QueueViewModel Queue { get; }
     public MainViewModel(ISettingsStore settings, IDiagnosticStore history, QueueViewModel queue)
     {
@@ -44,6 +75,8 @@ public sealed class MainViewModel : ObservableObject
         ReloadCommand = new(() => RunAsync(async () => { await InitializeAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
         InspectMarch7thCommand = new(() => RunAsync(InspectMarch7thAsync), HandleError);
+        CheckEnginesCommand = new(() => RunAsync(CheckEnginesCoreAsync), HandleError);
+        VerifyReleaseCommand = new(() => RunAsync(VerifyReleaseAsync), HandleError);
     }
     public async Task InitializeAsync()
     {
@@ -55,6 +88,57 @@ public sealed class MainViewModel : ObservableObject
         }
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
+        await CheckEnginesCoreAsync();
+    }
+
+    /// <summary>Read-only check of all three engine folders. Never runs an engine or touches its configuration.</summary>
+    public Task CheckEnginesAsync() => RunAsync(CheckEnginesCoreAsync);
+
+    private async Task CheckEnginesCoreAsync()
+    {
+        foreach (var card in Engines)
+        {
+            if (card.Id == GameId.StarRail) await InspectMarch7thAsync();
+            else await DiscoverAsync(card);
+        }
+        Status = "已只读检查三个引擎目录；没有运行任何程序，也没有修改任何文件。";
+    }
+
+    private static async Task DiscoverAsync(EngineCard card)
+    {
+        var path = card.InstallPath.Trim();
+        if (path.Length == 0) { card.Show("未设置路径", StateColors.Neutral, "在“引擎设置”中填写安装目录。"); return; }
+        var found = await Task.Run(() => EngineFileDiscovery.InspectAsync(card.Id, path));
+        switch (found.State)
+        {
+            case DiscoveryState.Found:
+                card.Show("不支持（尚未接入）", StateColors.Warning, found.Detail + " VIvian 还没有这个引擎的适配器，只显示检查结果。");
+                break;
+            case DiscoveryState.NotInstalled:
+                card.Show("未安装", StateColors.Neutral, found.Detail);
+                break;
+            default:
+                card.Show("无法访问", StateColors.Error, found.Detail);
+                break;
+        }
+    }
+
+    private async Task VerifyReleaseAsync()
+    {
+        var path = ReleaseArchivePath.Trim().Trim('"');
+        ReleaseStatus = "正在计算 SHA-256（大文件需要一些时间）…";
+        var result = await Task.Run(() => March7thReleaseVerifier.VerifyAsync(path));
+        if (result.Check == ReleaseCheck.Verified) _march7thEvidence = result.Evidence;
+        ReleaseStatus = result.Check switch
+        {
+            ReleaseCheck.Verified => "已验证：" + result.Detail,
+            ReleaseCheck.OfficialContentsUnavailable => "是官方文件，但无法用于核对安装：" + result.Detail,
+            ReleaseCheck.NotOfficial => "不是官方发行包：" + result.Detail,
+            ReleaseCheck.UnexpectedLayout => "内容与官方发行版不符：" + result.Detail,
+            _ => "无法核对：" + result.Detail,
+        };
+        Log.Information("Release archive check: {Check}", result.Check);
+        await InspectMarch7thAsync();
     }
     public void ReportReconciled(int count)
     {
@@ -84,16 +168,20 @@ public sealed class MainViewModel : ObservableObject
     {
         var card = Engines.Single(x => x.Id == GameId.StarRail);
         var path = card.InstallPath.Trim();
+        if (path.Length == 0) { card.Show("未设置路径", StateColors.Neutral, "在“引擎设置”中填写安装目录。"); return; }
+        var evidence = _march7thEvidence;
         // Off the UI thread: existence checks on a network path or hashing a large file must not freeze the window.
-        var result = await Task.Run(() => March7thReadOnlyInspector.InspectAsync(path));
-        card.Compatibility = result.Compatibility switch
+        var result = await Task.Run(() => March7thReadOnlyInspector.InspectAsync(path, evidence));
+        var (state, brush) = result.Compatibility switch
         {
-            March7thCompatibility.NotInstalled => "未安装 / 路径无效",
-            March7thCompatibility.MissingCli => "缺少 CLI，暂不支持",
-            _ => "发行包未验证，暂不支持查询",
+            March7thCompatibility.Verified => ("已验证（官方发行包）", StateColors.Verified),
+            March7thCompatibility.Unverified => ("未验证", StateColors.Warning),
+            March7thCompatibility.UnsupportedVersion => ("不支持（版本）", StateColors.Warning),
+            March7thCompatibility.MissingCli => ("不支持（缺少 m7a.exe）", StateColors.Warning),
+            March7thCompatibility.NotInstalled => ("未安装", StateColors.Neutral),
+            _ => ("无法访问", StateColors.Error),
         };
-        card.Evidence = result.Sha256 is null ? result.Detail
-            : $"文件版本：{result.FileVersion ?? "未知"} · CLI SHA-256：{result.Sha256}。{result.Detail}";
+        card.Show(state, brush, result.Detail);
         Status = "星铁只读检查完成；未运行上游程序或游戏。";
     }
     public async Task CheckFoundationAsync()

@@ -101,6 +101,7 @@ switch (scenario)
         return 0;
 
     case "probe-identity":
+        if (!OperatingSystem.IsWindows()) return 64;
         Emit("info", "user-sid=" + WindowsIdentity.GetCurrent().User?.Value);
         Emit("info", "in-job=" + JobProbe.IsProcessInJob(IntPtr.Zero, IntPtr.Zero, out var insideJob));
         Emit("info", "job-member=" + insideJob);

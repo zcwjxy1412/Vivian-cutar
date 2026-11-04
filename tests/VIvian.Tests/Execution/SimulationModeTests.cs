@@ -73,6 +73,15 @@ public sealed class SimulationModeTests
             RunPresentation.Summary(GameId.Genshin, RunPhase.Finished, RunOutcome.Success, CleanupState.Confirmed, ReasonCodes.Completed, isSimulation: false));
 
     [Fact]
+    public void UnconfirmedCleanupSummaryLeadsWithBlockedEvenIfTaskReportedCompletion()
+    {
+        var text = RunPresentation.Summary(GameId.Genshin, RunPhase.Blocked, RunOutcome.Success,
+            CleanupState.Unconfirmed, ReasonCodes.Completed, isSimulation: false);
+        Assert.Contains("已阻断", text);
+        Assert.DoesNotContain("成功", text);
+    }
+
+    [Fact]
     public void EveryReasonCodeHasUserFacingWording()
     {
         var codes = typeof(ReasonCodes).GetFields(BindingFlags.Public | BindingFlags.Static)

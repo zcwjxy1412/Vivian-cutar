@@ -107,7 +107,9 @@ public sealed class QueueViewModel : ObservableObject
         Status = "模拟队列运行中…（可随时紧急停止）";
         try
         {
-            var result = await Task.Run(() => _scheduler.RunAsync(items, stop.Token));
+            var queueTask = Task.Run(() => _scheduler.RunAsync(items, stop.Token));
+            _queueTask = queueTask;
+            var result = await queueTask;
             Status = RunPresentation.SimulationLabel + RunPresentation.QueueStatusText(result)
                 + (result.NotStarted.Count > 0 ? "；未启动：" + string.Join("、", result.NotStarted.Select(RunPresentation.GameName)) : "");
             Serilog.Log.Information("Simulation queue finished: {Status} {Reason}", result.Status, result.BlockReason);
@@ -122,12 +124,38 @@ public sealed class QueueViewModel : ObservableObject
         }
     }
 
+    private Task? _queueTask;
+
+    /// <summary>
+    /// Application shutdown: requests the emergency stop and waits, bounded, for the queue to end so its final state
+    /// is recorded. Returns false when it did not end in time; the caller then exits anyway: every engine process
+    /// VIvian started is in a kill-on-close Job that Windows terminates when VIvian exits, and the next start
+    /// reconciles the unfinished run as Blocked with cleanup unconfirmed (never as cleaned up).
+    /// </summary>
+    public async Task<bool> StopForShutdownAsync(TimeSpan timeout)
+    {
+        if (_queueTask is not { IsCompleted: false } running) return true;
+        EmergencyStop();
+        var ended = await Task.WhenAny(running, Task.Delay(timeout)) == running;
+        Serilog.Log.Information("Shutdown stop: queue {State}", ended ? "ended" : "still running at exit");
+        return ended;
+    }
+
     public void EmergencyStop()
     {
         if (_stop is not { } stop) return;
-        // Sent immediately, no confirmation dialog or countdown.
-        stop.Cancel();
-        Status = "已发出紧急停止…";
+        // Sent immediately, no confirmation dialog or countdown. Cancelling runs adapter cancellation callbacks
+        // synchronously, so it is done off the UI thread: a slow callback must never freeze the window.
+        var ui = SynchronizationContext.Current;
+        _ = Task.Run(() =>
+        {
+            try { stop.Cancel(); }
+            catch (Exception ex) when (ex is ObjectDisposedException or AggregateException) { /* queue ended or callback failed */ }
+            // Delivered to the scheduler (its stop path is running); this is not a claim that anything has ended.
+            ui?.Post(_ => { if (IsRunning) Status = "紧急停止已送达调度器，正在等待引擎结束并核对清理…"; }, null);
+        });
+        // Only queued so far: the request may not have reached the scheduler yet.
+        Status = "正在发送紧急停止…";
         Serilog.Log.Information("Emergency stop requested from UI");
     }
 

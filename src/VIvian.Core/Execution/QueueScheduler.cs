@@ -52,9 +52,16 @@ public sealed class QueueScheduler(
 {
     private readonly SchedulerOptions _options = options ?? SchedulerOptions.Default;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
-    private TaskCompletionSource _emergency = NewSignal();
+    private StopSignal _stop = new();
     private int _running;
     private readonly SafetyBarrier _barrier = new();
+    private readonly JournalWriter _writer = new(journal);
+
+    /// <summary>State writes queued or running; for deterministic tests that drive a virtual clock.</summary>
+    internal int StateWritesInFlight => _writer.InFlight;
+
+    /// <summary>A state write's bounded wait has given up and the write has not completed.</summary>
+    internal bool JournalStalled => _writer.IsStalled;
 
     /// <summary>Raised on a background thread whenever a run changes phase, outcome or cleanup state.</summary>
     public event Action<RunUpdate>? RunChanged;
@@ -87,22 +94,53 @@ public sealed class QueueScheduler(
         ArgumentNullException.ThrowIfNull(history);
         if (_barrier.Find(runId) is { } hazard)
         {
-            if (hazard.PendingOperations > 0 || hazard.RequiresVerifiedRecovery)
+            if (hazard.PendingOperations > 0 || hazard.PersistencePending > 0 || hazard.RequiresVerifiedRecovery)
                 throw new RunStillActiveException();
-            if (!hazard.TerminalPersisted && hazard.LastKnown is { } last)
+            var persisted = hazard.TerminalPersisted;
+            if (!persisted && hazard.LastKnown is { } last)
             {
+                // Through the serialized writer, bounded: it can never overtake or be overtaken by another state write.
+                var write = _writer.Enqueue(last);
                 try
                 {
-                    await _journal.PublishAsync(last, ct).ConfigureAwait(false);
+                    await write.WaitAsync(_options.JournalTimeout, _time, ct).ConfigureAwait(false);
                     _barrier.MarkPersisted(runId);
+                    persisted = true;
                 }
                 catch (Exception)
                 {
+                    write.ObserveLater();
                     // The acknowledgement below fails as well if the record is still missing; the barrier then stays.
                 }
             }
+            // Cleanup was confirmed by the run itself and its final state is stored: only the in-session gate (set
+            // because persistence was uncertain) remains, and there is no stored cleanup to acknowledge.
+            if (persisted && hazard.LastKnown is { Cleanup: not CleanupState.Unconfirmed, Phase: RunPhase.Finished or RunPhase.Blocked })
+            {
+                if (!_barrier.TryResolve(runId)) throw new RunStillActiveException();
+                return;
+            }
         }
-        await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+        try
+        {
+            await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException) when (_barrier.Find(runId) is null)
+        {
+            // M-30-1: a row left open by an earlier session counts as unresolved (it blocks queues) but cannot be
+            // acknowledged while it is open. Close interrupted rows (never as success: started runs become Blocked
+            // with cleanup Unconfirmed) while no queue can start, then try once more.
+            if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) throw new RunStillActiveException();
+            try
+            {
+                await history.ReconcileInterruptedRunsAsync(at, ct).ConfigureAwait(false);
+                await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref _running, 0);
+            }
+        }
         if (!_barrier.TryResolve(runId)) throw new RunStillActiveException();
     }
 
@@ -112,30 +150,73 @@ public sealed class QueueScheduler(
     /// asynchronously (e.g. from a UI) should stop it by cancelling the token passed to <see cref="RunAsync"/>,
     /// which also works when cancelled before the queue has started.
     /// </summary>
-    public void EmergencyStop() => Volatile.Read(ref _emergency).TrySetResult();
+    public void EmergencyStop() => Volatile.Read(ref _stop).Trigger();
+
+    /// <summary>
+    /// One queue's stop request. <see cref="Trigger"/> cancels the adapters' token synchronously, so the stop is
+    /// observable when it returns — including tokens linked to it (e.g. a call's own time-limit token). Registered
+    /// callbacks therefore run on the caller's thread; a UI should call <see cref="EmergencyStop"/> or cancel the
+    /// RunAsync token off its UI thread so a slow adapter callback cannot freeze it.
+    /// </summary>
+    private sealed class StopSignal : IDisposable
+    {
+        private readonly CancellationTokenSource _token = new();
+        private readonly TaskCompletionSource _signal = NewSignal();
+        private int _disposed;
+        private int _requested;
+
+        public Task Requested => _signal.Task;
+        public CancellationToken Token => _token.Token;
+
+        /// <summary>
+        /// Set before anything else observes the stop (signal, token, callbacks). Safety gates — such as a run's
+        /// launch permission — read this flag directly, so no adapter cancellation callback can delay them.
+        /// </summary>
+        public bool IsRequested => Volatile.Read(ref _requested) == 1;
+
+        public void Trigger()
+        {
+            // 1. Safety gates first: from here on no gate that reads IsRequested admits new work.
+            Interlocked.Exchange(ref _requested, 1);
+            // 2. The scheduler's own stop path (escalation, grace timers) is released next, so an adapter
+            //    cancellation callback that blocks below can never hide or delay the emergency stop.
+            _signal.TrySetResult();
+            if (Volatile.Read(ref _disposed) == 0)
+            {
+                // Not CancelAsync: that would also defer cancellation of linked tokens to the thread pool.
+                try { _token.Cancel(); }
+                catch (ObjectDisposedException) { /* the queue already finished */ }
+                catch (AggregateException) { /* an adapter callback failed; the token is cancelled regardless */ }
+            }
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) _token.Dispose();
+        }
+    }
 
     public async Task<QueueResult> RunAsync(IReadOnlyList<QueueItem> items, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(items);
         if (items.Select(i => i.Game).Distinct().Count() != items.Count)
             throw new ArgumentException("每款游戏在一个队列中只能出现一次。", nameof(items));
-        if (Interlocked.Exchange(ref _running, 1) == 1)
+        if (Interlocked.CompareExchange(ref _running, 1, 0) == 1)
             throw new InvalidOperationException("已有队列在运行。");
         try
         {
-            var emergency = NewSignal();
-            Volatile.Write(ref _emergency, emergency);
-            using var stopToken = new CancellationTokenSource();
-            using var registration = ct.Register(() => emergency.TrySetResult());
-            _ = emergency.Task.ContinueWith(_ =>
-            {
-                try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
-            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            using var stopSignal = new StopSignal();
+            Volatile.Write(ref _stop, stopSignal);
+            var emergency = stopSignal.Requested;
+            // Cancelling the caller's token (e.g. application shutdown) is an emergency stop; if it is already
+            // cancelled, Register runs the trigger synchronously here, before anything starts.
+            using var registration = ct.Register(stopSignal.Trigger);
             var queueId = Guid.NewGuid();
             // In-session barrier first: it does not depend on the database being writable.
             if (!_barrier.IsClear)
                 return new QueueResult(queueId, QueueStatus.Blocked, [], items.Select(x => x.Game).ToList(), false,
-                    _barrier.HasPendingOperations ? ReasonCodes.AdapterUnresponsive : ReasonCodes.UnresolvedRuns);
+                    _barrier.HasPendingPersistence ? ReasonCodes.JournalUnavailable
+                    : _barrier.HasPendingOperations ? ReasonCodes.AdapterUnresponsive : ReasonCodes.UnresolvedRuns);
             // A previous run may still own processes (e.g. after a crash). Nothing starts until the user resolves it.
             int unresolved;
             try
@@ -154,13 +235,13 @@ public sealed class QueueScheduler(
             var notStarted = new List<GameId>();
             for (var i = 0; i < items.Count; i++)
             {
-                if (emergency.Task.IsCompleted)
+                if (emergency.IsCompleted)
                 {
                     status = QueueStatus.Cancelled;
                     notStarted.AddRange(items.Skip(i).Select(x => x.Game));
                     break;
                 }
-                var execution = new RunExecution(this, queueId, items[i], emergency.Task, stopToken.Token);
+                var execution = new RunExecution(this, queueId, items[i], emergency, stopSignal.Token, () => stopSignal.IsRequested);
                 RunUpdate last;
                 bool blocksQueue;
                 try
@@ -175,7 +256,7 @@ public sealed class QueueScheduler(
                 journalFaulted |= execution.JournalFaulted;
                 runs.Add(last);
                 var stop = blocksQueue ? QueueStatus.Blocked
-                    : last.Outcome == RunOutcome.Cancelled || emergency.Task.IsCompleted ? QueueStatus.Cancelled
+                    : last.Outcome == RunOutcome.Cancelled || emergency.IsCompleted ? QueueStatus.Cancelled
                     : (QueueStatus?)null;
                 if (stop is { } s)
                 {
@@ -198,11 +279,13 @@ public sealed class QueueScheduler(
     public const int MaxBufferedEvents = 10_000;
     private const int MaxEventBatch = 500;
     private static readonly TimeSpan EventFlushTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan EventDrainTimeout = TimeSpan.FromSeconds(2);
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>State of one run inside a queue.</summary>
-    private sealed class RunExecution(QueueScheduler owner, Guid queueId, QueueItem item, Task emergency, CancellationToken stopToken)
+    private sealed class RunExecution(QueueScheduler owner, Guid queueId, QueueItem item, Task emergency, CancellationToken stopToken,
+        Func<bool> stopRequested)
     {
         private readonly RunStateMachine _sm = new();
         private readonly Guid _runId = Guid.NewGuid();
@@ -254,12 +337,7 @@ public sealed class QueueScheduler(
             if (emergency.IsCompleted) return await CancelBeforeStartAsync().ConfigureAwait(false);
 
             // The Starting record must be durable before any process exists, so a crash can be reconciled.
-            try
-            {
-                await owner._journal.PublishAsync(
-                    Snapshot() with { Phase = RunPhase.Starting, Cleanup = CleanupState.Pending }, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception)
+            if (!await PersistAsync(Snapshot() with { Phase = RunPhase.Starting, Cleanup = CleanupState.Pending }).ConfigureAwait(false))
             {
                 JournalFaulted = true;
                 _sm.SetBlockReason(ReasonCodes.JournalUnavailable);
@@ -271,7 +349,8 @@ public sealed class QueueScheduler(
 
             // A run that arrives after the limit is still released (e.g. its job handle closed), but that is never
             // taken as proof that its processes have ended.
-            _processScope = new RunProcessScope(owner._supervisor, _runId);
+            // The scope reads the queue's stop flag itself: revocation never depends on a cancellation callback running.
+            _processScope = new RunProcessScope(owner._supervisor, _runId, Time, stopRequested);
             using var stopRegistration = stopToken.Register(() => _processScope.RevokeLaunches());
             var started = await BoundAsync("StartAsync", t => Adapter.StartAsync(context, _processScope, t),
                 Options.StartTimeout, emergencyShortens: true,
@@ -325,6 +404,9 @@ public sealed class QueueScheduler(
             else _sm.SetBlockReason(ReasonCodes.AdapterUnresponsive);
             _sm.SetCleanup(CleanupState.Unconfirmed);
             _sm.MoveTo(RunPhase.Blocked);
+            // L-30-1: the barrier closes before the state becomes visible anywhere, so a user acknowledging the
+            // published row can never race ahead of it.
+            owner._barrier.MarkUnconfirmed(Snapshot(), persisted: false);
             var update = await PublishAsync().ConfigureAwait(false);
             owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);
             return (update, true);
@@ -438,13 +520,15 @@ public sealed class QueueScheduler(
                     note = $"适配器操作 {operation} 在时限之后才返回。";
                     if (onLateResult is not null)
                     {
+                        Task? release = null;
                         try
                         {
-                            var release = onLateResult(value);
+                            release = onLateResult(value);
                             await release.WaitAsync(Options.DisposeTimeout, Time, CancellationToken.None).ConfigureAwait(false);
                         }
                         catch (TimeoutException)
                         {
+                            release?.ObserveLater();
                             owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
                             note += " 迟到结果释放超时；需核实资源归属。";
                         }
@@ -461,15 +545,17 @@ public sealed class QueueScheduler(
                 }
                 foreach (var d in disposables) d.Dispose();
                 // A journal that never returns must not keep PendingOperations permanently high.
+                Task? write = null;
                 try
                 {
                     using var auditCts = new CancellationTokenSource(Options.JournalTimeout, Time);
-                    var write = owner._journal.AppendEventsAsync(
+                    write = owner._journal.AppendEventsAsync(
                         [new RunEvent(_runId, Time.GetUtcNow(), RunEventKind.Warning, note)], auditCts.Token);
                     await write.WaitAsync(Options.JournalTimeout, Time, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
+                    write?.ObserveLater();
                     owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
                 }
             }
@@ -497,9 +583,9 @@ public sealed class QueueScheduler(
                     started ? RunOutcome.Indeterminate : null, started ? CleanupState.Unconfirmed : CleanupState.NotRequired,
                     ReasonCodes.InternalError, DateTimeOffset.UtcNow);
             }
-            var persisted = true;
-            try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { JournalFaulted = true; persisted = false; }
+            if (update.Cleanup == CleanupState.Unconfirmed) owner._barrier.MarkUnconfirmed(update, persisted: false);
+            var persisted = await PersistAsync(update).ConfigureAwait(false);
+            if (!persisted) JournalFaulted = true;
             if (update.Cleanup == CleanupState.Unconfirmed) owner._barrier.MarkUnconfirmed(update, persisted);
             owner.Raise(update);
             return update;
@@ -550,8 +636,10 @@ public sealed class QueueScheduler(
                 Options.ReconcileTimeout, emergencyShortens: false).ConfigureAwait(false);
             var cleanup = reconciled is { Status: BoundStatus.Completed, Value: CleanupState.Confirmed }
                 ? CleanupState.Confirmed : CleanupState.Unconfirmed;
-            // Stop reading engine output (prompt), then let already-buffered events reach storage so the record is
-            // complete when the run is reported finished. Bounded, in case an adapter's event stream misbehaves.
+            // The engine has ended (or been stopped): give its event stream a short, bounded chance to complete on its
+            // own, so events emitted before the end are not lost when the pump started late. Then stop reading and let
+            // already-buffered events reach storage. Both waits are bounded in case an adapter's stream misbehaves.
+            await Task.WhenAny(pump, Task.Delay(EventDrainTimeout, Time)).ConfigureAwait(false);
             watchCts.Cancel();
             await Task.WhenAny(pump, Task.Delay(EventFlushTimeout, Time)).ConfigureAwait(false);
             await DisposeRunAsync(run).ConfigureAwait(false);
@@ -572,9 +660,14 @@ public sealed class QueueScheduler(
         /// <summary>Applies the evidence rule: success only with explicit completion evidence for this run.</summary>
         private (RunOutcome, string) Judge(RunVerdict verdict)
         {
-            if (verdict.Outcome == RunOutcome.Success
-                && !verdict.Evidence.Any(e => e.RunId == _runId && e.Kind == EvidenceKind.CompletionReported))
-                return (RunOutcome.Indeterminate, ReasonCodes.SuccessWithoutEvidence);
+            if (verdict.Outcome == RunOutcome.Success)
+            {
+                var ownKinds = verdict.Evidence.Where(e => e.RunId == _runId && e.Kind != EvidenceKind.Note)
+                    .Select(e => e.Kind).Distinct().ToArray();
+                if (ownKinds.Length > 1) return (RunOutcome.Indeterminate, ReasonCodes.ConflictingEvidence);
+                if (!ownKinds.Contains(EvidenceKind.CompletionReported))
+                    return (RunOutcome.Indeterminate, ReasonCodes.SuccessWithoutEvidence);
+            }
             return (verdict.Outcome, verdict.ReasonCode);
         }
 
@@ -691,6 +784,8 @@ public sealed class QueueScheduler(
             _sm.SetCleanup(cleanup);
             var confirmed = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
             _sm.MoveTo(confirmed ? RunPhase.Finished : RunPhase.Blocked);
+            // L-30-1: close the barrier before the terminal state is published or shown.
+            if (!confirmed) owner._barrier.MarkUnconfirmed(Snapshot(), persisted: false);
             var update = await PublishAsync().ConfigureAwait(false);
             // Fail closed: the barrier holds whether or not the database accepted the final state.
             if (!confirmed) owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);
@@ -700,19 +795,70 @@ public sealed class QueueScheduler(
         private async Task<RunUpdate> PublishAsync()
         {
             var update = Snapshot();
-            try
-            {
-                await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false);
-                _lastPublishSucceeded = true;
-            }
-            catch (Exception)
-            {
-                JournalFaulted = true;
-                _lastPublishSucceeded = false;
-            }
+            _lastPublishSucceeded = await PersistAsync(update).ConfigureAwait(false);
+            if (!_lastPublishSucceeded) JournalFaulted = true;
             owner._barrier.Observe(update, _lastPublishSucceeded);
             owner.Raise(update);
             return update;
+        }
+
+        /// <summary>
+        /// Writes one state through the scheduler's serialized writer and waits a bounded time
+        /// (<see cref="SchedulerOptions.JournalTimeout"/>; not at all while the journal is already stalled, and no
+        /// longer once an emergency stop arrives). Returns whether the write is known to have succeeded. A write that
+        /// is still running is never abandoned silently: it stays queued (so it cannot land after a newer state), its
+        /// completion or failure is observed, and until then the run is a persistence hazard that blocks new queues.
+        /// </summary>
+        private async Task<bool> PersistAsync(RunUpdate update)
+        {
+            // Whether a process of this run may exist at the time of this write (its launch capability was issued).
+            var processMayExist = _processScope is not null;
+            Task write;
+            try { write = owner._writer.Enqueue(update); }
+            catch (Exception) { return Failed(update, processMayExist); }
+            if (!write.IsCompleted && !owner._writer.IsStalled)
+            {
+                using var waitCts = new CancellationTokenSource();
+                Task deadline;
+                try { deadline = Task.Delay(Options.JournalTimeout, Time, waitCts.Token); }
+                catch (Exception) { deadline = Task.Delay(Options.JournalTimeout, waitCts.Token); } // clock failed (abort path)
+                // An emergency stop that arrives during the wait ends it; one that is already in effect does not
+                // (the write is then usually instantaneous, and shortening it would only manufacture hazards).
+                await (emergency.IsCompleted ? Task.WhenAny(write, deadline) : Task.WhenAny(write, deadline, emergency))
+                    .ConfigureAwait(false);
+                waitCts.Cancel();
+            }
+            if (write.IsCompleted)
+                return write.IsCompletedSuccessfully || Failed(update, processMayExist, write);
+
+            owner._writer.BeginOverdue();
+            owner._barrier.BeginPersistence(_runId, item.Game);
+            _ = ObserveOverdueWriteAsync(write, update, processMayExist);
+            return false;
+        }
+
+        private bool Failed(RunUpdate update, bool processMayExist, Task? write = null)
+        {
+            _ = write?.Exception; // observed
+            if (processMayExist) owner._barrier.MarkPersistenceFailed(Snapshot() with { At = update.At });
+            return false;
+        }
+
+        private async Task ObserveOverdueWriteAsync(Task write, RunUpdate update, bool processMayExist)
+        {
+            try
+            {
+                var succeeded = true;
+                try { await write.ConfigureAwait(false); }
+                catch (Exception) { succeeded = false; }
+                if (succeeded && update.Phase is RunPhase.Finished or RunPhase.Blocked) owner._barrier.MarkPersisted(_runId);
+                if (!succeeded && processMayExist) owner._barrier.MarkPersistenceFailed(Snapshot());
+            }
+            finally
+            {
+                owner._writer.EndOverdue();
+                owner._barrier.EndPersistence(_runId);
+            }
         }
     }
 

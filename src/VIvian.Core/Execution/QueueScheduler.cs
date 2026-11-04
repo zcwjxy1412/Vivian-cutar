@@ -42,6 +42,7 @@ public sealed class QueueScheduler(
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private TaskCompletionSource _emergency = NewSignal();
     private int _running;
+    private readonly SafetyBarrier _barrier = new();
 
     /// <summary>Raised on a background thread whenever a run changes phase, outcome or cleanup state.</summary>
     public event Action<RunUpdate>? RunChanged;
@@ -49,6 +50,49 @@ public sealed class QueueScheduler(
     public event Action<RunEvent>? EventReceived;
 
     public bool IsRunning => Volatile.Read(ref _running) == 1;
+
+    /// <summary>
+    /// Runs that, in this session, may still occupy the machine. While this is not empty, no queue starts — even if
+    /// the database could not record the problem (#29) or an abandoned adapter call has not returned yet (#28).
+    /// </summary>
+    public IReadOnlyList<SessionHazard> SessionHazards => _barrier.Snapshot();
+
+    /// <summary>Raised on a background thread when <see cref="SessionHazards"/> changes.</summary>
+    public event Action? HazardsChanged
+    {
+        add => _barrier.Changed += value;
+        remove => _barrier.Changed -= value;
+    }
+
+    /// <summary>
+    /// The user confirms that a run whose cleanup was unconfirmed no longer occupies the machine. Refused while an
+    /// abandoned adapter call of that run is still running. If the run's final state never reached the journal it is
+    /// written first; the acknowledgement is stored by <paramref name="history"/> and never rewrites the verdict.
+    /// The in-session barrier is released only after the acknowledgement was stored.
+    /// </summary>
+    public async Task AcknowledgeAsync(Guid runId, string note, IRunHistory history, DateTimeOffset at, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(history);
+        if (_barrier.Find(runId) is { } hazard)
+        {
+            if (hazard.PendingOperations > 0)
+                throw new RunStillActiveException();
+            if (!hazard.TerminalPersisted && hazard.LastKnown is { } last)
+            {
+                try
+                {
+                    await _journal.PublishAsync(last, ct).ConfigureAwait(false);
+                    _barrier.MarkPersisted(runId);
+                }
+                catch (Exception)
+                {
+                    // The acknowledgement below fails as well if the record is still missing; the barrier then stays.
+                }
+            }
+        }
+        await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+        if (!_barrier.TryResolve(runId)) throw new RunStillActiveException();
+    }
 
     /// <summary>
     /// Requests an immediate stop of the queue that is currently running. No countdown; safe from any thread.
@@ -77,6 +121,10 @@ public sealed class QueueScheduler(
         try
         {
             var queueId = Guid.NewGuid();
+            // In-session barrier first: it does not depend on the database being writable.
+            if (!_barrier.IsClear)
+                return new QueueResult(queueId, QueueStatus.Blocked, [], items.Select(x => x.Game).ToList(), false,
+                    _barrier.HasPendingOperations ? ReasonCodes.AdapterUnresponsive : ReasonCodes.UnresolvedRuns);
             // A previous run may still own processes (e.g. after a crash). Nothing starts until the user resolves it.
             int unresolved;
             try { unresolved = await _journal.CountUnresolvedAsync(CancellationToken.None).ConfigureAwait(false); }
@@ -143,6 +191,7 @@ public sealed class QueueScheduler(
         private readonly RunStateMachine _sm = new();
         private readonly Guid _runId = Guid.NewGuid();
         private long _lastActivity;
+        private bool _lastPublishSucceeded;
         public bool JournalFaulted { get; private set; }
 
         private IGameAdapter Adapter => item.Adapter;
@@ -237,8 +286,10 @@ public sealed class QueueScheduler(
                     started ? RunOutcome.Indeterminate : null, started ? CleanupState.Unconfirmed : CleanupState.NotRequired,
                     ReasonCodes.InternalError, DateTimeOffset.UtcNow);
             }
+            var persisted = true;
             try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { JournalFaulted = true; }
+            catch (Exception) { JournalFaulted = true; persisted = false; }
+            if (update.Cleanup == CleanupState.Unconfirmed) owner._barrier.MarkUnconfirmed(update, persisted);
             owner.Raise(update);
             return update;
         }
@@ -426,14 +477,26 @@ public sealed class QueueScheduler(
             _sm.SetCleanup(cleanup);
             var confirmed = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
             _sm.MoveTo(confirmed ? RunPhase.Finished : RunPhase.Blocked);
-            return (await PublishAsync().ConfigureAwait(false), !confirmed);
+            var update = await PublishAsync().ConfigureAwait(false);
+            // Fail closed: the barrier holds whether or not the database accepted the final state.
+            if (!confirmed) owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);
+            return (update, !confirmed);
         }
 
         private async Task<RunUpdate> PublishAsync()
         {
             var update = Snapshot();
-            try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
-            catch (Exception) { JournalFaulted = true; }
+            try
+            {
+                await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false);
+                _lastPublishSucceeded = true;
+            }
+            catch (Exception)
+            {
+                JournalFaulted = true;
+                _lastPublishSucceeded = false;
+            }
+            owner._barrier.Observe(update, _lastPublishSucceeded);
             owner.Raise(update);
             return update;
         }

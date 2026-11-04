@@ -95,7 +95,9 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, Time
                 Quarantine(QuarantineGroupAsync(group));
                 throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: false, "进程组 RunId 不匹配。");
             }
-            // Revoked while the supervisor was creating the process: the adapter never receives it.
+            // Revoked while the supervisor was creating the process: the adapter never receives it, and it is
+            // terminated now rather than waiting for a later RevokeAsync (the run may already have been abandoned).
+            Quarantine(QuarantineGroupAsync(group));
             throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: false,
                 "启动期间运行许可被撤销；已创建的进程将被终止。");
         }
@@ -136,22 +138,29 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, Time
         }
         foreach (var group in groups)
         {
+            Task<CleanupState>? termination = null;
             try
             {
-                var termination = group.TerminateAllAsync(timeout, CancellationToken.None);
+                termination = group.TerminateAllAsync(timeout, CancellationToken.None);
                 if (await termination.WaitAsync(timeout, _time).ConfigureAwait(false) != CleanupState.Confirmed)
                     confirmed = false;
             }
-            catch (Exception) { confirmed = false; }
+            catch (Exception)
+            {
+                termination?.ObserveLater();
+                confirmed = false;
+            }
+            Task? release = null;
             try
             {
                 // Releasing the group closes its Job handle (kill-on-close backup). Never proof of cleanup on its own.
-                await group.DisposeAsync().AsTask().WaitAsync(timeout, _time).ConfigureAwait(false);
+                release = group.DisposeAsync().AsTask();
+                await release.WaitAsync(timeout, _time).ConfigureAwait(false);
             }
-            catch (Exception) { /* termination result above decides; disposal is best effort */ }
+            catch (Exception) { release?.ObserveLater(); /* termination result above decides */ }
         }
         try { await quarantine.WaitAsync(timeout, _time).ConfigureAwait(false); }
-        catch (Exception) { confirmed = false; }
+        catch (Exception) { quarantine.ObserveLater(); confirmed = false; }
         return confirmed;
     }
 

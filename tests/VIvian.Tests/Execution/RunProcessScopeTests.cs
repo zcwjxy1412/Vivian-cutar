@@ -157,9 +157,9 @@ public sealed class RunProcessScopeTests
         finally { release.Set(); }
         var ex = await Assert.ThrowsAsync<EngineStartException>(() => started.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.False(ex.NothingStarted);
-        Assert.False(inner.Started!.Terminated); // not yet: RevokeAsync owns termination
+        Assert.True(inner.Started!.Terminated); // terminated at once, without waiting for RevokeAsync
+        Assert.True(inner.Started.Disposed);
         Assert.True(await scope.RevokeAsync(TimeSpan.FromSeconds(5)));
-        Assert.True(inner.Started.Terminated);
     }
 
     // H-30-1: termination racing registration. A launch still running when the bounded wait ends is never

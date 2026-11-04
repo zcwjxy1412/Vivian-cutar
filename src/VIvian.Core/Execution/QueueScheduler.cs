@@ -102,7 +102,26 @@ public sealed class QueueScheduler(
                 }
             }
         }
-        await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+        try
+        {
+            await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException) when (_barrier.Find(runId) is null)
+        {
+            // M-30-1: a row left open by an earlier session counts as unresolved (it blocks queues) but cannot be
+            // acknowledged while it is open. Close interrupted rows (never as success: started runs become Blocked
+            // with cleanup Unconfirmed) while no queue can start, then try once more.
+            if (Interlocked.CompareExchange(ref _running, 1, 0) != 0) throw new RunStillActiveException();
+            try
+            {
+                await history.ReconcileInterruptedRunsAsync(at, ct).ConfigureAwait(false);
+                await history.AcknowledgeAsync(runId, note, at, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                Volatile.Write(ref _running, 0);
+            }
+        }
         if (!_barrier.TryResolve(runId)) throw new RunStillActiveException();
     }
 
@@ -326,6 +345,9 @@ public sealed class QueueScheduler(
             else _sm.SetBlockReason(ReasonCodes.AdapterUnresponsive);
             _sm.SetCleanup(CleanupState.Unconfirmed);
             _sm.MoveTo(RunPhase.Blocked);
+            // L-30-1: the barrier closes before the state becomes visible anywhere, so a user acknowledging the
+            // published row can never race ahead of it.
+            owner._barrier.MarkUnconfirmed(Snapshot(), persisted: false);
             var update = await PublishAsync().ConfigureAwait(false);
             owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);
             return (update, true);
@@ -439,13 +461,15 @@ public sealed class QueueScheduler(
                     note = $"适配器操作 {operation} 在时限之后才返回。";
                     if (onLateResult is not null)
                     {
+                        Task? release = null;
                         try
                         {
-                            var release = onLateResult(value);
+                            release = onLateResult(value);
                             await release.WaitAsync(Options.DisposeTimeout, Time, CancellationToken.None).ConfigureAwait(false);
                         }
                         catch (TimeoutException)
                         {
+                            release?.ObserveLater();
                             owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
                             note += " 迟到结果释放超时；需核实资源归属。";
                         }
@@ -462,15 +486,17 @@ public sealed class QueueScheduler(
                 }
                 foreach (var d in disposables) d.Dispose();
                 // A journal that never returns must not keep PendingOperations permanently high.
+                Task? write = null;
                 try
                 {
                     using var auditCts = new CancellationTokenSource(Options.JournalTimeout, Time);
-                    var write = owner._journal.AppendEventsAsync(
+                    write = owner._journal.AppendEventsAsync(
                         [new RunEvent(_runId, Time.GetUtcNow(), RunEventKind.Warning, note)], auditCts.Token);
                     await write.WaitAsync(Options.JournalTimeout, Time, CancellationToken.None).ConfigureAwait(false);
                 }
                 catch (Exception)
                 {
+                    write?.ObserveLater();
                     owner._barrier.RequireVerifiedRecovery(_runId, item.Game);
                 }
             }
@@ -498,6 +524,7 @@ public sealed class QueueScheduler(
                     started ? RunOutcome.Indeterminate : null, started ? CleanupState.Unconfirmed : CleanupState.NotRequired,
                     ReasonCodes.InternalError, DateTimeOffset.UtcNow);
             }
+            if (update.Cleanup == CleanupState.Unconfirmed) owner._barrier.MarkUnconfirmed(update, persisted: false);
             var persisted = true;
             try { await owner._journal.PublishAsync(update, CancellationToken.None).ConfigureAwait(false); }
             catch (Exception) { JournalFaulted = true; persisted = false; }
@@ -694,6 +721,8 @@ public sealed class QueueScheduler(
             _sm.SetCleanup(cleanup);
             var confirmed = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
             _sm.MoveTo(confirmed ? RunPhase.Finished : RunPhase.Blocked);
+            // L-30-1: close the barrier before the terminal state is published or shown.
+            if (!confirmed) owner._barrier.MarkUnconfirmed(Snapshot(), persisted: false);
             var update = await PublishAsync().ConfigureAwait(false);
             // Fail closed: the barrier holds whether or not the database accepted the final state.
             if (!confirmed) owner._barrier.MarkUnconfirmed(update, _lastPublishSucceeded);

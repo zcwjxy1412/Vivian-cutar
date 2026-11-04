@@ -465,4 +465,330 @@ public sealed class AdapterHangTests : IDisposable
             gate.Set();
         }
     }
+
+    // ---------------------------------------------------------------- H-30 (lead remediation)
+
+    private sealed class FakeGroup(Guid runId) : ISupervisedProcessGroup
+    {
+        public volatile bool Terminated;
+        public volatile bool Disposed;
+        public Func<Task<CleanupState>>? Terminate;
+        public Guid RunId => runId;
+        public int RootProcessId => 4242;
+        public DateTimeOffset RootStartTime => Start;
+        public IAsyncEnumerable<string> OutputLines => Empty();
+        private static async IAsyncEnumerable<string> Empty() { await Task.CompletedTask; yield break; }
+        public int ActiveProcessCount => Terminated ? 0 : 1;
+        public Task<int> WaitForRootExitAsync(CancellationToken ct) => new TaskCompletionSource<int>().Task.WaitAsync(ct);
+        public Task<bool> SendInputLineAsync(string line, CancellationToken ct) => Task.FromResult(false);
+        public Task<CleanupState> TerminateAllAsync(TimeSpan timeout, CancellationToken ct)
+        {
+            Terminated = true;
+            return Terminate?.Invoke() ?? Task.FromResult(CleanupState.Confirmed);
+        }
+        public ValueTask DisposeAsync() { Disposed = true; return ValueTask.CompletedTask; }
+    }
+
+    /// <summary>Supervisor whose launch blocks the calling thread (like CreateProcess + Job assignment).</summary>
+    private sealed class BlockingSupervisor(ManualResetEventSlim entered, ManualResetEventSlim release) : IProcessSupervisor
+    {
+        public FakeGroup? Group;
+        public Task<ISupervisedProcessGroup> StartAsync(ProcessLaunchSpec spec, Guid runId, CancellationToken ct)
+        {
+            entered.Set();
+            release.Wait();
+            return Task.FromResult<ISupervisedProcessGroup>(Group = new FakeGroup(runId));
+        }
+    }
+
+    private sealed class FixedSupervisor(Func<Guid, FakeGroup> create) : IProcessSupervisor
+    {
+        public FakeGroup? Group;
+        public Task<ISupervisedProcessGroup> StartAsync(ProcessLaunchSpec spec, Guid runId, CancellationToken ct) =>
+            Task.FromResult<ISupervisedProcessGroup>(Group = create(runId));
+    }
+
+    /// <summary>Launches through the supplied supervisor, ignoring cancellation, then optionally hangs.</summary>
+    private sealed class LaunchingAdapter(Task? hangAfterLaunch = null, Func<Guid, IEngineRun>? lateRun = null) : IGameAdapter
+    {
+        public Exception? LaunchError;
+        public GameId Game => GameId.Genshin;
+        public string RuleVersion => "launching-1";
+        public bool IsSimulation => true;
+        public Task<PreflightResult> PreflightAsync(RunContext c, CancellationToken ct) => Task.FromResult(PreflightResult.Ok());
+        public async Task<IEngineRun> StartAsync(RunContext c, IProcessSupervisor s, CancellationToken ct)
+        {
+            try
+            {
+                await s.StartAsync(new ProcessLaunchSpec("fake.exe", [], "."), c.RunId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                LaunchError = ex;
+                throw;
+            }
+            if (hangAfterLaunch is not null) await hangAfterLaunch.ConfigureAwait(false);
+            return lateRun?.Invoke(c.RunId) ?? new HangingRun(c.RunId, HangPoint.Reconcile, Task.CompletedTask);
+        }
+    }
+
+    // H-30-1: an emergency stop while the supervisor is still creating the process. Neither the stop request nor
+    // the scheduler waits for the creation; the queue ends with the hazard held, and the process that appears
+    // afterwards is terminated instead of being handed to the adapter.
+    [Fact]
+    public async Task H30_EmergencyStopDuringLaunchNeverWaitsAndTheLaunchedGroupIsTerminated()
+    {
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var time = new FakeTimeProvider(Start);
+        var supervisor = new BlockingSupervisor(entered, release);
+        var adapter = new LaunchingAdapter();
+        var scheduler = new QueueScheduler(new InMemoryJournal(), supervisor,
+            Options with { DisposeTimeout = TimeSpan.FromSeconds(2) }, time);
+        using var stop = new CancellationTokenSource();
+        var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)], stop.Token);
+        try
+        {
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "launch not reached");
+            // Repeated, concurrent stop requests from the UI token and the scheduler API.
+            var stops = Task.WhenAll(Task.Run(stop.Cancel), Task.Run(scheduler.EmergencyStop),
+                Task.Run(stop.Cancel), Task.Run(scheduler.EmergencyStop));
+            await stops.WaitAsync(TimeSpan.FromSeconds(5));
+            // The launch is still blocked: the queue must end anyway (emergency grace + bounded revoke).
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60));
+            Assert.True(result is not null, "queue waited for a launch in progress");
+            Assert.False(entered.IsSet && release.IsSet);
+            var run = result!.Runs.Single();
+            Assert.NotEqual(RunOutcome.Success, run.Outcome);
+            Assert.Equal(CleanupState.Unconfirmed, run.Cleanup);
+            Assert.True(Assert.Single(scheduler.SessionHazards).RequiresVerifiedRecovery);
+            Assert.False(scheduler.IsRunning);
+        }
+        finally { release.Set(); }
+
+        await WaitUntilAsync(() => supervisor.Group is { Terminated: true, Disposed: true }, "late group terminated");
+        await WaitUntilAsync(() => adapter.LaunchError is not null, "adapter saw the refusal");
+        var launchError = Assert.IsType<EngineStartException>(adapter.LaunchError);
+        Assert.False(launchError.NothingStarted);
+        await WaitUntilAsync(() => scheduler.SessionHazards.All(h => h.PendingOperations == 0), "late start observed");
+        Assert.True(Assert.Single(scheduler.SessionHazards).RequiresVerifiedRecovery);
+    }
+
+    // H-30-2: safe barrier behaviour under repeated emergency stops while the stop call itself hangs.
+    [Fact]
+    public async Task H30_RepeatedEmergencyStopsEndTheQueueOnceAndKeepTheBarrierClosed()
+    {
+        var time = new FakeTimeProvider(Start);
+        var scheduler = new QueueScheduler(new InMemoryJournal(), new NoProcessSupervisor(), Options, time);
+        var hanging = new HangingAdapter(GameId.Genshin, HangPoint.Stop);
+        using var stop = new CancellationTokenSource();
+        var queue = scheduler.RunAsync([new QueueItem(GameId.Genshin, hanging, HangLimits)], stop.Token);
+        try
+        {
+            await WaitUntilAsync(() => hanging.Run is not null, "run started");
+            for (var i = 0; i < 5; i++)
+            {
+                scheduler.EmergencyStop();
+                stop.Cancel();
+                time.Advance(TimeSpan.FromSeconds(1));
+                await Task.Delay(5);
+            }
+            var result = await DriveAsync(queue, time, TimeSpan.FromSeconds(60));
+            Assert.NotNull(result);
+            Assert.Equal(CleanupState.Unconfirmed, result!.Runs.Single().Cleanup);
+            Assert.Equal(1, hanging.Run!.StopRequests); // escalation happens once, not once per click
+            scheduler.EmergencyStop(); // after the queue ended: harmless
+            var hazard = Assert.Single(scheduler.SessionHazards);
+            Assert.True(hazard.PendingOperations > 0);
+            Assert.Equal(QueueStatus.Blocked,
+                (await scheduler.RunAsync([new QueueItem(GameId.StarRail, Completes(GameId.StarRail))])).Status);
+        }
+        finally { hanging.Release.TrySetResult(); }
+    }
+
+    // H-30-2: process termination, late-result disposal and the audit write all time out at once. Every wait is
+    // bounded, bookkeeping ends, and the process hazard stays: nothing becomes Confirmed.
+    [Fact]
+    public async Task H30_ConcurrentCleanupTimeoutsAreAllBoundedAndNeverConfirmed()
+    {
+        var time = new FakeTimeProvider(Start);
+        var startRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        NeverDisposedRun? late = null;
+        var supervisor = new FixedSupervisor(id => new FakeGroup(id) { Terminate = () => new TaskCompletionSource<CleanupState>().Task });
+        var adapter = new LaunchingAdapter(startRelease.Task, id => late = new NeverDisposedRun(id));
+        var journal = new HangingJournal(hangCount: false, hangEvents: true);
+        var scheduler = new QueueScheduler(journal, supervisor, Options with
+        {
+            StartTimeout = TimeSpan.FromSeconds(2), DisposeTimeout = TimeSpan.FromSeconds(2), JournalTimeout = TimeSpan.FromSeconds(2),
+        }, time);
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
+        try
+        {
+            Assert.NotNull(result);
+            Assert.Equal(QueueStatus.Blocked, result!.Status);
+            Assert.Equal(CleanupState.Unconfirmed, result.Runs.Single().Cleanup);
+            Assert.True(supervisor.Group!.Terminated);
+            Assert.True(supervisor.Group.Disposed); // Job handle released (kill-on-close), still not proof
+            var hazard = Assert.Single(scheduler.SessionHazards);
+            Assert.True(hazard.RequiresVerifiedRecovery); // termination never confirmed
+            Assert.True(hazard.PendingOperations > 0);
+
+            startRelease.TrySetResult(); // the abandoned StartAsync returns a run whose disposal never ends
+            await WaitUntilAsync(() => late?.DisposeEntered.Task.IsCompleted == true, "late dispose entered");
+            for (var i = 0; i < 20 && scheduler.SessionHazards.Any(h => h.PendingOperations > 0); i++)
+            {
+                time.Advance(TimeSpan.FromSeconds(1));
+                await Task.Delay(10);
+            }
+            hazard = Assert.Single(scheduler.SessionHazards);
+            Assert.Equal(0, hazard.PendingOperations); // bookkeeping ended…
+            Assert.True(hazard.RequiresVerifiedRecovery); // …the safety hazard did not
+            await Assert.ThrowsAsync<RunStillActiveException>(() =>
+                scheduler.AcknowledgeAsync(result.Runs.Single().RunId, "generic confirmation", new LocalDatabase(Path.Combine(_root, "unused.db")), Start));
+            Assert.Equal(QueueStatus.Blocked,
+                (await scheduler.RunAsync([new QueueItem(GameId.StarRail, Completes(GameId.StarRail))])).Status);
+        }
+        finally { late?.Release.TrySetResult(); startRelease.TrySetResult(); }
+    }
+
+    private sealed class ThrowingDisposeRun(Guid id) : IEngineRun
+    {
+        public volatile bool DisposeCalled;
+        public Guid RunId => id;
+        public IAsyncEnumerable<RunEvent> Events => Empty();
+        private static async IAsyncEnumerable<RunEvent> Empty() { await Task.CompletedTask; yield break; }
+        public Task<RunVerdict> WaitForVerdictAsync(CancellationToken ct) => new TaskCompletionSource<RunVerdict>().Task.WaitAsync(ct);
+        public Task<StopResult> RequestStopAsync(StopMode mode, CancellationToken ct) => Task.FromResult(new StopResult(CleanupState.Pending, "t"));
+        public Task<CleanupState> ReconcileAsync(CancellationToken ct) => Task.FromResult(CleanupState.Confirmed);
+        public async ValueTask DisposeAsync()
+        {
+            DisposeCalled = true;
+            await Task.Yield();
+            throw new LateFailure();
+        }
+    }
+
+    // H-30-2: processing the late result throws. The fault is observed, recorded, and keeps the hazard.
+    [Fact]
+    public async Task H30_LateResultProcessingThatThrowsIsObservedAndKeepsTheHazard()
+    {
+        var unobserved = 0;
+        EventHandler<UnobservedTaskExceptionEventArgs> handler = (_, e) =>
+        {
+            if (e.Exception.InnerExceptions.Any(x => x is LateFailure)) Interlocked.Increment(ref unobserved);
+        };
+        TaskScheduler.UnobservedTaskException += handler;
+        var startRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var time = new FakeTimeProvider(Start);
+            var db = new LocalDatabase(Path.Combine(_root, "late-throw.db"));
+            await db.InitializeAsync();
+            ThrowingDisposeRun? late = null;
+            var adapter = new LaunchingAdapter(startRelease.Task, id => late = new ThrowingDisposeRun(id));
+            var scheduler = new QueueScheduler(db, new FixedSupervisor(id => new FakeGroup(id)),
+                Options with { StartTimeout = TimeSpan.FromSeconds(2) }, time);
+            var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
+            Assert.NotNull(result);
+            var runId = result!.Runs.Single().RunId;
+            startRelease.TrySetResult();
+            await WaitUntilAsync(() => scheduler.SessionHazards.All(h => h.PendingOperations == 0), "late result observed");
+            Assert.True(late!.DisposeCalled);
+            Assert.True(Assert.Single(scheduler.SessionHazards).RequiresVerifiedRecovery);
+            Assert.Contains(await db.ReadEventsAsync(runId, 50), e => e.Message.Contains("释放迟到的结果时出错（LateFailure）"));
+            for (var i = 0; i < 3; i++) { GC.Collect(); GC.WaitForPendingFinalizers(); await Task.Delay(20); }
+            Assert.Equal(0, unobserved);
+        }
+        finally
+        {
+            startRelease.TrySetResult();
+            TaskScheduler.UnobservedTaskException -= handler;
+        }
+    }
+
+    // H-30-2 controlled recovery: a hazard that needs verified recovery cannot be acknowledged in-session. Ending
+    // VIvian closes every Job handle it owns (kill-on-close), so after a restart the stored run (Blocked, cleanup
+    // Unconfirmed) is acknowledged in the normal way. The stored verdict is never rewritten as cleaned up.
+    [Fact]
+    public async Task H30_RestartIsTheControlledRecoveryPathForAnUnresolvedCleanup()
+    {
+        var time = new FakeTimeProvider(Start);
+        var db = new LocalDatabase(Path.Combine(_root, "restart-recovery.db"));
+        await db.InitializeAsync();
+        var supervisor = new FixedSupervisor(id => new FakeGroup(id) { Terminate = () => Task.FromResult(CleanupState.Unconfirmed) });
+        var startRelease = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var adapter = new LaunchingAdapter(startRelease.Task);
+        var scheduler = new QueueScheduler(db, supervisor, Options with { StartTimeout = TimeSpan.FromSeconds(2) }, time);
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]), time, TimeSpan.FromSeconds(20));
+        Assert.NotNull(result);
+        var runId = result!.Runs.Single().RunId;
+        Assert.True(Assert.Single(scheduler.SessionHazards).RequiresVerifiedRecovery);
+        await Assert.ThrowsAsync<RunStillActiveException>(() => scheduler.AcknowledgeAsync(runId, "同一会话", db, Start));
+        startRelease.TrySetResult();
+
+        // "Restart": a new process reconciles interrupted rows and starts with an empty in-memory barrier.
+        await db.ReconcileInterruptedRunsAsync(Start);
+        var restarted = new QueueScheduler(db, new NoProcessSupervisor(), Options, time);
+        var next = Completes(GameId.StarRail);
+        Assert.Equal(QueueStatus.Blocked, (await restarted.RunAsync([new QueueItem(GameId.StarRail, next)])).Status);
+        Assert.Equal(0, next.StartCount);
+        await restarted.AcknowledgeAsync(runId, "重启后确认引擎已结束", db, Start);
+        Assert.Equal(QueueStatus.Completed, (await restarted.RunAsync([new QueueItem(GameId.StarRail, next)])).Status);
+        var stored = (await db.ReadRecentRunsAsync(10)).Single(r => r.RunId == runId);
+        Assert.Equal(CleanupState.Unconfirmed, stored.Cleanup);
+        Assert.NotEqual(RunOutcome.Success, stored.Outcome);
+    }
+
+    // M-30-1: a row an earlier session left open counts as unresolved; acknowledging it closes it first (never as
+    // success) instead of failing forever.
+    [Fact]
+    public async Task M30_AcknowledgingARowLeftOpenByAnEarlierSessionClosesItFirst()
+    {
+        var db = new LocalDatabase(Path.Combine(_root, "left-open.db"));
+        await db.InitializeAsync();
+        var runId = Guid.NewGuid();
+        await db.PublishAsync(new RunUpdate(runId, Guid.NewGuid(), GameId.Genshin, "r1", true, RunPhase.Running,
+            null, CleanupState.Pending, null, Start), default);
+        var scheduler = new QueueScheduler(db, new NoProcessSupervisor(), Options);
+        var next = Completes(GameId.StarRail);
+        Assert.Equal(QueueStatus.Blocked, (await scheduler.RunAsync([new QueueItem(GameId.StarRail, next)])).Status);
+
+        await scheduler.AcknowledgeAsync(runId, "确认已关闭", db, Start);
+
+        var stored = (await db.ReadRecentRunsAsync(10)).Single(r => r.RunId == runId);
+        Assert.Equal(RunPhase.Blocked, stored.Phase);
+        Assert.Equal(CleanupState.Unconfirmed, stored.Cleanup);
+        Assert.Equal(RunOutcome.Indeterminate, stored.Outcome);
+        Assert.NotNull(stored.AcknowledgedAt);
+        Assert.False(scheduler.IsRunning);
+        Assert.Equal(QueueStatus.Completed, (await scheduler.RunAsync([new QueueItem(GameId.StarRail, next)])).Status);
+    }
+
+    private sealed class ObservingJournal : IRunJournal
+    {
+        private readonly InMemoryJournal _inner = new();
+        public QueueScheduler? Scheduler;
+        public bool BarrierClosedWhenBlockedWasPublished;
+        public Task PublishAsync(RunUpdate u, CancellationToken ct)
+        {
+            if (u.Phase == RunPhase.Blocked)
+                BarrierClosedWhenBlockedWasPublished = Scheduler!.SessionHazards.Any(h => h.RunId == u.RunId && h.RequiresAcknowledgement);
+            return _inner.PublishAsync(u, ct);
+        }
+        public Task AppendEventsAsync(IReadOnlyList<RunEvent> e, CancellationToken ct) => _inner.AppendEventsAsync(e, ct);
+        public Task<int> CountUnresolvedAsync(CancellationToken ct) => _inner.CountUnresolvedAsync(ct);
+    }
+
+    // L-30-1: the barrier is closed before the Blocked state is stored or shown.
+    [Fact]
+    public async Task L30_BarrierClosesBeforeTheBlockedStateIsPublished()
+    {
+        var journal = new ObservingJournal();
+        var scheduler = new QueueScheduler(journal, new NoProcessSupervisor(), Options);
+        journal.Scheduler = scheduler;
+        var first = Completes(GameId.Genshin);
+        first.ReconcileResult = CleanupState.Unconfirmed;
+        Assert.Equal(QueueStatus.Blocked, (await scheduler.RunAsync([new QueueItem(GameId.Genshin, first)])).Status);
+        Assert.True(journal.BarrierClosedWhenBlockedWasPublished);
+    }
 }

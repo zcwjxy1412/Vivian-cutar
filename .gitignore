@@ -7,3 +7,17 @@ artifacts/
 *.db-shm
 *.db-wal
 TestResults/
+
+# Test and diagnostic outputs (keep them as CI artifacts, never in Git)
+*.trx
+*.binlog
+*.dmp
+*.coverage
+*.coveragexml
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

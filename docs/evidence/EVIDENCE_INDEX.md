@@ -28,3 +28,16 @@
 5. 逐款 `feature/m3-bettergi-adapter`、`feature/m3-m7a-adapter`、`feature/m3-onedragon-adapter`，各自 PR 和 Windows CI；三款均经实机验收后再验证串行队列。
 
 参见 [M3_PREREQUISITES.md](../M3_PREREQUISITES.md) 的 A1–A5 与 B1–B12。当前没有测试电脑授权或发行包实测证据；**生产适配器、真实游戏测试和“已完成日常”宣称均未开始**。
+
+## Gemini M3 原始研究
+
+以下报告为源码和文档研究输入。发行包、任务完成判定及桌面实测状态仍为 Pending。原文中的版本示例与接入建议见 [独立审查](../reviews/M3_GEMINI_RESEARCH_VALIDATION.md)。
+
+- [BetterGI 审计](../research/M3_BETTERGI_ANALYSIS.md)
+- [March7thAssistant 审计](../research/M3_MARCH7TH_ANALYSIS.md)
+- [ZenlessZoneZero-OneDragon 审计](../research/M3_ONEDRAGON_ANALYSIS.md)
+- [三引擎接口矩阵](../research/M3_ENGINE_INTERFACE_MATRIX.md)
+- [版本兼容与更新策略](../research/M3_VERSION_COMPATIBILITY.md)
+- [适配层架构提案](../architecture/M3_ADAPTER_PROPOSAL.md)
+- [UI/UX 增量规范](../requirements/M3_UI_SPEC.md)
+- [研究总结与八项问答](../research/M3_GEMINI_FINAL_SUMMARY.md)

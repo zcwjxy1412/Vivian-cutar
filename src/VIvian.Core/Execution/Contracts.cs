@@ -51,8 +51,14 @@ public interface ISupervisedProcessGroup : IAsyncDisposable
     Task<int> WaitForRootExitAsync(CancellationToken ct);
     /// <summary>Writes one line to the root process's standard input. False if the engine no longer reads it.</summary>
     Task<bool> SendInputLineAsync(string line, CancellationToken ct);
-    /// <summary>Number of owned processes still alive (root and descendants).</summary>
+    /// <summary>Number of processes alive in the ownership boundary. May include OS helpers the engine started
+    /// implicitly (e.g. a console host), so it is not a count of engine processes.</summary>
     int ActiveProcessCount { get; }
+    /// <summary>
+    /// Whether the given process is inside this group's ownership boundary (VIvian's own job, not merely any job).
+    /// Takes a handle, not a PID, so a reused PID cannot be mistaken for an owned process.
+    /// </summary>
+    bool OwnsProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process);
     /// <summary>Terminates every owned process and waits until none remain or the timeout elapses.</summary>
     Task<CleanupState> TerminateAllAsync(TimeSpan timeout, CancellationToken ct);
 }

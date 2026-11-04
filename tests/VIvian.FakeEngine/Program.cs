@@ -7,6 +7,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Security.Principal;
 
 Console.OutputEncoding = new UTF8Encoding(false);
 var arguments = ParseArguments(args);
@@ -99,6 +100,24 @@ switch (scenario)
         Emit("evidence", "completion");
         return 0;
 
+    case "probe-identity":
+    case "probe-identity-wait":
+    {
+        if (!OperatingSystem.IsWindows()) return 64;
+        using var identity = WindowsIdentity.GetCurrent();
+        Emit("info", "user-sid=" + identity.User?.Value);
+        // Under UAC, the Administrators role is only active in an elevated token.
+        Emit("info", "elevated=" + new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator));
+        // NULL job handle: "is this process in ANY job". That alone cannot prove membership in VIvian's job;
+        // the test checks VIvian's own job from the parent side and records this value only as context.
+        Emit("info", "api-ok=" + JobProbe.IsProcessInJob(JobProbe.GetCurrentProcess(), IntPtr.Zero, out var insideAnyJob));
+        Emit("info", "any-job-member=" + insideAnyJob);
+        if (scenario == "probe-identity") return 0;
+        Emit("info", "waiting");
+        while (!Pause(60_000)) { }
+        return HonouredStop();
+    }
+
     case "sleep-forever":
         Thread.Sleep(Timeout.Infinite);
         return 0;
@@ -120,4 +139,15 @@ internal static class HandleProbe
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetHandleInformation(IntPtr handle, out uint flags);
+}
+
+internal static class JobProbe
+{
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsProcessInJob(IntPtr processHandle, IntPtr jobHandle,
+        [MarshalAs(UnmanagedType.Bool)] out bool result);
 }

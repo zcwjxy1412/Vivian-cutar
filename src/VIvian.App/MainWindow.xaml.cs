@@ -26,6 +26,17 @@ public partial class MainWindow : Window
         };
     }
 
+    private void BrowseReleaseArchive(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择官方 March7thAssistant 发行包",
+            Filter = "官方发行包 (*.zip;*.7z)|*.zip;*.7z|所有文件 (*.*)|*.*",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) == true && DataContext is MainViewModel vm) vm.ReleaseArchivePath = dialog.FileName;
+    }
+
     private static readonly TimeSpan ShutdownStopTimeout = TimeSpan.FromSeconds(30);
     private bool _stopping;
     private bool _closeAfterStop;

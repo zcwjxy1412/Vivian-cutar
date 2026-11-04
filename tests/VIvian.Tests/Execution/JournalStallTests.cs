@@ -278,6 +278,7 @@ public sealed class JournalStallTests
 
     private sealed class Group(Guid runId) : ISupervisedProcessGroup
     {
+        public bool OwnsProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process) => false; // simulated: owns nothing
         public Guid RunId => runId;
         public int RootProcessId => 7;
         public DateTimeOffset RootStartTime => Start;

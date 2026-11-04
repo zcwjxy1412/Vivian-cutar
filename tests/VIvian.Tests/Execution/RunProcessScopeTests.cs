@@ -9,6 +9,7 @@ public sealed class RunProcessScopeTests
 {
     private sealed class Group(Guid id) : ISupervisedProcessGroup
     {
+        public bool OwnsProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process) => false; // simulated: owns nothing
         public Guid RunId => id;
         public int RootProcessId => 1;
         public DateTimeOffset RootStartTime => DateTimeOffset.UtcNow;

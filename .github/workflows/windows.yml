@@ -14,6 +14,13 @@ jobs:
       - name: Build, test, publish and WPF smoke
         shell: pwsh
         run: ./scripts/Build.ps1 -SmokeTest
+      - name: Upload development build (simulated engines only)
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-dev-win-x64
+          path: artifacts/VIvian-win-x64.zip
+          if-no-files-found: error
       - name: Preserve build evidence and portable preview
         if: always()
         uses: actions/upload-artifact@v6

@@ -11,6 +11,7 @@
 | [`architecture/ADR-007-M3-PRIVILEGE-BOUNDARY.md`](architecture/ADR-007-M3-PRIVILEGE-BOUNDARY.md) | M3 权限与进程身份边界（**提案**，不能据此启用生产适配器） |
 | [`M3_PREREQUISITES.md`](M3_PREREQUISITES.md) | 接入真实引擎之前必须满足的条件 |
 | [`evidence/EVIDENCE_INDEX.md`](evidence/EVIDENCE_INDEX.md) | M3 证据索引：已固定的上游源码事实与仍为 Pending 的实测项 |
+| [`RUN_ON_WINDOWS.md`](RUN_ON_WINDOWS.md) | 下载和运行 Windows 开发版（模拟引擎） |
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | 故障排查 |
 
 ## 2. 验收记录（保留，不改写）

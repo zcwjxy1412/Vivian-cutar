@@ -29,6 +29,18 @@
 
 参见 [M3_PREREQUISITES.md](../M3_PREREQUISITES.md) 的 A1–A5 与 B1–B12。当前没有测试电脑授权或发行包实测证据；**生产适配器、真实游戏测试和“已完成日常”宣称均未开始**。
 
+## 权限与协作进度（2026-11-04）
+
+- [M3 任务与依赖](../M3_TASK_BOARD.md)：Codex / DeepSeek 文件边界、Issue 和 PR。
+- [权限与 Job 验证记录](M3_PRIVILEGE_BOUNDARY_VALIDATION.md)：无害程序的 Windows CI 覆盖矩阵和待授权的桌面 UAC 步骤。#16 仍为 Open，ADR-007 保持提案；CI 运行结果见该记录。
+- [调度器 PR #20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20)：取消令牌异常、停止时序、冲突证据和阻断摘要回归；CI 与 DeepSeek 复核状态以 PR 为准。
+
+## 星铁只读发现进度（2026-11-04）
+
+- 0.3.0-dev（分支 `feature/m3-engine-readiness`）：整个路径链拒绝链接；读取时禁止其他程序写入；读取前后核对文件身份；所有文件系统查询都有时限；读取 `assets/config/version.txt`。只有当 m7a.exe 与用户提供的、和官方 v2026.10.31 发布摘要完全一致的 `March7thAssistant_full.zip` 包内文件逐字节相同时，才显示“已验证”。官方摘要来自 GitHub 发布元数据（见发行包审计），**本项目尚未独立下载并重新计算**。“已验证”不会开放任何 CLI 查询或任务。
+
+- [March7thAssistant 发行包门禁](M3_MARCH7TH_READONLY_EVIDENCE.md)：本地路径、`m7a.exe`、版本元数据与 SHA-256 的只读发现；官方完整发行包、CLI 只读输出及任务清单仍待核验。未验证时不启动查询或游戏。
+
 ## Gemini M3 原始研究
 
 以下报告为源码和文档研究输入。发行包、任务完成判定及桌面实测状态仍为 Pending。原文中的版本示例与接入建议见 [独立审查](../reviews/M3_GEMINI_RESEARCH_VALIDATION.md)。

@@ -8,21 +8,21 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <StackPanel><TextBlock Text="VIvian" FontSize="32" FontWeight="Bold"/><TextBlock Text="每天的旅程，从这里开始。" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/></StackPanel>
-<Border Grid.Column="1" Background="#3A2A12" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="M2 · 模拟模式 · 未接入真实引擎" Foreground="#F2CC85"/></Border>
+<Border Grid.Column="1" Background="#3A2A12" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="开发版 0.3.0 · 模拟引擎 · 真实任务未开放" Foreground="#F2CC85"/></Border>
 </Grid>
 <TabControl Grid.Row="1" Background="#0D1523" BorderThickness="0" Padding="0,20,0,0">
 <TabItem Header="概览"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
 <Border Background="{StaticResource Surface}" CornerRadius="16" Padding="24" Margin="0,0,0,20"><StackPanel>
 <TextBlock Text="准备好你的三段旅程" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="先保存引擎位置，检查本地基础服务。真实自动日常将在三款引擎完成实机验证后开放；在此之前可在“模拟队列”中体验调度流程。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
-<WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="运行基础自检" Command="{Binding CheckCommand}"/><TextBlock Text="仅检查 VIvian，不启动游戏" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/></WrapPanel>
+<TextBlock Text="在“引擎设置”中填写三个引擎的安装目录，VIvian 会只读检查它们。真实自动日常要等每款引擎通过兼容与安全验证后才会开放；在此之前可在“模拟队列”中体验调度、停止和结果判定。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
+<WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="检查全部引擎（只读）" Command="{Binding CheckEnginesCommand}"/><Button Content="运行基础自检" Command="{Binding CheckCommand}"/><TextBlock Text="只读取文件信息，不启动任何程序或游戏" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/></WrapPanel>
 </StackPanel></Border>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate>
 <Border Background="{StaticResource Surface}" CornerRadius="12" Padding="20" Margin="0,0,0,12"><Grid>
 <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <TextBlock Text="{Binding Glyph}" FontSize="24" Foreground="#93B3FF" VerticalAlignment="Center"/>
-<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/></StackPanel>
-<TextBlock Grid.Column="2" Text="尚未接入" Foreground="#E5BF76" VerticalAlignment="Center" Margin="12,0,0,0"/>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/><TextBlock Text="{Binding Evidence}" Foreground="{StaticResource Muted}" Margin="0,5,12,0" TextWrapping="Wrap"/><TextBlock Text="{Binding Execution}" Foreground="#F2CC85" Margin="0,5,12,0"/></StackPanel>
+<TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" AutomationProperties.Name="引擎状态"/>
 </Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 <TextBlock Text="此版本没有真实游戏任务执行能力；模拟队列的结果均标注为【模拟】，不会被当作日常完成。" Foreground="{StaticResource Muted}" Margin="0,8,0,16"/>
 </StackPanel></ScrollViewer></TabItem>
@@ -31,6 +31,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Border Background="#3A2A12" CornerRadius="12" Padding="16" Margin="0,0,0,16"><StackPanel>
 <TextBlock Text="模拟模式：这里的所有结果都是演示，不代表任何游戏的真实日常。" FontWeight="SemiBold" Foreground="#F2CC85"/>
 <TextBlock Text="不会启动游戏或任何程序，不读写游戏文件，也不操作键盘鼠标。用于检验 VIvian 的串行调度、停止与结果判定逻辑。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
+<TextBlock Text="三款真实引擎在这个版本中都没有就绪：即使引擎显示“已验证”，队列也只会运行模拟引擎。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
 </StackPanel></Border>
 <Grid Grid.Row="1" Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <ItemsControl ItemsSource="{Binding Games}" IsEnabled="{Binding IsIdle}"><ItemsControl.ItemTemplate><DataTemplate>
@@ -65,7 +66,14 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="{Binding Name}" FontSize="18" Margin="0,0,0,10"/>
 <TextBox Text="{Binding InstallPath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name}" ToolTip="引擎安装目录"/>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<WrapPanel Margin="0,12,0,0"><Button Content="保存路径" Command="{Binding SaveCommand}"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}"/></WrapPanel>
+<WrapPanel Margin="0,12,0,0"><Button Content="保存路径" Command="{Binding SaveCommand}"/><Button Content="检查全部引擎（只读）" Command="{Binding CheckEnginesCommand}"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}"/></WrapPanel>
+<Border Background="{StaticResource Surface}" Padding="20" CornerRadius="12" Margin="0,20,0,0"><StackPanel>
+<TextBlock Text="核对星铁官方发行包（可选）" FontSize="18" Margin="0,0,0,6"/>
+<TextBlock Text="选择从 March7thAssistant 官方 GitHub Release 下载的 March7thAssistant_full.zip。VIvian 计算它的 SHA-256 并与官方公布的摘要比对，再从压缩包内读取 m7a.exe 的摘要，用来核对上面填写的安装目录。不解压、不运行任何文件；核对结果只在本次运行中有效。" Foreground="{StaticResource Muted}" Margin="0,0,0,10"/>
+<DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseReleaseArchive" Margin="8,0,0,0"/><TextBox Text="{Binding ReleaseArchivePath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="官方发行包路径" ToolTip="官方发行包文件路径"/></DockPanel>
+<WrapPanel Margin="0,10,0,0"><Button Content="核对官方发行包" Command="{Binding VerifyReleaseCommand}"/></WrapPanel>
+<TextBlock Text="{Binding ReleaseStatus}" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+</StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 <TabItem Header="自检记录"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <StackPanel Margin="0,0,0,16"><TextBlock Text="本地基础自检记录" FontSize="24"/><TextBlock Text="保留最近记录；这里不是游戏任务历史。时间显示为 UTC。" Foreground="{StaticResource Muted}" Margin="0,8,0,12"/><Button Content="刷新记录与配置" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel>
@@ -73,7 +81,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </Grid></TabItem>
 <TabItem Header="关于"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="4">
 <TextBlock Text="一个控制中心，三款独立引擎。" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="VIvian 0.2.0 · M2 执行内核（模拟模式）" Margin="0,14,0,24" Foreground="#93B3FF"/>
+<TextBlock Text="VIvian 0.3.0-dev · M3 开发版（模拟引擎 + 只读引擎检查；真实任务未开放）" Margin="0,14,0,24" Foreground="#93B3FF"/>
 <TextBlock Text="当前已提供：本地配置、SQLite 持久化、日志、单实例保护，以及在模拟模式下的串行调度、紧急停止、运行记录与崩溃后对账。" Margin="0,0,0,16"/>
 <TextBlock Text="尚未提供：真实游戏自动日常、引擎安装更新、回滚及托盘。真实引擎需完成接口与停止能力的实机验证后接入。" Margin="0,0,0,16"/>
 <TextBlock Text="三款引擎由各自开源项目维护。本程序无官方游戏关联，不收集游戏密码，不自动上传诊断信息。" Margin="0,0,0,16"/>

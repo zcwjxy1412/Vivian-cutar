@@ -35,7 +35,7 @@ public sealed class IsolatedCopyTests : IDisposable
         CreateSource();
         var before = Hashes(Source);
         var copy = await IsolatedCopyBuilder.PrepareAsync(Source, Workspace);
-        Assert.Equal(IsolationState.Ready, copy.State);
+        Assert.True(copy.State == IsolationState.Ready, copy.Detail);
         Assert.Equal(before, Hashes(copy.Root!));
         Assert.Equal(before, copy.Files.ToDictionary(f => f.RelativePath, f => f.Sha256));
         Assert.True(File.Exists(Path.Combine(copy.Container!, IsolatedCopyBuilder.MarkerName)));
@@ -300,7 +300,7 @@ public sealed class CliDiagnosticRunnerTests : IDisposable
         foreach (var file in Directory.EnumerateFiles(AppContext.BaseDirectory, "VIvian.FakeEngine*"))
             File.Copy(file, Path.Combine(source, Path.GetFileName(file)));
         var copy = await IsolatedCopyBuilder.PrepareAsync(source, Path.Combine(_base, "ws"));
-        Assert.Equal(IsolationState.Ready, copy.State);
+        Assert.True(copy.State == IsolationState.Ready, copy.Detail);
         var sha = copy.Files.Single(f => f.RelativePath == "VIvian.FakeEngine.exe").Sha256;
         return (copy, new CliDiagnosticRunner(new WindowsProcessSupervisor(), new SyntheticOnlyGate(sha)), sha);
     }
@@ -382,5 +382,27 @@ public sealed class CliDiagnosticRunnerTests : IDisposable
             new Dictionary<string, string> { ["VIVIAN_FAKE_SCENARIO"] = "orphan-child" }, default);
         Assert.Equal(CliRunState.Completed, orphan.State);
         Assert.Equal(CleanupState.Confirmed, orphan.Cleanup);
+    }
+}
+
+public sealed class FileIdentityTests : IDisposable
+{
+    private readonly string _dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "vivian-id-" + Guid.NewGuid().ToString("N"))).FullName;
+    public void Dispose() => TestDirectories.DeleteWithRetry(_dir);
+
+    [WindowsFact]
+    public void LinkCountAndIdentityMatchTheNativeStructure()
+    {
+        var a = Path.Combine(_dir, "a.txt");
+        var b = Path.Combine(_dir, "b.txt");
+        File.WriteAllText(a, "one");
+        File.WriteAllText(b, "two");
+        using var ha = File.OpenHandle(a);
+        using var hb = File.OpenHandle(b);
+        using var ha2 = File.OpenHandle(a);
+        Assert.Equal(1u, ReadOnlyFileAccess.LinkCount(ha));
+        Assert.Equal(ReadOnlyFileAccess.Identity(ha), ReadOnlyFileAccess.Identity(ha2));
+        Assert.NotEqual(ReadOnlyFileAccess.Identity(ha), ReadOnlyFileAccess.Identity(hb));
+        Assert.NotEqual(0u, ReadOnlyFileAccess.Identity(ha)!.Value.Volume);
     }
 }

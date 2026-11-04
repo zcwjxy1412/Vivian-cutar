@@ -88,9 +88,11 @@ public sealed class SchedulerTests
         source.Dispose();
         var first = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
 
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => scheduler.RunAsync([Item(first)], token));
+        // .NET 10 permits registration on an already disposed token source; record that actual contract.
+        var firstResult = await scheduler.RunAsync([Item(first)], token);
+        Assert.Equal(QueueStatus.Completed, firstResult.Status);
         Assert.False(scheduler.IsRunning);
-        Assert.Equal(0, first.StartCount);
+        Assert.Equal(1, first.StartCount);
 
         var next = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
         var result = await scheduler.RunAsync([Item(next)]);

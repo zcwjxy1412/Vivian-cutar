@@ -340,6 +340,35 @@ public sealed class SchedulerTests
         Assert.Equal(0, second.StartCount);
     }
 
+    /// <summary>
+    /// The adapter's cancellation token must already be cancelled when EmergencyStop() returns — not some time later
+    /// on the thread pool — so an adapter checking it can never start a process after the user pressed stop.
+    /// Repeated to make a timing-dependent regression show up reliably.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopIsVisibleOnAdapterTokenWhenStopReturns(bool viaCallerToken)
+    {
+        for (var i = 0; i < 25; i++)
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var adapter = Adapter(GameId.Genshin);
+            adapter.StartGate = gate;
+            var scheduler = NewScheduler();
+            using var caller = new CancellationTokenSource();
+            var queue = scheduler.RunAsync([Item(adapter)], caller.Token);
+            await adapter.StartEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            if (viaCallerToken) caller.Cancel(); else scheduler.EmergencyStop();
+            var visible = adapter.StartToken.IsCancellationRequested; // read immediately, no waiting
+
+            gate.SetResult();
+            await queue.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(visible, $"iteration {i}: adapter token not yet cancelled when the stop call returned");
+        }
+    }
+
     [Fact]
     public async Task BlockingPreflightStopsQueueWithoutStarting()
     {

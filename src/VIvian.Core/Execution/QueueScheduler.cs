@@ -40,7 +40,7 @@ public sealed class QueueScheduler(
 {
     private readonly SchedulerOptions _options = options ?? SchedulerOptions.Default;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
-    private TaskCompletionSource _emergency = NewSignal();
+    private StopSignal _stop = new();
     private int _running;
 
     /// <summary>Raised on a background thread whenever a run changes phase, outcome or cleanup state.</summary>
@@ -56,7 +56,46 @@ public sealed class QueueScheduler(
     /// asynchronously (e.g. from a UI) should stop it by cancelling the token passed to <see cref="RunAsync"/>,
     /// which also works when cancelled before the queue has started.
     /// </summary>
-    public void EmergencyStop() => Volatile.Read(ref _emergency).TrySetResult();
+    public void EmergencyStop() => Volatile.Read(ref _stop).Trigger();
+
+    /// <summary>
+    /// One queue's stop request. <see cref="Trigger"/> marks the adapters' token cancelled before it returns, so the
+    /// stop is observable at that boundary; registered cancellation callbacks run asynchronously
+    /// (<see cref="CancellationTokenSource.CancelAsync"/>), so a slow adapter callback cannot block the caller (e.g. UI).
+    /// </summary>
+    private sealed class StopSignal : IDisposable
+    {
+        private readonly CancellationTokenSource _token = new();
+        private readonly TaskCompletionSource _signal = NewSignal();
+        private int _disposed;
+
+        public Task Requested => _signal.Task;
+        public CancellationToken Token => _token.Token;
+
+        public void Trigger()
+        {
+            if (Volatile.Read(ref _disposed) == 0)
+            {
+                try
+                {
+                    // IsCancellationRequested is true when CancelAsync returns; callbacks run on the thread pool.
+                    var callbacks = _token.CancelAsync();
+                    _ = callbacks.ContinueWith(t => _ = t.Exception, CancellationToken.None,
+                        TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The queue already finished.
+                }
+            }
+            _signal.TrySetResult();
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) _token.Dispose();
+        }
+    }
 
     public async Task<QueueResult> RunAsync(IReadOnlyList<QueueItem> items, CancellationToken ct = default)
     {
@@ -67,15 +106,12 @@ public sealed class QueueScheduler(
             throw new InvalidOperationException("已有队列在运行。");
         try
         {
-            var emergency = NewSignal();
-            Volatile.Write(ref _emergency, emergency);
-            // Cancelling the caller's token (e.g. application shutdown) is treated as an emergency stop.
-            using var registration = ct.Register(() => emergency.TrySetResult());
-            using var stopToken = new CancellationTokenSource();
-            _ = emergency.Task.ContinueWith(_ =>
-            {
-                try { stopToken.Cancel(); } catch (ObjectDisposedException) { /* queue already finished */ }
-            }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            using var stopSignal = new StopSignal();
+            Volatile.Write(ref _stop, stopSignal);
+            var emergency = stopSignal.Requested;
+            // Cancelling the caller's token (e.g. application shutdown) is an emergency stop; if it is already
+            // cancelled, Register runs the trigger synchronously here, before anything starts.
+            using var registration = ct.Register(stopSignal.Trigger);
             var queueId = Guid.NewGuid();
             // A previous run may still own processes (e.g. after a crash). Nothing starts until the user resolves it.
             int unresolved;
@@ -90,13 +126,13 @@ public sealed class QueueScheduler(
             var notStarted = new List<GameId>();
             for (var i = 0; i < items.Count; i++)
             {
-                if (emergency.Task.IsCompleted)
+                if (emergency.IsCompleted)
                 {
                     status = QueueStatus.Cancelled;
                     notStarted.AddRange(items.Skip(i).Select(x => x.Game));
                     break;
                 }
-                var execution = new RunExecution(this, queueId, items[i], emergency.Task, stopToken.Token);
+                var execution = new RunExecution(this, queueId, items[i], emergency, stopSignal.Token);
                 RunUpdate last;
                 bool blocksQueue;
                 try
@@ -111,7 +147,7 @@ public sealed class QueueScheduler(
                 journalFaulted |= execution.JournalFaulted;
                 runs.Add(last);
                 var stop = blocksQueue ? QueueStatus.Blocked
-                    : last.Outcome == RunOutcome.Cancelled || emergency.Task.IsCompleted ? QueueStatus.Cancelled
+                    : last.Outcome == RunOutcome.Cancelled || emergency.IsCompleted ? QueueStatus.Cancelled
                     : (QueueStatus?)null;
                 if (stop is { } s)
                 {

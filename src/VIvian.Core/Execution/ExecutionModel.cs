@@ -47,6 +47,7 @@ public static class ReasonCodes
     public const string UnresolvedRuns = "unresolved_runs";
     public const string InternalError = "internal_error";
     public const string AdapterUnresponsive = "adapter_unresponsive";
+    public const string RealAdapterUnverified = "real_adapter_unverified";
 }
 
 public sealed record RunContext(Guid RunId, Guid QueueId, GameId Game, DateTimeOffset CreatedAt);

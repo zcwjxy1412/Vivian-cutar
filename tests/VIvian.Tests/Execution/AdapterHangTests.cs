@@ -347,6 +347,58 @@ public sealed class AdapterHangTests : IDisposable
         finally { adapter.Run?.Release.TrySetResult(); }
     }
 
+    private sealed class HangingJournal(bool hangCount, bool hangEvents) : IRunJournal
+    {
+        private readonly InMemoryJournal _inner = new();
+        private readonly TaskCompletionSource _never = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task PublishAsync(RunUpdate update, CancellationToken ct) => _inner.PublishAsync(update, ct);
+        public Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct) =>
+            hangEvents ? _never.Task : _inner.AppendEventsAsync(events, ct);
+        public Task<int> CountUnresolvedAsync(CancellationToken ct) =>
+            hangCount ? WaitForever() : _inner.CountUnresolvedAsync(ct);
+        private async Task<int> WaitForever() { await _never.Task.ConfigureAwait(false); return 0; }
+    }
+
+    [Fact]
+    public async Task M30_JournalGateTimeoutBlocksWithoutStartingAdapter()
+    {
+        var time = new FakeTimeProvider(Start);
+        var adapter = Completes(GameId.Genshin);
+        var scheduler = new QueueScheduler(new HangingJournal(hangCount: true, hangEvents: false),
+            new NoProcessSupervisor(), Options with { JournalTimeout = TimeSpan.FromSeconds(2) }, time);
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, adapter)]),
+            time, TimeSpan.FromSeconds(10));
+        Assert.NotNull(result);
+        Assert.Equal(QueueStatus.Blocked, result!.Status);
+        Assert.Equal(ReasonCodes.JournalUnavailable, result.BlockReason);
+        Assert.Equal(0, adapter.StartCount);
+        Assert.False(scheduler.IsRunning);
+    }
+
+    [Fact]
+    public async Task H30_LateAuditWriteThatNeverReturnsDoesNotHoldPendingForever()
+    {
+        var time = new FakeTimeProvider(Start);
+        var journal = new HangingJournal(hangCount: false, hangEvents: true);
+        var scheduler = new QueueScheduler(journal, new NoProcessSupervisor(),
+            Options with { PreflightTimeout = TimeSpan.FromSeconds(2), JournalTimeout = TimeSpan.FromSeconds(2) }, time);
+        var hanging = new HangingAdapter(GameId.Genshin, HangPoint.Preflight);
+        var result = await DriveAsync(scheduler.RunAsync([new QueueItem(GameId.Genshin, hanging)]),
+            time, TimeSpan.FromSeconds(10));
+        Assert.NotNull(result);
+        hanging.Release.TrySetResult();
+        for (var i = 0; i < 10 && scheduler.SessionHazards.Any(h => h.PendingOperations > 0); i++)
+        {
+            await Task.Delay(10);
+            time.Advance(TimeSpan.FromSeconds(1));
+        }
+        var hazard = Assert.Single(scheduler.SessionHazards);
+        Assert.Equal(0, hazard.PendingOperations);
+        Assert.True(hazard.RequiresVerifiedRecovery);
+        Assert.Equal(QueueStatus.Blocked,
+            (await scheduler.RunAsync([new QueueItem(GameId.StarRail, Completes(GameId.StarRail))])).Status);
+    }
+
     private sealed class LateFailure : Exception;
 
     [Fact]

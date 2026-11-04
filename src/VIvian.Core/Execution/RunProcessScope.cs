@@ -11,6 +11,7 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId) : IP
     private readonly List<ISupervisedProcessGroup> _groups = [];
     private bool _revoked;
     private bool _unsafeLaunch;
+    private bool _launchUsed;
 
     public bool HasUnsafeLaunch { get { lock (_gate) return _unsafeLaunch; } }
 
@@ -23,9 +24,10 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId) : IP
     {
         lock (_gate)
         {
-            if (_revoked || requestedRunId != runId || ct.IsCancellationRequested)
+            if (_revoked || _launchUsed || requestedRunId != runId || ct.IsCancellationRequested)
                 throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: true,
-                    "运行许可已撤销，或进程请求的 RunId 不匹配。");
+                    "运行许可已撤销、已使用，或进程请求的 RunId 不匹配。");
+            _launchUsed = true;
             // The Windows implementation creates the suspended process and assigns it to its Job
             // before returning a completed task. Holding this gate closes the revoke/create race.
             var launch = inner.StartAsync(spec, runId, ct);

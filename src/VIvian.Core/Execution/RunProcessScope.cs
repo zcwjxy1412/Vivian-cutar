@@ -13,7 +13,8 @@ namespace VIvian.Core.Execution;
 /// The production supervisor completes StartAsync synchronously (create suspended, assign to Job, resume), so the
 /// "launch in progress" window is the duration of that call.
 /// </summary>
-internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, TimeProvider? time = null) : IProcessSupervisor
+internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, TimeProvider? time = null,
+    Func<bool>? stopRequested = null) : IProcessSupervisor
 {
     private readonly Lock _gate = new();
     private readonly List<ISupervisedProcessGroup> _groups = [];
@@ -27,7 +28,13 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, Time
 
     public bool HasUnsafeLaunch { get { lock (_gate) return _unsafeLaunch; } }
 
-    public bool IsRevoked { get { lock (_gate) return _revoked; } }
+    /// <summary>
+    /// Revoked explicitly, or the queue's stop flag is set. The flag is read directly (never through a cancellation
+    /// callback), so revocation is in effect as soon as the stop request begins.
+    /// </summary>
+    public bool IsRevoked { get { lock (_gate) return RevokedLocked; } }
+
+    private bool RevokedLocked => _revoked || (stopRequested?.Invoke() ?? false);
 
     public void RevokeLaunches()
     {
@@ -38,7 +45,7 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, Time
     {
         lock (_gate)
         {
-            if (_revoked || _launchUsed || requestedRunId != runId || ct.IsCancellationRequested)
+            if (RevokedLocked || _launchUsed || requestedRunId != runId || ct.IsCancellationRequested)
                 throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: true,
                     "运行许可已撤销、已使用，或进程请求的 RunId 不匹配。");
             _launchUsed = true;
@@ -87,7 +94,7 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, Time
                 {
                     // Registered even when revoked meanwhile, so RevokeAsync terminates it.
                     _groups.Add(group);
-                    if (!_revoked) return Task.FromResult(group);
+                    if (!RevokedLocked) return Task.FromResult(group);
                 }
             }
             if (group.RunId != runId)
@@ -153,11 +160,18 @@ internal sealed class RunProcessScope(IProcessSupervisor inner, Guid runId, Time
             Task? release = null;
             try
             {
-                // Releasing the group closes its Job handle (kill-on-close backup). Never proof of cleanup on its own.
+                // Releasing the group closes its Job handle (kill-on-close backup). Required for a confirmed result,
+                // but never sufficient on its own: termination above must also have been confirmed.
                 release = group.DisposeAsync().AsTask();
                 await release.WaitAsync(timeout, _time).ConfigureAwait(false);
             }
-            catch (Exception) { release?.ObserveLater(); /* termination result above decides */ }
+            catch (Exception)
+            {
+                // The owned handles (Job, process, pipes) were not released: kill-on-close has not happened and the
+                // group's resources are not accounted for. Never reported as cleaned up.
+                release?.ObserveLater();
+                confirmed = false;
+            }
         }
         try { await quarantine.WaitAsync(timeout, _time).ConfigureAwait(false); }
         catch (Exception) { quarantine.ObserveLater(); confirmed = false; }

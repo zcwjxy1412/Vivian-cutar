@@ -9,9 +9,12 @@ namespace VIvian.Core.Execution;
 /// <param name="PendingOperations">Adapter calls that were abandoned after their time limit and have not returned yet.</param>
 /// <param name="RequiresAcknowledgement">Cleanup ended unconfirmed; the user must confirm before queues resume.</param>
 /// <param name="TerminalPersisted">Whether the final state was written to the journal successfully.</param>
+/// <param name="RequiresVerifiedRecovery">Live resources may remain whose ownership could not be verified; a generic
+/// acknowledgement cannot clear this in the current session.</param>
+/// <param name="PersistencePending">State writes of this run whose bounded wait gave up and that have not completed.</param>
 public sealed record SessionHazard(
     Guid RunId, GameId Game, RunUpdate? LastKnown, int PendingOperations, bool RequiresAcknowledgement, bool TerminalPersisted,
-    bool RequiresVerifiedRecovery = false);
+    bool RequiresVerifiedRecovery = false, int PersistencePending = 0);
 
 /// <summary>
 /// In-memory, fail-closed record of runs that may still own resources. It is kept independently of persistence,
@@ -31,6 +34,7 @@ internal sealed class SafetyBarrier
         public bool RequiresAcknowledgement { get; set; }
         public bool Persisted { get; set; }
         public bool RecoveryRequired { get; set; }
+        public int PersistencePending { get; set; }
     }
 
     public event Action? Changed;
@@ -43,6 +47,45 @@ internal sealed class SafetyBarrier
     public bool HasPendingOperations
     {
         get { lock (_gate) return _entries.Values.Any(e => e.Pending > 0); }
+    }
+
+    public bool HasPendingPersistence
+    {
+        get { lock (_gate) return _entries.Values.Any(e => e.PersistencePending > 0); }
+    }
+
+    /// <summary>A state write of the run is overdue: the stored state is unknown until it completes.</summary>
+    public void BeginPersistence(Guid runId, GameId game)
+    {
+        lock (_gate) Get(runId, game).PersistencePending++;
+        Raise();
+    }
+
+    public void EndPersistence(Guid runId)
+    {
+        lock (_gate)
+        {
+            if (!_entries.TryGetValue(runId, out var entry)) return;
+            entry.PersistencePending = Math.Max(0, entry.PersistencePending - 1);
+            RemoveIfClear(runId, entry);
+        }
+        Raise();
+    }
+
+    /// <summary>
+    /// A state write failed after the run's launch capability existed: what is stored may not describe a process that
+    /// could exist. The next queue waits for the user; the acknowledgement records no cleanup evidence.
+    /// </summary>
+    public void MarkPersistenceFailed(RunUpdate latest)
+    {
+        lock (_gate)
+        {
+            var entry = Get(latest.RunId, latest.Game);
+            entry.Last = latest;
+            entry.Persisted = false;
+            entry.RequiresAcknowledgement = true;
+        }
+        Raise();
     }
 
     public void BeginOperation(Guid runId, GameId game)
@@ -109,7 +152,7 @@ internal sealed class SafetyBarrier
         lock (_gate)
         {
             if (!_entries.TryGetValue(runId, out var entry)) return true;
-            if (entry.Pending > 0 || entry.RecoveryRequired) return false;
+            if (entry.Pending > 0 || entry.PersistencePending > 0 || entry.RecoveryRequired) return false;
             entry.RequiresAcknowledgement = false;
             RemoveIfClear(runId, entry);
         }
@@ -136,11 +179,11 @@ internal sealed class SafetyBarrier
 
     private void RemoveIfClear(Guid runId, Entry entry)
     {
-        if (entry.Pending == 0 && !entry.RequiresAcknowledgement) _entries.Remove(runId);
+        if (entry.Pending == 0 && entry.PersistencePending == 0 && !entry.RequiresAcknowledgement) _entries.Remove(runId);
     }
 
     private static SessionHazard ToHazard(Guid runId, Entry e) =>
-        new(runId, e.Game, e.Last, e.Pending, e.RequiresAcknowledgement, e.Persisted, e.RecoveryRequired);
+        new(runId, e.Game, e.Last, e.Pending, e.RequiresAcknowledgement, e.Persisted, e.RecoveryRequired, e.PersistencePending);
 
     private void Raise()
     {

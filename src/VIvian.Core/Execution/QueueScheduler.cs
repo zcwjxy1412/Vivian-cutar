@@ -198,6 +198,7 @@ public sealed class QueueScheduler(
     public const int MaxBufferedEvents = 10_000;
     private const int MaxEventBatch = 500;
     private static readonly TimeSpan EventFlushTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan EventDrainTimeout = TimeSpan.FromSeconds(2);
 
     private static TaskCompletionSource NewSignal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -550,8 +551,10 @@ public sealed class QueueScheduler(
                 Options.ReconcileTimeout, emergencyShortens: false).ConfigureAwait(false);
             var cleanup = reconciled is { Status: BoundStatus.Completed, Value: CleanupState.Confirmed }
                 ? CleanupState.Confirmed : CleanupState.Unconfirmed;
-            // Stop reading engine output (prompt), then let already-buffered events reach storage so the record is
-            // complete when the run is reported finished. Bounded, in case an adapter's event stream misbehaves.
+            // The engine has ended (or been stopped): give its event stream a short, bounded chance to complete on its
+            // own, so events emitted before the end are not lost when the pump started late. Then stop reading and let
+            // already-buffered events reach storage. Both waits are bounded in case an adapter's stream misbehaves.
+            await Task.WhenAny(pump, Task.Delay(EventDrainTimeout, Time)).ConfigureAwait(false);
             watchCts.Cancel();
             await Task.WhenAny(pump, Task.Delay(EventFlushTimeout, Time)).ConfigureAwait(false);
             await DisposeRunAsync(run).ConfigureAwait(false);

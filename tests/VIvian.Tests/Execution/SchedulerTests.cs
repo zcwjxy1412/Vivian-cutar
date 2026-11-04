@@ -377,6 +377,53 @@ public sealed class SchedulerTests
         Assert.All(_journal.Events, e => Assert.Equal(runId, e.RunId));
     }
 
+    /// <summary>
+    /// The event pump may start late (thread-pool pressure). Simulated deterministically: the run's event stream only
+    /// becomes readable shortly after reconciliation. Events that were emitted before the run ended must still be stored.
+    /// </summary>
+    [Fact]
+    public async Task EventsAreNotLostWhenTheEventPumpStartsLate()
+    {
+        var journal = new InMemoryJournal();
+        var adapter = new LateReaderAdapter();
+        await new QueueScheduler(journal, new NoProcessSupervisor(), Fast).RunAsync([new QueueItem(GameId.Genshin, adapter)]);
+        Assert.Contains(journal.EventsSnapshot(), e => e.Message == "only line");
+    }
+
+    private sealed class LateReaderAdapter : IGameAdapter
+    {
+        public GameId Game => GameId.Genshin;
+        public string RuleVersion => "late-reader";
+        public bool IsSimulation => true;
+        public Task<PreflightResult> PreflightAsync(RunContext c, CancellationToken ct) => Task.FromResult(PreflightResult.Ok());
+        public Task<IEngineRun> StartAsync(RunContext c, IProcessSupervisor s, CancellationToken ct) =>
+            Task.FromResult<IEngineRun>(new LateReaderRun(c.RunId));
+    }
+
+    private sealed class LateReaderRun : IEngineRun
+    {
+        private readonly System.Threading.Channels.Channel<RunEvent> _events = System.Threading.Channels.Channel.CreateUnbounded<RunEvent>();
+        private readonly ManualResetEventSlim _readable = new(false);
+        public LateReaderRun(Guid id)
+        {
+            RunId = id;
+            _events.Writer.TryWrite(new RunEvent(id, DateTimeOffset.UtcNow, RunEventKind.Output, "only line"));
+            _events.Writer.TryComplete();
+        }
+        public Guid RunId { get; }
+        // The pump's first access blocks until shortly after reconciliation, like a pump started late.
+        public IAsyncEnumerable<RunEvent> Events { get { _readable.Wait(TimeSpan.FromSeconds(10)); return _events.Reader.ReadAllAsync(); } }
+        public Task<RunVerdict> WaitForVerdictAsync(CancellationToken ct) => Task.FromResult(VerdictPolicy.Decide(RunId,
+            [new Evidence(RunId, EvidenceKind.CompletionReported, "late-reader", DateTimeOffset.UtcNow)]));
+        public Task<StopResult> RequestStopAsync(StopMode mode, CancellationToken ct) => Task.FromResult(new StopResult(CleanupState.Pending, "n/a"));
+        public Task<CleanupState> ReconcileAsync(CancellationToken ct)
+        {
+            _ = Task.Run(async () => { await Task.Delay(100); _readable.Set(); });
+            return Task.FromResult(CleanupState.Confirmed);
+        }
+        public ValueTask DisposeAsync() { _readable.Set(); return ValueTask.CompletedTask; }
+    }
+
     [Fact]
     public async Task EventsAreFullyStoredBeforeTheRunIsReportedFinished()
     {

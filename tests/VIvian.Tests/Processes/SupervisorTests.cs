@@ -85,9 +85,8 @@ public sealed class SupervisorTests(ITestOutputHelper output) : IAsyncLifetime
     }
 
     /// <summary>
-    /// Membership in VIvian's OWN Job, checked from the parent side through VIvian's job handle
-    /// (ActiveProcessCount = QueryInformationJobObject on that handle). A probe started outside the supervisor is
-    /// the control group: it must not be counted. Whether the test host itself runs inside some job is recorded,
+    /// Membership in VIvian's OWN Job, checked from the parent side with IsProcessInJob(process, VIvian's job handle).
+    /// A probe started outside the supervisor is the control group: it must not be in VIvian's job. Whether the test host itself runs inside some job is recorded,
     /// because that is exactly what makes an "in any job" check non-discriminating.
     /// </summary>
     [WindowsFact]
@@ -113,8 +112,13 @@ public sealed class SupervisorTests(ITestOutputHelper output) : IAsyncLifetime
             await foreach (var line in group.OutputLines)
                 if (line.EndsWith("|info|waiting", StringComparison.Ordinal)) break;
 
-            // VIvian's job contains exactly its own child; the concurrently running control process is not in it.
-            Assert.Equal(1, group.ActiveProcessCount);
+            // Identity, not counts: Windows may add helper processes (e.g. a console host) to the job.
+            using var child = Process.GetProcessById(group.RootProcessId);
+            Assert.True(group.OwnsProcess(child.SafeHandle), "VIvian's child must be in VIvian's own job");
+            Assert.False(group.OwnsProcess(control.SafeHandle), "the control process must not be in VIvian's job");
+            using (var self = Process.GetCurrentProcess())
+                Assert.False(group.OwnsProcess(self.SafeHandle), "the test host must not be in VIvian's job");
+            Assert.True(group.ActiveProcessCount >= 1);
             Assert.False(control.HasExited);
 
             Assert.True(await group.SendInputLineAsync("stop", default));

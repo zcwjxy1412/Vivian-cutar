@@ -177,6 +177,15 @@ internal sealed class SupervisedProcessGroup : ISupervisedProcessGroup
         }
     }
 
+    public bool OwnsProcess(SafeProcessHandle process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+        if (Volatile.Read(ref _disposed) == 1) return false;
+        return IsProcessInJob(process, _job, out var inJob)
+            ? inJob
+            : throw new Win32Exception(Marshal.GetLastWin32Error(), "IsProcessInJob failed");
+    }
+
     public Task<int> WaitForRootExitAsync(CancellationToken ct) => _exit.Task.WaitAsync(ct);
 
     public async Task<bool> SendInputLineAsync(string line, CancellationToken ct)

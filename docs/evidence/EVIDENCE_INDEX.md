@@ -29,6 +29,10 @@
 
 参见 [M3_PREREQUISITES.md](../M3_PREREQUISITES.md) 的 A1–A5 与 B1–B12。当前没有测试电脑授权或发行包实测证据；**生产适配器、真实游戏测试和“已完成日常”宣称均未开始**。
 
+## 星铁只读发现进度（2026-11-04）
+
+- [March7thAssistant 发行包门禁](M3_MARCH7TH_READONLY_EVIDENCE.md)：本地路径、`m7a.exe`、版本元数据与 SHA-256 的只读发现；官方完整发行包、CLI 只读输出及任务清单仍待核验。未验证时不启动查询或游戏。
+
 ## Gemini M3 原始研究
 
 以下报告为源码和文档研究输入。发行包、任务完成判定及桌面实测状态仍为 Pending。原文中的版本示例与接入建议见 [独立审查](../reviews/M3_GEMINI_RESEARCH_VALIDATION.md)。

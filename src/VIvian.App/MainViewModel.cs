@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Serilog;
 using VIvian.Core;
+using VIvian.Infrastructure.Engines;
 namespace VIvian.App;
 
 public sealed class EngineCard(GameId id, string name, string engine, string glyph) : ObservableObject
@@ -12,6 +13,10 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public long Revision { get; set; }
     private string _installPath = "";
     public string InstallPath { get => _installPath; set => Set(ref _installPath, value); }
+    private string _compatibility = id == GameId.StarRail ? "尚未检查" : "尚未接入";
+    public string Compatibility { get => _compatibility; set => Set(ref _compatibility, value); }
+    private string _evidence = "";
+    public string Evidence { get => _evidence; set => Set(ref _evidence, value); }
 }
 public sealed class MainViewModel : ObservableObject
 {
@@ -30,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand SaveCommand { get; }
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand CheckCommand { get; }
+    public AsyncCommand InspectMarch7thCommand { get; }
     public QueueViewModel Queue { get; }
     public MainViewModel(ISettingsStore settings, IDiagnosticStore history, QueueViewModel queue)
     {
@@ -37,6 +43,7 @@ public sealed class MainViewModel : ObservableObject
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
+        InspectMarch7thCommand = new(() => RunAsync(InspectMarch7thAsync), HandleError);
     }
     public async Task InitializeAsync()
     {
@@ -72,6 +79,22 @@ public sealed class MainViewModel : ObservableObject
     {
         var items = await Task.Run(() => _history.ReadRecentAsync(50));
         History.Clear(); foreach (var item in items) History.Add(item);
+    }
+    private async Task InspectMarch7thAsync()
+    {
+        var card = Engines.Single(x => x.Id == GameId.StarRail);
+        var path = card.InstallPath.Trim();
+        // Off the UI thread: existence checks on a network path or hashing a large file must not freeze the window.
+        var result = await Task.Run(() => March7thReadOnlyInspector.InspectAsync(path));
+        card.Compatibility = result.Compatibility switch
+        {
+            March7thCompatibility.NotInstalled => "未安装 / 路径无效",
+            March7thCompatibility.MissingCli => "缺少 CLI，暂不支持",
+            _ => "发行包未验证，暂不支持查询",
+        };
+        card.Evidence = result.Sha256 is null ? result.Detail
+            : $"文件版本：{result.FileVersion ?? "未知"} · CLI SHA-256：{result.Sha256}。{result.Detail}";
+        Status = "星铁只读检查完成；未运行上游程序或游戏。";
     }
     public async Task CheckFoundationAsync()
     {

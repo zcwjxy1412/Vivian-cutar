@@ -21,8 +21,8 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Border Background="{StaticResource Surface}" CornerRadius="12" Padding="20" Margin="0,0,0,12"><Grid>
 <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <TextBlock Text="{Binding Glyph}" FontSize="24" Foreground="#93B3FF" VerticalAlignment="Center"/>
-<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/></StackPanel>
-<TextBlock Grid.Column="2" Text="尚未接入" Foreground="#E5BF76" VerticalAlignment="Center" Margin="12,0,0,0"/>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/><TextBlock Text="{Binding Evidence}" Foreground="{StaticResource Muted}" Margin="0,5,12,0" TextWrapping="Wrap"/></StackPanel>
+<TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="#E5BF76" VerticalAlignment="Center" Margin="12,0,0,0"/>
 </Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 <TextBlock Text="此版本没有真实游戏任务执行能力；模拟队列的结果均标注为【模拟】，不会被当作日常完成。" Foreground="{StaticResource Muted}" Margin="0,8,0,16"/>
 </StackPanel></ScrollViewer></TabItem>
@@ -65,7 +65,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="{Binding Name}" FontSize="18" Margin="0,0,0,10"/>
 <TextBox Text="{Binding InstallPath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name}" ToolTip="引擎安装目录"/>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<WrapPanel Margin="0,12,0,0"><Button Content="保存路径" Command="{Binding SaveCommand}"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}"/></WrapPanel>
+<WrapPanel Margin="0,12,0,0"><Button Content="保存路径" Command="{Binding SaveCommand}"/><Button Content="检查星铁安装（只读）" Command="{Binding InspectMarch7thCommand}"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}"/></WrapPanel>
 </StackPanel></ScrollViewer></TabItem>
 <TabItem Header="自检记录"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <StackPanel Margin="0,0,0,16"><TextBlock Text="本地基础自检记录" FontSize="24"/><TextBlock Text="保留最近记录；这里不是游戏任务历史。时间显示为 UTC。" Foreground="{StaticResource Muted}" Margin="0,8,0,12"/><Button Content="刷新记录与配置" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel>

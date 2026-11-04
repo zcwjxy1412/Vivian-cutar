@@ -35,6 +35,10 @@
 - [权限与 Job 验证记录](M3_PRIVILEGE_BOUNDARY_VALIDATION.md)：无害程序的 Windows CI 覆盖矩阵和待授权的桌面 UAC 步骤。#16 仍为 Open，ADR-007 保持提案；CI 运行结果见该记录。
 - [调度器 PR #20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20)：取消令牌异常、停止时序、冲突证据和阻断摘要回归；CI 与 DeepSeek 复核状态以 PR 为准。
 
+## 星铁只读发现进度（2026-11-04）
+
+- [March7thAssistant 发行包门禁](M3_MARCH7TH_READONLY_EVIDENCE.md)：本地路径、`m7a.exe`、版本元数据与 SHA-256 的只读发现；官方完整发行包、CLI 只读输出及任务清单仍待核验。未验证时不启动查询或游戏。
+
 ## Gemini M3 原始研究
 
 以下报告为源码和文档研究输入。发行包、任务完成判定及桌面实测状态仍为 Pending。原文中的版本示例与接入建议见 [独立审查](../reviews/M3_GEMINI_RESEARCH_VALIDATION.md)。

@@ -97,6 +97,27 @@ public sealed class March7thReleaseVerifierTests : IDisposable
     }
 
     [Fact]
+    public async Task BackslashSeparatorsAndDoubleDotsInsideNamesAreAccepted()
+    {
+        var layout = Layout().ToDictionary(kv => kv.Key.Replace('/', '\\'), kv => kv.Value);
+        layout[Root + "3rdparty/tool..v2/readme.txt"] = "not an escape";
+        var zip = WriteZip("d.zip", layout);
+        Assert.Equal(ReleaseCheck.Verified, (await March7thReleaseVerifier.VerifyAsync(zip, [Pin(zip)], default)).Check);
+    }
+
+    [Theory]
+    [InlineData("/abs/file.txt")]
+    [InlineData("March7thAssistant_full\\..\\..\\escape.txt")]
+    [InlineData("C:/windows/escape.txt")]
+    public async Task EscapingEntriesAreRejected(string escaping)
+    {
+        var layout = Layout();
+        layout[escaping] = "x";
+        var zip = WriteZip("e.zip", layout);
+        Assert.Equal(ReleaseCheck.UnexpectedLayout, (await March7thReleaseVerifier.VerifyAsync(zip, [Pin(zip)], default)).Check);
+    }
+
+    [Fact]
     public async Task PinnedOfficialTableMatchesTheReleaseAudit()
     {
         // Values recorded from the GitHub release metadata in docs/evidence/M3_MARCH7TH_RELEASE_ASSET_AUDIT.md.

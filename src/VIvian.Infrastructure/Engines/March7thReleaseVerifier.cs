@@ -91,15 +91,21 @@ public static class March7thReleaseVerifier
             // are the bytes that were hashed.
             stream.Position = 0;
             using var zip = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
-            if (zip.Entries.Any(e => e.FullName.StartsWith('/') || e.FullName.Contains("..", StringComparison.Ordinal)
-                || e.FullName.Contains('\\', StringComparison.Ordinal)))
-                return new(ReleaseCheck.UnexpectedLayout, null, "压缩包含有异常路径，已拒绝（未解压）。");
-            var names = zip.Entries.Select(e => e.FullName).ToHashSet(StringComparer.Ordinal);
-            if (RequiredEntries.Any(e => !names.Contains(e)))
+            // Some ZIP writers use '\\' as the separator: compare normalised names, and reject only real escapes
+            // (an absolute name or a ".." segment), never a file name that merely contains two dots.
+            var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+            foreach (var entry in zip.Entries)
+            {
+                var name = entry.FullName.Replace('\\', '/');
+                if (name.StartsWith('/') || name.Contains(':', StringComparison.Ordinal) || name.Split('/').Any(part => part == ".."))
+                    return new(ReleaseCheck.UnexpectedLayout, null, "压缩包含有异常路径，已拒绝（未解压）。");
+                entries.TryAdd(name, entry);
+            }
+            if (RequiredEntries.Any(e => !entries.ContainsKey(e)))
                 return new(ReleaseCheck.UnexpectedLayout, null, "官方压缩包中缺少预期的 m7a.exe、主程序或版本文件。");
 
             string version;
-            var versionEntry = zip.GetEntry(VersionEntry)!;
+            var versionEntry = entries[VersionEntry];
             if (versionEntry.Length > 64) return new(ReleaseCheck.UnexpectedLayout, null, "版本文件异常（过大）。");
             using (var reader = new StreamReader(versionEntry.Open(), Encoding.UTF8))
                 version = (await reader.ReadToEndAsync(ct).ConfigureAwait(false)).Trim();
@@ -107,7 +113,7 @@ public static class March7thReleaseVerifier
                 return new(ReleaseCheck.UnexpectedLayout, null, $"压缩包中的版本文件为“{version}”，与发布版本 {asset.Version} 不一致。");
 
             string cliHash;
-            await using (var cli = zip.GetEntry(CliEntry)!.Open())
+            await using (var cli = entries[CliEntry].Open())
                 cliHash = Convert.ToHexString(await SHA256.HashDataAsync(cli, ct).ConfigureAwait(false)).ToLowerInvariant();
             return new(ReleaseCheck.Verified, new(asset.Version, asset.FileName, digest, cliHash),
                 $"与官方 {asset.Version} 的 {asset.FileName} 完全一致；已从包内读取 m7a.exe 的 SHA-256：{cliHash}。未解压、未运行任何文件。");

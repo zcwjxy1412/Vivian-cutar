@@ -2,5 +2,6 @@
 <ItemGroup>
 <ProjectReference Include="../VIvian.Core/VIvian.Core.csproj" />
 <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+<InternalsVisibleTo Include="VIvian.Tests" />
 </ItemGroup>
 </Project>

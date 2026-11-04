@@ -83,7 +83,9 @@ public sealed class MainViewModel : ObservableObject
     private async Task InspectMarch7thAsync()
     {
         var card = Engines.Single(x => x.Id == GameId.StarRail);
-        var result = await March7thReadOnlyInspector.InspectAsync(card.InstallPath.Trim());
+        var path = card.InstallPath.Trim();
+        // Off the UI thread: existence checks on a network path or hashing a large file must not freeze the window.
+        var result = await Task.Run(() => March7thReadOnlyInspector.InspectAsync(path));
         card.Compatibility = result.Compatibility switch
         {
             March7thCompatibility.NotInstalled => "未安装 / 路径无效",

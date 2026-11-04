@@ -41,6 +41,23 @@ public sealed class ProcessSafetyGuardTests
         Assert.True(hits.Count == 0, string.Join("\n", hits.Select(h => $"{h.File}:{h.Line}")));
     }
 
+    /// <summary>
+    /// Read-only discovery (e.g. the March7th inspector) must never be able to launch anything: every way to start a
+    /// process is confined to the job-object supervisor, which places the child in VIvian's own job.
+    /// </summary>
+    [Theory]
+    [InlineData(@"\bProcess\.Start\s*\(")]
+    [InlineData(@"\bnew\s+(System\.Diagnostics\.)?ProcessStartInfo\b")]
+    [InlineData(@"(?i)\bShellExecute")]
+    [InlineData(@"\bCreateProcess\w*\s*\(")]
+    [InlineData(@"\bWinExec\s*\(")]
+    public void ProcessesAreStartedOnlyByTheJobObjectSupervisor(string pattern)
+    {
+        var allowed = new[] { "VIvian.Infrastructure/Processes/WindowsProcessSupervisor.cs", "VIvian.Infrastructure/Processes/NativeMethods.cs" };
+        var hits = Lines().Where(l => Regex.IsMatch(l.Text, pattern) && !allowed.Contains(l.File)).ToList();
+        Assert.True(hits.Count == 0, "Process start outside the supervisor:\n" + string.Join("\n", hits.Select(h => $"{h.File}:{h.Line}: {h.Text.Trim()}")));
+    }
+
     [Fact]
     public void ProcessLookupByNameIsUsedOnlyForDetection()
     {

@@ -21,7 +21,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Border Background="{StaticResource Surface}" CornerRadius="12" Padding="20" Margin="0,0,0,12"><Grid>
 <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <TextBlock Text="{Binding Glyph}" FontSize="24" Foreground="#93B3FF" VerticalAlignment="Center"/>
-<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/><TextBlock Text="{Binding Evidence}" Foreground="{StaticResource Muted}" Margin="0,5,12,0"/></StackPanel>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/><TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/><TextBlock Text="{Binding Evidence}" Foreground="{StaticResource Muted}" Margin="0,5,12,0" TextWrapping="Wrap"/></StackPanel>
 <TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="#E5BF76" VerticalAlignment="Center" Margin="12,0,0,0"/>
 </Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 <TextBlock Text="此版本没有真实游戏任务执行能力；模拟队列的结果均标注为【模拟】，不会被当作日常完成。" Foreground="{StaticResource Muted}" Margin="0,8,0,16"/>

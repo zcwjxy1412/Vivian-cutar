@@ -43,22 +43,24 @@
 - [`architecture/M3_ADAPTER_PROPOSAL.md`](architecture/M3_ADAPTER_PROPOSAL.md)、[`requirements/M3_UI_SPEC.md`](requirements/M3_UI_SPEC.md)
 - [`research/assets/gemini-m3/`](research/assets/gemini-m3/)：上述文档引用的图示
 
-尚未合并的 [PR #32](https://github.com/zcwjxy1412/Vivian-cutar/pull/32) 还带来四份较新的 Gemini 报告和一份勘误。合并后，勘误（`research/M3_GEMINI_RESEARCH_ERRATA.md`）优先于这些原文。原文中“VIvian 以管理员身份运行”“按安装路径或进程名清扫进程”两条与项目安全规则冲突，不予采用。
+[PR #32](https://github.com/zcwjxy1412/Vivian-cutar/pull/32) 带来四份较新的 Gemini 报告（`research/M3_UPSTREAM_RELEASE_VERIFICATION.md`、`research/M3_ENGINE_CLI_COMPATIBILITY.md`、`research/M3_ENGINE_PROCESS_AND_PRIVILEGE_RISKS.md`、`research/M3_ADAPTER_IMPLEMENTATION_REQUIREMENTS.md`）和一份勘误；勘误（[`research/M3_GEMINI_RESEARCH_ERRATA.md`](research/M3_GEMINI_RESEARCH_ERRATA.md)）优先于这些原文。原文中“VIvian 以管理员身份运行”“按安装路径或进程名清扫进程”两条与项目安全规则冲突，不予采用。
 
 ## 5. 进行中的工作与安全门禁
 
-以 GitHub 上的 PR 列表为准；下面是写入本文时（2026-11-04）的状态，可能已经过时。
+以 GitHub 上的 PR 列表为准。M3 安全整合（#32、#30、#33（含 #20）、#34）合并之后的状态：
 
 | PR | 内容 | 状态 |
 | --- | --- | --- |
-| [#30](https://github.com/zcwjxy1412/Vivian-cutar/pull/30) | #28/#29 安全门禁（RunId 启动许可、有界调用） | 待独立复审 |
-| [#20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20) | 调度器取消与矛盾证据 | 待独立复审；已被 #33 合并 |
-| [#33](https://github.com/zcwjxy1412/Vivian-cutar/pull/33) | 运行归属、有界迟到清理、持久化有界与停止/启动许可（包含 #20） | 待独立复审 |
-| [#23](https://github.com/zcwjxy1412/Vivian-cutar/pull/23) | Windows Job 与权限探针 | 桌面 UAC 验证 Pending |
-| [#24](https://github.com/zcwjxy1412/Vivian-cutar/pull/24) | March7th 只读安装发现 | 有待处理的审查意见 |
-| [#26](https://github.com/zcwjxy1412/Vivian-cutar/pull/26) | March7th 官方发行包审计 | 有待处理的审查意见 |
+| [#30](https://github.com/zcwjxy1412/Vivian-cutar/pull/30) | #28/#29 安全门禁（RunId 启动许可、有界调用） | 已合并 |
+| [#33](https://github.com/zcwjxy1412/Vivian-cutar/pull/33) | 运行归属、有界迟到清理、有界持久化、停止/启动许可（包含 #20） | 已合并；Codex 验收通过 |
+| [#20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20) | 调度器取消与矛盾证据 | 已随 #33 合并，不单独合并 |
+| [#32](https://github.com/zcwjxy1412/Vivian-cutar/pull/32) | Gemini 新报告与勘误 | 已合并；勘误优先于 Gemini 原文 |
+| [#34](https://github.com/zcwjxy1412/Vivian-cutar/pull/34) | 文档导航与仓库审计 | 已合并 |
+| [#23](https://github.com/zcwjxy1412/Vivian-cutar/pull/23) | Windows Job 与权限探针 | M3.1 继续；桌面 UAC 验证 Pending |
+| [#24](https://github.com/zcwjxy1412/Vivian-cutar/pull/24)、[#26](https://github.com/zcwjxy1412/Vivian-cutar/pull/26) | March7th 只读发现、官方发行包审计 | M3.2 在其基础上继续 |
 | [#27](https://github.com/zcwjxy1412/Vivian-cutar/pull/27) | Claude 独立审查报告（历史） | 保留为记录 |
 | [#31](https://github.com/zcwjxy1412/Vivian-cutar/pull/31) | #30 + #20 组合验证 | **只用于验证，禁止合并** |
-| [#32](https://github.com/zcwjxy1412/Vivian-cutar/pull/32) | Gemini 新报告与勘误 | 待合并 |
+
+整合后的安全基线（仅限模拟引擎范围）：有界的适配器调用与状态写入、按 RunId 发放的启动许可、停止时先撤销启动许可、会话安全门禁。CI 通过不是 UAC、提权进程或真实游戏的证明。
 
 main 上目前没有任何真实适配器；#30 起，调度器还会用 `RealAdapterUnverified` 门禁阻断所有非模拟适配器，直到适配器通过独立审查。桌面 UAC、提权子进程、真实引擎和真实游戏都仍为 Pending。

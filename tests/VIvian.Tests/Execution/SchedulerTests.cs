@@ -80,6 +80,42 @@ public sealed class SchedulerTests
     }
 
     [Fact]
+    public async Task DisposedCallerTokenDoesNotLeaveSchedulerRunning()
+    {
+        var scheduler = NewScheduler();
+        using var source = new CancellationTokenSource();
+        var token = source.Token;
+        source.Dispose();
+        var first = Adapter(GameId.Genshin, EndsWith(EvidenceKind.CompletionReported));
+
+        // .NET 10 permits registration on an already disposed token source; record that actual contract.
+        var firstResult = await scheduler.RunAsync([Item(first)], token);
+        Assert.Equal(QueueStatus.Completed, firstResult.Status);
+        Assert.False(scheduler.IsRunning);
+        Assert.Equal(1, first.StartCount);
+
+        var next = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var result = await scheduler.RunAsync([Item(next)]);
+        Assert.Equal(QueueStatus.Completed, result.Status);
+        Assert.Equal(RunOutcome.Success, result.Runs.Single().Outcome);
+    }
+
+    [Fact]
+    public async Task AdapterClaimingSuccessWithConflictingEvidenceIsIndeterminate()
+    {
+        var a = Adapter(GameId.Genshin, run =>
+        {
+            var evidence = new[] { EvidenceKind.CompletionReported, EvidenceKind.FailureReported }
+                .Select(kind => new Evidence(run.RunId, kind, "test", DateTimeOffset.UtcNow)).ToArray();
+            run.EndWith(new RunVerdict(RunOutcome.Success, ReasonCodes.Completed, evidence));
+            return Task.CompletedTask;
+        });
+        var result = await NewScheduler().RunAsync([Item(a)]);
+        Assert.Equal(RunOutcome.Indeterminate, result.Runs.Single().Outcome);
+        Assert.Equal(ReasonCodes.ConflictingEvidence, result.Runs.Single().ReasonCode);
+    }
+
+    [Fact]
     public async Task EvidenceForAnotherRunDoesNotCountAsSuccess()
     {
         var a = Adapter(GameId.Genshin, run =>
@@ -281,6 +317,57 @@ public sealed class SchedulerTests
         var result = await queue.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(StopMode.Emergency, a.LastRun!.StopRequests.First().Mode);
         Assert.Equal(QueueStatus.Cancelled, result.Status);
+    }
+
+    [Fact]
+    public async Task EmergencyStopDuringStartDoesNotLoseRequestOrStartNextGame()
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = Adapter(GameId.Genshin);
+        first.StartGate = gate;
+        var second = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var scheduler = NewScheduler();
+        var queue = scheduler.RunAsync([Item(first), Item(second)]);
+        await WaitUntilAsync(() => first.StartCount == 1);
+
+        scheduler.EmergencyStop();
+        gate.SetResult();
+        var result = await queue.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(QueueStatus.Cancelled, result.Status);
+        Assert.Equal(RunOutcome.Cancelled, result.Runs.Single().Outcome);
+        Assert.Equal(CleanupState.NotRequired, result.Runs.Single().Cleanup);
+        Assert.Equal(0, second.StartCount);
+    }
+
+    /// <summary>
+    /// The adapter's cancellation token must already be cancelled when EmergencyStop() returns — not some time later
+    /// on the thread pool — so an adapter checking it can never start a process after the user pressed stop.
+    /// Repeated to make a timing-dependent regression show up reliably.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StopIsVisibleOnAdapterTokenWhenStopReturns(bool viaCallerToken)
+    {
+        for (var i = 0; i < 25; i++)
+        {
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var adapter = Adapter(GameId.Genshin);
+            adapter.StartGate = gate;
+            var scheduler = NewScheduler();
+            using var caller = new CancellationTokenSource();
+            var queue = scheduler.RunAsync([Item(adapter)], caller.Token);
+            await adapter.StartEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            if (viaCallerToken) caller.Cancel(); else scheduler.EmergencyStop();
+            var visible = adapter.StartToken.IsCancellationRequested; // read immediately, no waiting
+            visible &= adapter.LinkedStartToken.IsCancellationRequested; // a token linked to it is cancelled too
+
+            gate.SetResult();
+            await queue.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(visible, $"iteration {i}: adapter token not yet cancelled when the stop call returned");
+        }
     }
 
     [Fact]

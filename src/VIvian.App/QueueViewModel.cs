@@ -125,8 +125,13 @@ public sealed class QueueViewModel : ObservableObject
     public void EmergencyStop()
     {
         if (_stop is not { } stop) return;
-        // Sent immediately, no confirmation dialog or countdown.
-        stop.Cancel();
+        // Sent immediately, no confirmation dialog or countdown. Cancelling runs adapter cancellation callbacks
+        // synchronously, so it is done off the UI thread: a slow callback must never freeze the window.
+        _ = Task.Run(() =>
+        {
+            try { stop.Cancel(); }
+            catch (Exception ex) when (ex is ObjectDisposedException or AggregateException) { /* queue ended or callback failed */ }
+        });
         Status = "已发出紧急停止…";
         Serilog.Log.Information("Emergency stop requested from UI");
     }

@@ -29,6 +29,12 @@
 
 参见 [M3_PREREQUISITES.md](../M3_PREREQUISITES.md) 的 A1–A5 与 B1–B12。当前没有测试电脑授权或发行包实测证据；**生产适配器、真实游戏测试和“已完成日常”宣称均未开始**。
 
+## 权限与协作进度（2026-11-04）
+
+- [M3 任务与依赖](../M3_TASK_BOARD.md)：Codex / DeepSeek 文件边界、Issue 和 PR。
+- [权限与 Job 验证记录](M3_PRIVILEGE_BOUNDARY_VALIDATION.md)：无害程序的 Windows CI 覆盖矩阵和待授权的桌面 UAC 步骤。#16 仍为 Open，ADR-007 保持提案；CI 运行结果见该记录。
+- [调度器 PR #20](https://github.com/zcwjxy1412/Vivian-cutar/pull/20)：取消令牌异常、停止时序、冲突证据和阻断摘要回归；CI 与 DeepSeek 复核状态以 PR 为准。
+
 ## Gemini M3 原始研究
 
 以下报告为源码和文档研究输入。发行包、任务完成判定及桌面实测状态仍为 Pending。原文中的版本示例与接入建议见 [独立审查](../reviews/M3_GEMINI_RESEARCH_VALIDATION.md)。

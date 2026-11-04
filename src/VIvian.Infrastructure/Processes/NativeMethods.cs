@@ -110,6 +110,11 @@ internal static class NativeMethods
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool IsProcessInJob(SafeProcessHandle process, SafeFileHandle job,
+        [MarshalAs(UnmanagedType.Bool)] out bool result);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool AssignProcessToJobObject(SafeFileHandle hJob, SafeProcessHandle hProcess);
 
     [DllImport("kernel32.dll", SetLastError = true)]

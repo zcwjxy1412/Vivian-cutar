@@ -489,7 +489,7 @@ public sealed class SchedulerTests
     public async Task InternalErrorAfterStartClosesRunAsBlockedAndUnconfirmed()
     {
         // Fault injection: the clock fails once the engine is running, so the scheduler itself throws.
-        var time = new FailingTimers(VirtualStart);
+        var time = new FailingTimers(VirtualStart) { ArmWhen = () => _journal.AnyInPhase(RunPhase.Running) };
         var started = Adapter(GameId.Genshin, run => { run.Emit("x"); return Task.CompletedTask; });
         var next = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
         var result = await new QueueScheduler(_journal, new NoProcessSupervisor(), Fast, time)
@@ -502,7 +502,7 @@ public sealed class SchedulerTests
         Assert.Equal(ReasonCodes.InternalError, run.ReasonCode);
         Assert.Equal(QueueStatus.Blocked, result.Status);
         Assert.Equal(0, next.StartCount);
-        Assert.True(started.LastRun!.Disposed);
+        await WaitUntilAsync(() => started.LastRun!.Disposed); // released even though no timer can be created
         Assert.Equal(RunPhase.Blocked, _journal.PhaseOf(run.RunId));
     }
 
@@ -516,11 +516,14 @@ public sealed class SchedulerTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new RunLimits(TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(seconds)));
     }
 
-    /// <summary>A clock whose timers fail: the first timer the scheduler creates is the task timeout, right after Running.</summary>
+    /// <summary>A clock whose timers fail once armed; armed when the run is Running, i.e. after the engine started.</summary>
     private sealed class FailingTimers(DateTimeOffset start) : FakeTimeProvider(start)
     {
+        public Func<bool> ArmWhen { get; init; } = () => true;
+
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
-            throw new InvalidOperationException("injected timer failure");
+            ArmWhen() ? throw new InvalidOperationException("injected timer failure")
+                : base.CreateTimer(callback, state, dueTime, period);
     }
 
     private static readonly DateTimeOffset VirtualStart = new(2026, 11, 3, 4, 0, 0, TimeSpan.Zero);

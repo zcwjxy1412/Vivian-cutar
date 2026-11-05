@@ -41,7 +41,7 @@ await Check("B1 Job 归属及同名外部进程隔离", async () =>
         await ReadUntilAsync(control.StandardOutput, "|info|waiting");
         var id = Guid.NewGuid();
         await using var group = await Start(id, "probe-identity-wait");
-        await ReadUntilAsync(group.OutputLines, "|info|waiting");
+        await ReadGroupUntilAsync(group.OutputLines, "|info|waiting");
         using var child = Process.GetProcessById(group.RootProcessId);
         using var self = Process.GetCurrentProcess();
         var owned = group.RunId == id && group.OwnsProcess(child.SafeHandle) &&
@@ -49,7 +49,7 @@ await Check("B1 Job 归属及同名外部进程隔离", async () =>
         var before = group.ActiveProcessCount;
         var sw = Stopwatch.StartNew();
         var cleanup = await group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
-        var gone = await Exited(child, TimeSpan.FromSeconds(5));
+        var gone = await ProcessExited(child, TimeSpan.FromSeconds(5));
         return new("B1 Job 归属及同名外部进程隔离",
             owned && before >= 1 && cleanup == CleanupState.Confirmed && gone && !control.HasExited ? "PASS" : "FAIL",
             id, child.Id, group.RootStartTime, sw.ElapsedMilliseconds, cleanup.ToString(), null,
@@ -62,7 +62,7 @@ await Check("B2 子进程及 Job 清理", async () =>
 {
     var id = Guid.NewGuid();
     await using var group = await Start(id, "orphan-child");
-    var childLine = await ReadUntilAsync(group.OutputLines, "|info|child-pid=");
+    var childLine = await ReadGroupUntilAsync(group.OutputLines, "|info|child-pid=");
     var childPid = int.Parse(childLine[(childLine.LastIndexOf('=') + 1)..]);
     await group.WaitForRootExitAsync(new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
     // The child is only queried by handle; never killed independently.
@@ -70,7 +70,7 @@ await Check("B2 子进程及 Job 清理", async () =>
     var owned = group.OwnsProcess(child.SafeHandle);
     var sw = Stopwatch.StartNew();
     var cleanup = await group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
-    return new("B2 子进程及 Job 清理", owned && cleanup == CleanupState.Confirmed && await Exited(child, TimeSpan.FromSeconds(5)) ? "PASS" : "FAIL",
+    return new("B2 子进程及 Job 清理", owned && cleanup == CleanupState.Confirmed && await ProcessExited(child, TimeSpan.FromSeconds(5)) ? "PASS" : "FAIL",
         id, group.RootProcessId, group.RootStartTime, sw.ElapsedMilliseconds, cleanup.ToString(), 0,
         $"子进程 PID={childPid}；属于本次 Job={owned}；清理后 Job 活跃数={group.ActiveProcessCount}");
 });
@@ -92,7 +92,7 @@ await Check("B3 队列紧急停止及持久化", async () =>
     var sw = Stopwatch.StartNew();
     scheduler.EmergencyStop();
     var result = await queue.WaitAsync(TimeSpan.FromSeconds(25));
-    var gone = await Exited(child, TimeSpan.FromSeconds(5));
+    var gone = await ProcessExited(child, TimeSpan.FromSeconds(5));
     var stored = (await db.ReadRecentRunsAsync(10)).SingleOrDefault(r => r.RunId == result.Runs.Single().RunId);
     var run = result.Runs.Single();
     return new("B3 队列紧急停止及持久化",
@@ -123,14 +123,14 @@ await Check("B5 独立宿主崩溃及重启对账", async () =>
     int pid;
     try { pid = int.Parse((await ReadUntilAsync(host.StandardOutput, "ENGINE-PID "))["ENGINE-PID ".Length..]); }
     finally { if (!host.HasExited) host.Kill(); await host.WaitForExitAsync(); }
-    var gone = await Exited(pid, TimeSpan.FromSeconds(10));
+    var gone = await PidExited(pid, TimeSpan.FromSeconds(10));
     var db = new LocalDatabase(database); await db.InitializeAsync();
     var recovered = (await db.ReconcileInterruptedRunsAsync(DateTimeOffset.UtcNow)).SingleOrDefault();
     var blocked = await new QueueScheduler(db, new WindowsProcessSupervisor()).RunAsync([
         new QueueItem(GameId.Genshin, new FakeEngineAdapter(GameId.Genshin, engine, "success"))
     ]).WaitAsync(TimeSpan.FromSeconds(15));
     return new("B5 独立宿主崩溃及重启对账",
-        gone && recovered?.Outcome == RunOutcome.Indeterminate && recovered.Cleanup == CleanupState.Unconfirmed &&
+        gone && recovered?.Outcome == RunOutcome.Indeterminate && recovered?.Cleanup == CleanupState.Unconfirmed &&
         blocked.Status == QueueStatus.Blocked && blocked.BlockReason == ReasonCodes.UnresolvedRuns ? "PASS" : "FAIL",
         recovered?.RunId, pid, null, null, recovered?.Cleanup.ToString(), null,
         $"测试宿主已退出；自有引擎已退出={gone}；重启结果={recovered?.Outcome}；队列={blocked.Status}；原因={blocked.BlockReason}");
@@ -157,20 +157,20 @@ static async Task<string> ReadUntilAsync(StreamReader reader, string suffix)
     while (await reader.ReadLineAsync(cts.Token) is { } line) if (line.Contains(suffix, StringComparison.Ordinal)) return line;
     throw new IOException("测试进程在就绪前退出。");
 }
-static async Task<string> ReadUntilAsync(IAsyncEnumerable<string> lines, string suffix)
+static async Task<string> ReadGroupUntilAsync(IAsyncEnumerable<string> lines, string suffix)
 {
     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
     await foreach (var line in lines.WithCancellation(cts.Token)) if (line.Contains(suffix, StringComparison.Ordinal)) return line;
     throw new IOException("受监管进程在就绪前退出。");
 }
-static async Task<bool> Exited(Process process, TimeSpan limit)
+static async Task<bool> ProcessExited(Process process, TimeSpan limit)
 {
     try { await process.WaitForExitAsync(new CancellationTokenSource(limit).Token); return true; }
     catch (OperationCanceledException) { return false; }
 }
-static async Task<bool> Exited(int pid, TimeSpan limit)
+static async Task<bool> PidExited(int pid, TimeSpan limit)
 {
-    try { using var process = Process.GetProcessById(pid); return await Exited(process, limit); }
+    try { using var process = Process.GetProcessById(pid); return await ProcessExited(process, limit); }
     catch (ArgumentException) { return true; }
 }
 static string SafeMessage(Exception ex) => ex is System.ComponentModel.Win32Exception w ? $"Win32 错误 {w.NativeErrorCode}" :

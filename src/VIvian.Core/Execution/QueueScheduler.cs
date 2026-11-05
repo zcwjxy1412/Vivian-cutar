@@ -48,7 +48,8 @@ public sealed record SchedulerOptions(
 /// <see cref="SessionHazards"/> barrier until it actually returns, and its run ends with cleanup Unconfirmed.
 /// </summary>
 public sealed class QueueScheduler(
-    IRunJournal journal, IProcessSupervisor supervisor, SchedulerOptions? options = null, TimeProvider? time = null)
+    IRunJournal journal, IProcessSupervisor supervisor, SchedulerOptions? options = null, TimeProvider? time = null,
+    Func<IGameAdapter, bool>? admitReal = null)
 {
     private readonly SchedulerOptions _options = options ?? SchedulerOptions.Default;
     private readonly TimeProvider _time = time ?? TimeProvider.System;
@@ -56,6 +57,8 @@ public sealed class QueueScheduler(
     private int _running;
     private readonly SafetyBarrier _barrier = new();
     private readonly JournalWriter _writer = new(journal);
+    // Default is closed. The application may explicitly admit one reviewed adapter in a future build.
+    private readonly Func<IGameAdapter, bool> _admitReal = admitReal ?? (_ => false);
 
     /// <summary>State writes queued or running; for deterministic tests that drive a virtual clock.</summary>
     internal int StateWritesInFlight => _writer.InFlight;
@@ -314,7 +317,7 @@ public sealed class QueueScheduler(
 
             // No real adapter has passed process-ownership admission yet. A third-party adapter can
             // ignore our supervisor and launch on its own; the scoped gate cannot contain such code.
-            if (!Adapter.IsSimulation)
+            if (!Adapter.IsSimulation && !owner._admitReal(Adapter))
             {
                 _sm.SetBlockReason(ReasonCodes.RealAdapterUnverified);
                 _sm.MoveTo(RunPhase.Blocked);

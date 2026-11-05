@@ -10,7 +10,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <StackPanel><TextBlock Text="VIvian" FontSize="32" FontWeight="Bold"/><TextBlock Text="每天的旅程，从这里开始。" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/></StackPanel>
-<Border Grid.Column="1" Background="#3A2A12" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="预桌面开发版 · 模拟引擎 · 真实任务未开放" Foreground="#F2CC85"/></Border>
+<Border Grid.Column="1" Background="#3A2A12" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="{Binding ExecutionBanner}" Foreground="#F2CC85"/></Border>
 </Grid>
 <TabControl Grid.Row="1" Background="#0D1523" BorderThickness="0" Padding="0,20,0,0">
 
@@ -73,11 +73,44 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 
+<TabItem Header="星铁实测"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+<TextBlock Text="March7thAssistant · 单次真实任务" FontSize="24" FontWeight="SemiBold"/>
+<Border Style="{StaticResource Notice}" Margin="0,14,0,12"><StackPanel>
+<TextBlock Text="执行安全闸门" FontWeight="SemiBold" Foreground="#F2CC85"/>
+<TextBlock Text="{Binding March7thExecutionBlock}" Foreground="#E8D9BC" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel>
+<TextBlock Text="上游安装与固定版本" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="支持版本：March7thAssistant v2026.10.31；游戏路径须由上游设置，并在状态查询中核对。" Foreground="{StaticResource Muted}" Margin="0,6,0,10"/>
+<TextBlock Text="{Binding Engines[1].InstallPath, StringFormat=安装目录：{0}}" Foreground="{StaticResource Muted}"/>
+<TextBlock Text="{Binding Engines[1].Compatibility, StringFormat=安装检查：{0}}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
+<TextBlock Text="{Binding ReleaseStatus}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
+<TextBlock Text="{Binding March7thStopStatus}" Foreground="#F2CC85" Margin="0,5,0,0"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel>
+<TextBlock Text="任务与本次确认" FontSize="18" FontWeight="SemiBold"/>
+<ComboBox ItemsSource="{Binding March7thTasks}" SelectedItem="{Binding March7thTask}" DisplayMemberPath="Title" Width="260" HorizontalAlignment="Left" Margin="0,10,0,10" AutomationProperties.Name="星铁真实任务选择"/>
+<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我了解这会运行真实游戏自动化任务，仅确认本次执行" AutomationProperties.Name="确认本次星铁真实任务"/>
+<WrapPanel Margin="0,12,0,0">
+<Button Content="启动本次星铁任务" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,10,0"/>
+<Button Content="紧急停止当前任务" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Background="#F08A80"/>
+</WrapPanel>
+<TextBlock Text="{Binding March7thConsentNote}" Foreground="{StaticResource Muted}" Margin="0,10,0,0"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel>
+<TextBlock Text="运行状态、日志与结果" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Queue.Current}" Margin="0,8,0,0"/>
+<TextBlock Text="{Binding Queue.Status}" Foreground="{StaticResource Muted}" Margin="0,4,0,8"/>
+<ListBox ItemsSource="{Binding Queue.LogLines}" Height="180" Background="#101A2A" Foreground="#EEF3FB"/>
+<TextBlock Text="执行历史及清理结果详见“调度与监控”。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+</StackPanel></Border>
+</StackPanel></ScrollViewer></TabItem>
+
 <TabItem Header="任务管理"><Grid>
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Border Style="{StaticResource Notice}"><StackPanel>
 <TextBlock Text="任务计划：可以选择和排序，但不会执行" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="列表中的任务标识来自固定版本的上游源码或文档，尚未在真实发行包上验证，因此全部标为“候选 · 不可执行”。你的选择会保存，待对应引擎通过桌面验证后才可能用于真实执行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
+<TextBlock Text="这里保存任务计划，不会因勾选而运行游戏。候选任务仍待实机验证；星铁单次 screen_test 只能从专用页手动确认启动。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
 </StackPanel></Border>
 <DockPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock Text="游戏：" VerticalAlignment="Center" Margin="0,0,8,0"/>
 <ComboBox ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" MinWidth="320" HorizontalAlignment="Left" AutomationProperties.Name="选择游戏"/></DockPanel>
@@ -102,7 +135,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Border Style="{StaticResource Notice}"><StackPanel>
 <TextBlock Text="模拟模式：这里的所有结果都是演示，不代表任何游戏的真实日常。" FontWeight="SemiBold" Foreground="#F2CC85"/>
 <TextBlock Text="不会启动游戏或任何程序，不读写游戏文件，也不操作键盘鼠标。用于检验 VIvian 的串行调度、停止、清理核对与结果判定逻辑。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
-<TextBlock Text="三款真实引擎在这个版本中都没有开放：即使引擎显示“文件已核对”，队列也只会运行模拟引擎。结果无法确认时显示为“结果未知”，不会被当作完成。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
+<TextBlock Text="本页的队列只运行模拟引擎。星铁单次测试仅能从“星铁实测”页经本人确认后启动；结果或清理无法确认时会阻断后续运行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
 </StackPanel></Border>
 <Grid Grid.Row="1" Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <ItemsControl ItemsSource="{Binding Games}" IsEnabled="{Binding IsIdle}"><ItemsControl.ItemTemplate><DataTemplate>

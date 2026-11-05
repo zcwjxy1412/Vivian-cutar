@@ -8,6 +8,7 @@ using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Simulation;
+using VIvian.Infrastructure.Processes;
 
 namespace VIvian.App;
 
@@ -30,9 +31,15 @@ public partial class App : Application
         try
         {
             // Smoke tests use a disposable directory, never the user's profile.
+            var screenTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-ScreenTest.marker"));
+            if (RealExecutionPolicy.BuildPermitsRealExecution && !screenTest)
+                throw new InvalidOperationException("单次测试包缺少隔离数据标记，拒绝启动。");
+            var preview = e.Args.Contains("--m4-preview")
+                || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VIvian");
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    screenTest ? "VIvian-M4A-ScreenTest-R2" : preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
             // One instance per data directory, decided before the database or logs are touched.
             _instance = SingleInstanceGuard.Acquire(root);
@@ -61,9 +68,17 @@ public partial class App : Application
                 services.AddSingleton<ITaskPlanStore>(database);
                 services.AddSingleton<IPreferenceStore>(database);
                 services.AddSingleton(new AppPaths(root));
-                // M2 simulation mode: the only supervisor available refuses to start processes.
-                services.AddSingleton<IProcessSupervisor, RefusingProcessSupervisor>();
-                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(), sp.GetRequiredService<IProcessSupervisor>()));
+                // The current build still injects the refusing supervisor. A separately reviewed
+                // real-execution build would use the existing Windows Job supervisor.
+                services.AddSingleton<IProcessSupervisor>(_ => RealExecutionPolicy.BuildPermitsRealExecution
+                    ? new WindowsProcessSupervisor() : new RefusingProcessSupervisor());
+                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(),
+                    sp.GetRequiredService<IProcessSupervisor>(),
+                    options: RealExecutionPolicy.BuildPermitsRealExecution ? SchedulerOptions.Default with
+                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(45) }
+                    : SchedulerOptions.Default,
+                    admitReal: adapter =>
+                        RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
@@ -92,6 +107,9 @@ public partial class App : Application
                     {
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
+                        if (RealExecutionPolicy.BuildPermitsRealExecution &&
+                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != "screen_test" || vm.CanStartMarch7th))
+                            throw new InvalidOperationException("One-attempt screen test admission is not constrained");
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);

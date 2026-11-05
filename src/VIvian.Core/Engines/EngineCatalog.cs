@@ -64,6 +64,7 @@ public static class EngineCatalog
             new("currencywars", "货币战争", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
             new("fight", "锄大地", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
             new("universe", "模拟/差分宇宙", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
+            new("screen_test", "界面可切换性测试", Pending, B, M7Cli, "逐项切换游戏界面；只在用户单次授权后执行，仍会操作游戏。"),
         ],
         Launch: new("m7a.exe", WritesToStandardOutput: true, PrivilegeRequirement.ElevationRequested, ProcessTopology.LauncherWithWorker,
             PathConstraint.None, Pending,

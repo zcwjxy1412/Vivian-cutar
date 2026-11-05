@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Engines;
@@ -6,6 +8,8 @@ using VIvian.Infrastructure.Engines.Isolation;
 using VIvian.Infrastructure.Processes;
 
 if (!OperatingSystem.IsWindows()) { Console.WriteLine("只能在 Windows 上运行。"); return 2; }
+Console.InputEncoding = new UTF8Encoding(false);
+Console.OutputEncoding = new UTF8Encoding(false);
 Console.WriteLine("星铁 CLI 状态验证：仅在临时隔离副本内运行 --status；不会启动游戏或申请 UAC。");
 Console.Write("粘贴上游安装目录：");
 var install = Console.ReadLine()?.Trim().Trim('"');
@@ -34,12 +38,24 @@ try
     var runner = new CliDiagnosticRunner(new WindowsProcessSupervisor(), new ApprovedStatusGate());
     var result = await runner.RunAsync(copy, "m7a.exe", operation, authorization);
     Console.WriteLine($"CLI 状态：{result.State}；退出码：{result.ExitCode?.ToString() ?? "未知"}；清理：{result.Cleanup}；耗时：{result.Duration.TotalSeconds:F1} 秒");
-    if (result.State != CliRunState.Completed || result.ExitCode != 0 || result.Cleanup != CleanupState.Confirmed
-        || result.OutputTruncated || result.Changes is null || result.Changes.Incomplete)
+    var evidenceComplete = result.State == CliRunState.Completed && result.ExitCode == 0
+        && result.Cleanup == CleanupState.Confirmed && !result.OutputTruncated
+        && result.Changes is { Incomplete: false };
+    var status = evidenceComplete
+        ? March7thStatusContract.Parse(string.Join('\n', result.Output))
+        : March7thStatusResult.Reject(March7thStatusBlock.Other, "状态查询或证据采集未通过；请勿执行真实任务。");
+    var report = new
     {
-        Console.WriteLine("状态查询或证据采集未通过；请勿执行真实任务。"); return 1;
-    }
-    var status = March7thStatusContract.Parse(string.Join('\n', result.Output));
+        schema = "vivian.m4-status/1", checkedAt = DateTimeOffset.UtcNow,
+        release = verified.Evidence.Version, cliState = result.State.ToString(),
+        result.ExitCode, cleanup = result.Cleanup.ToString(),
+        result.OutputTruncated, fileSnapshotIncomplete = result.Changes?.Incomplete,
+        readyForUacValidation = status.ReadyForUacValidation,
+        block = status.Block.ToString(), status.Detail,
+    };
+    var reportPath = Path.Combine(AppContext.BaseDirectory, "状态结果.json");
+    await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
+    Console.WriteLine("脱敏结构化结果：" + reportPath);
     Console.WriteLine(status.ReadyForUacValidation ? "状态检查通过；下一步仍需单独 UAC 归属验证。" : "状态检查阻断：" + status.Detail);
     return status.ReadyForUacValidation ? 0 : 1;
 }

@@ -6,4 +6,5 @@
 - 本机 .NET 10.0.403：359 项测试通过；独立 Windows 自包含构建成功；WPF 冒烟通过（渲染、隔离 SQLite 往返、模拟队列及停止）。
 - 固定上游 `utils/runs.py` 的 `success` 来自退出码 0，因此目前星铁真实任务完成证据仍不足。
 - 用户明确同意后，在已核对官方包的临时隔离副本内运行一次 `m7a.exe --status`：CLI 状态 `Completed`、退出码 `0`、归属进程清理 `Confirmed`、耗时约 `0.8` 秒；探针最终返回阻断（退出码 `1`）。外层非交互捕获发生中文乱码，无法可靠保留具体阻断文案；不推断或填写原因。首次尝试在确认词阶段取消，未执行 CLI。未请求 UAC，也未运行游戏任务。
+- 修复 UTF-8 捕获和脱敏结构化报告后，重新在官方隔离副本执行状态查询：`cliState=Completed`、`ExitCode=0`、`cleanup=Confirmed`、`OutputTruncated=false`、`fileSnapshotIncomplete=false`、`block=FirstRunNotConfirmed`。明确阻断字段为上游首次免责声明未由本人确认；用户需自行在上游界面完成，不由 VIvian 代为确认。报告位于本机独立状态探针目录的 `状态结果.json`，不含原始路径或账号内容。
 - 真实任务、UAC 归属与跨权限停止仍未验证，应用真实执行闸门保持关闭。

@@ -27,6 +27,15 @@ public class March7thStatusContractTests
         => Assert.False(March7thStatusContract.Parse(Ready.Replace(from, to)).ReadyForUacValidation);
 
     [Fact]
+    public void ReportsDistinctBlockingFields()
+    {
+        Assert.Equal(March7thStatusBlock.FirstRunNotConfirmed, March7thStatusContract.Parse(Ready.Replace("\"first_run_completed\":true", "\"first_run_completed\":false")).Block);
+        Assert.Equal(March7thStatusBlock.GamePathMissing, March7thStatusContract.Parse(Ready.Replace("\"game_path_exists\":true", "\"game_path_exists\":false")).Block);
+        Assert.Equal(March7thStatusBlock.ActiveRun, March7thStatusContract.Parse(Ready.Replace("\"active_run\":null", "\"active_run\":{}")).Block);
+        Assert.Equal(March7thStatusBlock.Protocol, March7thStatusContract.Parse("{}").Block);
+    }
+
+    [Fact]
     public void RefusesMalformedSnapshot()
     {
         Assert.False(March7thStatusContract.Parse("not json").ReadyForUacValidation);

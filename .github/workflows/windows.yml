@@ -45,6 +45,10 @@ jobs:
         env:
           VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: ./scripts/Build-M4ScreenTest.ps1
+      - name: Verify special-build status and stop launch boundaries
+        if: success()
+        shell: pwsh
+        run: dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M4ScreenTestBuild=true --filter FullyQualifiedName~StatusAndExactStopUseAuxiliarySupervisorWhileTaskUsesSingleRunLaunch
       - name: Upload M4-A one-attempt screen test package
         if: success()
         uses: actions/upload-artifact@v6

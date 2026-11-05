@@ -29,6 +29,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ITaskPlanStore _plans;
     private readonly IPreferenceStore _preferences;
     private readonly IRunHistory _runs;
+    private readonly IProcessSupervisor _statusSupervisor;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
     private string _status = RealExecutionPolicy.BuildPermitsRealExecution
@@ -140,9 +141,10 @@ public sealed class MainViewModel : ObservableObject
     public QueueViewModel Queue { get; }
 
     public MainViewModel(ISettingsStore settings, IDiagnosticStore history, ITaskPlanStore plans, IPreferenceStore preferences,
-        IRunHistory runs, AppPaths paths, QueueViewModel queue)
+        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
+        _statusSupervisor = statusSupervisor;
         _oneShotConsumed = File.Exists(OneShotMarker);
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeCoreAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
@@ -261,7 +263,7 @@ public sealed class MainViewModel : ObservableObject
         }
         catch (IOException) { _oneShotConsumed = true; Status = "单次许可标记已存在或无法写入；任务未启动。"; return; }
         var adapter = new March7thAdapter(card.InstallPath, _march7thEvidence, March7thTask.Id,
-            () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath);
+            () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath, _statusSupervisor);
         try
         {
             var result = await Queue.RunMarch7thAsync(adapter);

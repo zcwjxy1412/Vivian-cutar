@@ -8,7 +8,7 @@ namespace VIvian.Infrastructure.Engines;
 
 /// <summary>Fixed-release task runner. The scheduler's real-execution admission remains closed until UAC ownership is validated.</summary>
 public sealed class March7thAdapter(string installDirectory, March7thReleaseEvidence release, string task,
-    Func<bool> userConfirmedThisRun) : IGameAdapter
+    Func<bool> userConfirmedThisRun, IProcessSupervisor statusSupervisor) : IGameAdapter
 {
     public GameId Game => GameId.StarRail;
     public string RuleVersion => "m7a-v2026.10.31-task-1";
@@ -36,14 +36,18 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
         var install = await March7thReadOnlyInspector.InspectAsync(installDirectory, release, ct).ConfigureAwait(false);
         if (install.Compatibility != March7thCompatibility.Verified || install.CliPath is null)
             throw new EngineStartException(ReasonCodes.RealAdapterUnverified, true, "上游身份核对未通过。");
-        var status = await March7thStatusCommand.CheckAsync(supervisor, install.CliPath, installDirectory, context.RunId, ct)
+        // The scheduler's per-run capability is deliberately single-use. The read-only status query
+        // owns and cleans up its own Job; the capability remains available for the actual task launch.
+        var status = await March7thStatusCommand.CheckAsync(statusSupervisor, install.CliPath, installDirectory,
+                context.RunId, ct)
             .ConfigureAwait(false);
         if (!status.Status.ReadyForUacValidation)
             throw new EngineStartException(ReasonCodes.RealAdapterUnverified,
                 status.Cleanup == CleanupState.Confirmed, "上游状态阻断：" + status.Status.Detail);
         var group = await supervisor.StartAsync(new ProcessLaunchSpec(install.CliPath,
             March7thTaskContract.StartArguments(task), installDirectory), context.RunId, ct).ConfigureAwait(false);
-        return new March7thRun(context.RunId, group, supervisor, install.CliPath, installDirectory, task);
+        // The task capability is single-use; exact-RunId control commands are separately Job-supervised.
+        return new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task);
     }
 }
 

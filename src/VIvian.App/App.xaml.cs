@@ -39,7 +39,7 @@ public partial class App : Application
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    screenTest ? "VIvian-M4A-ScreenTest" : preview ? "VIvian-M4A-Preview" : "VIvian");
+                    screenTest ? "VIvian-M4A-ScreenTest-R2" : preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
             // One instance per data directory, decided before the database or logs are touched.
             _instance = SingleInstanceGuard.Acquire(root);

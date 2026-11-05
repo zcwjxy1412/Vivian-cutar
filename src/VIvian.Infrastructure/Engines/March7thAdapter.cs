@@ -34,6 +34,11 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
         var install = await March7thReadOnlyInspector.InspectAsync(installDirectory, release, ct).ConfigureAwait(false);
         if (install.Compatibility != March7thCompatibility.Verified || install.CliPath is null)
             throw new EngineStartException(ReasonCodes.RealAdapterUnverified, true, "上游身份核对未通过。");
+        var status = await March7thStatusCommand.CheckAsync(supervisor, install.CliPath, installDirectory, context.RunId, ct)
+            .ConfigureAwait(false);
+        if (!status.Status.ReadyForUacValidation)
+            throw new EngineStartException(ReasonCodes.RealAdapterUnverified,
+                status.Cleanup == CleanupState.Confirmed, "上游状态阻断：" + status.Status.Detail);
         var group = await supervisor.StartAsync(new ProcessLaunchSpec(install.CliPath,
             March7thTaskContract.StartArguments(task), installDirectory), context.RunId, ct).ConfigureAwait(false);
         return new March7thRun(context.RunId, group, supervisor, install.CliPath, installDirectory, task);

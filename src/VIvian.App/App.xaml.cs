@@ -69,7 +69,9 @@ public partial class App : Application
                 // real-execution build would use the existing Windows Job supervisor.
                 services.AddSingleton<IProcessSupervisor>(_ => RealExecutionPolicy.BuildPermitsRealExecution
                     ? new WindowsProcessSupervisor() : new RefusingProcessSupervisor());
-                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(), sp.GetRequiredService<IProcessSupervisor>()));
+                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(),
+                    sp.GetRequiredService<IProcessSupervisor>(), admitReal: adapter =>
+                        RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();

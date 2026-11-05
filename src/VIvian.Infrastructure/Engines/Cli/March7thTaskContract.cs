@@ -1,0 +1,77 @@
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using VIvian.Core.Execution;
+
+namespace VIvian.Infrastructure.Engines.Cli;
+
+/// <summary>
+/// v2026.10.31 的 m7a.exe 协议。来源：该 tag 的 utils/cli_entry.py；
+/// 命令构造与结果解析本身不会启动程序，也不授权跨 UAC 进程执行。
+/// </summary>
+public static partial class March7thTaskContract
+{
+    private static readonly HashSet<string> Tasks =
+        ["main", "daily", "power", "routine", "divergent", "currencywars", "fight", "universe"];
+
+    [GeneratedRegex(@"^\d{8}-\d{6}-[0-9a-f]{4}$", RegexOptions.CultureInvariant)]
+    private static partial Regex RunIdPattern();
+
+    public static IReadOnlyList<string> StartArguments(string task)
+    {
+        if (!Tasks.Contains(task)) throw new ArgumentException("任务不在已核对的白名单内。", nameof(task));
+        // 禁止从上游配置继承关机、睡眠或脚本等完成后动作；末尾 JSON 是运行记录。
+        return [task, "--after-finish", "None", "--json"];
+    }
+
+    public static IReadOnlyList<string> StopArguments(string upstreamRunId)
+    {
+        if (!RunIdPattern().IsMatch(upstreamRunId)) throw new ArgumentException("上游运行编号格式无效。", nameof(upstreamRunId));
+        // 必须指定本次上游 RunId，绝不能用 current/latest 误停别人的任务。
+        return ["--control", upstreamRunId, "stop", "--json"];
+    }
+
+    public static March7thTaskResult ParseFinalRecord(string output, string task, int processExitCode, string expectedUpstreamRunId)
+    {
+        if (!Tasks.Contains(task)) throw new ArgumentException("任务不在已核对的白名单内。", nameof(task));
+        if (!RunIdPattern().IsMatch(expectedUpstreamRunId)) throw new ArgumentException("缺少本次启动时捕获的上游运行编号。", nameof(expectedUpstreamRunId));
+        // m7a 会先打印日志，再在最后一行打印 JSON；不从自由文本中猜测完成状态。
+        var last = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim()).LastOrDefault(x => x.StartsWith('{'));
+        if (last is null) return Unknown("没有运行记录 JSON。");
+        try
+        {
+            using var doc = JsonDocument.Parse(last, new JsonDocumentOptions { MaxDepth = 16 });
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return Unknown("运行记录不是对象。");
+            string? String(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+                ? value.GetString() : null;
+            int? Int(string name) => root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number
+                && value.TryGetInt32(out var n) ? n : null;
+            var id = String("run_id");
+            var status = String("effective_status") ?? String("status");
+            var recordedTask = String("task");
+            var recordedExit = Int("exit_code");
+            if (id != expectedUpstreamRunId || recordedTask != task)
+                return Unknown("运行编号或任务标识未能匹配本次请求。");
+            if (String("lock") != "acquired")
+                return new(id, RunOutcome.Indeterminate, "无法确认上游运行锁归属。");
+            if (recordedExit is null || recordedExit != processExitCode)
+                return new(id, RunOutcome.Indeterminate, "上游记录与入口退出码不一致。");
+            if (!string.IsNullOrEmpty(String("error")))
+                return new(id, RunOutcome.Failed, "上游运行记录包含错误。");
+            return (status, recordedExit) switch
+            {
+                ("success", 0) => new(id, RunOutcome.Success, "上游运行记录明确成功，任务与退出码一致。"),
+                ("failed", _) => new(id, RunOutcome.Failed, "上游运行记录报告失败。"),
+                ("blocked", _) => new(id, RunOutcome.Failed, "上游运行记录报告任务未执行。"),
+                ("stopped", _) => new(id, RunOutcome.Cancelled, "上游运行记录报告停止。"),
+                _ => new(id, RunOutcome.Indeterminate, "上游状态不是已验证的终态。"),
+            };
+        }
+        catch (JsonException) { return Unknown("末尾运行记录 JSON 无法解析。"); }
+
+        static March7thTaskResult Unknown(string reason) => new(null, RunOutcome.Indeterminate, reason);
+    }
+}
+
+public sealed record March7thTaskResult(string? UpstreamRunId, RunOutcome Outcome, string Detail);

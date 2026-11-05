@@ -1,5 +1,6 @@
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Engines.Cli;
+using Xunit;
 
 namespace VIvian.Tests.Engines;
 

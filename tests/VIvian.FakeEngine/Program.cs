@@ -12,7 +12,7 @@ using System.Security.Principal;
 Console.OutputEncoding = new UTF8Encoding(false);
 var arguments = ParseArguments(args);
 var runId = arguments.GetValueOrDefault("--run-id") ?? Guid.Empty.ToString();
-var scenario = arguments.GetValueOrDefault("--scenario") ?? "success";
+var scenario = arguments.GetValueOrDefault("--scenario") ?? Environment.GetEnvironmentVariable("VIVIAN_FAKE_SCENARIO") ?? "success";
 var stopRequested = new ManualResetEventSlim(false);
 
 new Thread(() =>
@@ -116,6 +116,27 @@ switch (scenario)
         Emit("info", "waiting");
         while (!Pause(60_000)) { }
         return HonouredStop();
+    }
+
+    case "synthetic-cli":
+    {
+        // SYNTHETIC stand-in for an upstream diagnostic CLI. Output shapes are invented for tests and prove nothing
+        // about the real March7thAssistant. Side effects mimic the risks recorded in the research (probe file, config).
+        var cwd = Environment.CurrentDirectory;
+        if (args.Contains("--version")) { Console.WriteLine("v2026.10.31"); return 0; }
+        if (args.Contains("--status"))
+        {
+            var probe = Path.Combine(cwd, ".synthetic_write_probe");
+            File.WriteAllText(probe, "probe");
+            File.Delete(probe);
+            var config = Path.Combine(cwd, "config.yaml");
+            if (!File.Exists(config)) File.WriteAllText(config, "# SYNTHETIC generated config\n");
+            Console.WriteLine("{\"first_run_completed\": false, \"game_path_exists\": false, \"active_run\": null, \"synthetic\": true}");
+            return 0;
+        }
+        if (args.Contains("--list")) { Console.WriteLine("[{\"synthetic\": true}]"); Console.Error.WriteLine("SYNTHETIC stderr line"); return 0; }
+        Console.Error.WriteLine("SYNTHETIC: unknown arguments");
+        return 2;
     }
 
     case "sleep-forever":

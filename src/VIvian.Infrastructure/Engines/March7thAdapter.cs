@@ -16,6 +16,8 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
 
     public async Task<PreflightResult> PreflightAsync(RunContext context, CancellationToken ct)
     {
+        if (!RealExecutionPolicy.AllowsTask(task))
+            return PreflightResult.Block("task_not_authorized", "此构建未授权该真实任务。");
         if (!userConfirmedThisRun()) return PreflightResult.Block("real_run_not_confirmed", "请在界面中确认本次真实任务。");
         if (release.Version != "v2026.10.31") return PreflightResult.Block("release_mismatch", "上游版本不匹配。");
         try { March7thTaskContract.StartArguments(task); }
@@ -27,7 +29,7 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
 
     public async Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
     {
-        if (!RealExecutionPolicy.BuildPermitsRealExecution)
+        if (!RealExecutionPolicy.AllowsTask(task))
             throw new EngineStartException(ReasonCodes.RealAdapterUnverified, true, "跨 UAC 工作进程清理尚未验证，真实任务闸门关闭。");
         if (!userConfirmedThisRun())
             throw new EngineStartException(ReasonCodes.RealAdapterUnverified, true, "本次真实运行尚未由用户确认。");
@@ -104,6 +106,13 @@ internal sealed class March7thRun : IEngineRun
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
             var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id);
+            if (parsed.Outcome == RunOutcome.Success)
+            {
+                var own = await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None)
+                    .ConfigureAwait(false);
+                if (own != CleanupState.Confirmed || March7thWorkerExit.Check(output, id, _task) != WorkerExitState.Exited)
+                    return Unknown("完成步骤已记录，但无法确认本次工作进程全部退出。");
+            }
             var reason = parsed.Outcome switch
             {
                 RunOutcome.Success => ReasonCodes.Completed,

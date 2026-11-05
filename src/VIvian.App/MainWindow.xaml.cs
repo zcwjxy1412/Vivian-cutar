@@ -54,7 +54,8 @@ public partial class MainWindow : Window
         catch (System.Runtime.InteropServices.ExternalException) { /* clipboard busy: the path is still shown below */ }
     }
 
-    private static readonly TimeSpan ShutdownStopTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan ShutdownStopTimeout = VIvian.Core.Engines.RealExecutionPolicy.BuildPermitsRealExecution
+        ? TimeSpan.FromSeconds(90) : TimeSpan.FromSeconds(30);
     private bool _stopping;
     private bool _closeAfterStop;
 }

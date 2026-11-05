@@ -31,13 +31,18 @@ public sealed class MainViewModel : ObservableObject
     private readonly IRunHistory _runs;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
-    private string _status = "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
+    private string _status = RealExecutionPolicy.BuildPermitsRealExecution
+        ? "单次星铁 screen_test 测试包：请先核对官方包与安装路径，再逐项确认本次执行。"
+        : "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
     public string Status { get => _status; private set => Set(ref _status, value); }
     private bool _busy;
     public bool IsIdle => !_busy;
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
-    public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}）· 预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）";
+    public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}）· "
+        + (RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
+    public string ExecutionBanner => RealExecutionPolicy.BuildPermitsRealExecution
+        ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
     public ObservableCollection<EngineCard> Engines { get; } =
     [new(GameId.Genshin, "原神", "BetterGI", "01"), new(GameId.StarRail, "崩坏：星穹铁道", "March7thAssistant", "02"), new(GameId.ZenlessZoneZero, "绝区零", "OneDragon", "03")];
@@ -61,8 +66,11 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand SavePreferencesCommand { get; }
     public AsyncCommand ExportDiagnosticsCommand { get; }
     public AsyncCommand StartMarch7thCommand { get; }
-    public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = EngineCatalog.March7th.Tasks;
-    private EngineTaskDefinition? _march7thTask = EngineCatalog.March7th.Tasks.FirstOrDefault(t => t.Id == "daily");
+    public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = RealExecutionPolicy.BuildPermitsRealExecution
+        ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
+        : EngineCatalog.March7th.Tasks;
+    private EngineTaskDefinition? _march7thTask = EngineCatalog.March7th.Tasks.FirstOrDefault(t => t.Id ==
+        (RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
     public EngineTaskDefinition? March7thTask
     {
         get => _march7thTask;
@@ -85,9 +93,21 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(CanStartMarch7th));
         }
     }
-    public string March7thExecutionBlock => "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。";
-    public bool CanStartMarch7th => RealExecutionPolicy.BuildPermitsRealExecution && March7thConfirmedThisRun
-        && _march7thEvidence is not null && March7thTask is not null && Queue.IsIdle;
+    private bool _oneShotConsumed;
+    private string OneShotMarker => Path.Combine(_paths.DataDirectory, "screen_test.attempted");
+    public string March7thExecutionBlock => !RealExecutionPolicy.BuildPermitsRealExecution
+        ? "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。"
+        : _oneShotConsumed ? "本包的单次 screen_test 许可已使用；不会自动重试。"
+        : "本包仅允许一次 screen_test，需核对固定版本、状态与本次确认；UAC 由你亲自处理。";
+    public string March7thStopStatus => RealExecutionPolicy.BuildPermitsRealExecution
+        ? "无害 UAC 边界已核对；上游 Worker 的停止结果需以本次实测为准。"
+        : "跨权限安全停止：待实机验证；当前不能运行真实任务。";
+    public string March7thConsentNote => RealExecutionPolicy.BuildPermitsRealExecution
+        ? "本包仅含已获单次授权的 screen_test。启动前核对路径及任务；UAC 由你亲自操作。"
+        : "首次真实任务必须先完成 UAC 与 Worker 实测，并另行取得你的单次游戏操作授权。";
+    public bool CanStartMarch7th => RealExecutionPolicy.AllowsTask(March7thTask?.Id ?? "") && !_oneShotConsumed
+        && March7thConfirmedThisRun && _march7thEvidence is not null && Queue.IsIdle && !Queue.HasUnresolved
+        && Engines.Single(e => e.Id == GameId.StarRail).Report?.Compatibility == CompatibilityClass.IdentityVerified;
 
     private string _releaseArchivePath = "";
     /// <summary>A March7thAssistant release archive the user downloaded from the official GitHub release.</summary>
@@ -123,6 +143,7 @@ public sealed class MainViewModel : ObservableObject
         IRunHistory runs, AppPaths paths, QueueViewModel queue)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
+        _oneShotConsumed = File.Exists(OneShotMarker);
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeCoreAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
@@ -173,6 +194,7 @@ public sealed class MainViewModel : ObservableObject
         // Off the UI thread: a network path or hashing a large file must not freeze the window.
         var report = await Task.Run(() => EngineReadinessInspector.InspectAsync(card.Id, path, evidence, TimeProvider.System));
         card.Show(report);
+        if (card.Id == GameId.StarRail) Raise(nameof(CanStartMarch7th));
         Log.Information("Engine readiness {Game}: {Compatibility} ({Error})", card.Id, report.Compatibility, report.PrimaryError);
     }
 
@@ -216,14 +238,28 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task StartMarch7thAsync()
     {
-        if (!RealExecutionPolicy.BuildPermitsRealExecution) { Status = March7thExecutionBlock; return; }
+        if (!RealExecutionPolicy.AllowsTask(March7thTask?.Id ?? "") || _oneShotConsumed)
+        { Status = March7thExecutionBlock; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
         if (!March7thConfirmedThisRun || _confirmedInstallPath != card.InstallPath
             || _confirmedArchivePath != ReleaseArchivePath || _confirmedTask != March7thTask?.Id)
         { Status = "安装目录、发行包或任务选择已改变；请重新确认本次真实执行。"; return; }
         if (_march7thEvidence is null || March7thTask is null)
         { Status = "请先核对固定版本的官方发行包并选择任务。"; return; }
+        if (card.Report?.Compatibility != CompatibilityClass.IdentityVerified || Queue.HasUnresolved)
+        { Status = "安装身份未核对，或有上次运行尚未确认清理；任务未启动。"; return; }
+        if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
         March7thTaskContract.StartArguments(March7thTask.Id); // whitelist, even for a programmatic command call
+        // CreateNew is atomic: a second window or restart cannot silently repeat this approved attempt.
+        try
+        {
+            await using var marker = new FileStream(OneShotMarker, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            await using var writer = new StreamWriter(marker);
+            await writer.WriteAsync($"{DateTimeOffset.UtcNow:O} screen_test 单次尝试已使用。\n");
+            _oneShotConsumed = true;
+            Raise(nameof(CanStartMarch7th)); Raise(nameof(March7thExecutionBlock));
+        }
+        catch (IOException) { _oneShotConsumed = true; Status = "单次许可标记已存在或无法写入；任务未启动。"; return; }
         var adapter = new March7thAdapter(card.InstallPath, _march7thEvidence, March7thTask.Id,
             () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath);
         try
@@ -279,7 +315,7 @@ public sealed class MainViewModel : ObservableObject
         foreach (var plan in TaskPlans.Where(p => p.IsDirty).ToList())
             await Task.Run(() => _plans.SaveTaskPlanAsync(plan.ToPlan()));
         await LoadTasksAsync();
-        Status = "任务选择已保存。所选任务只是计划：真实任务在此开发版中不会执行。";
+        Status = "任务选择已保存。这里的计划不会触发真实执行；星铁单次测试只从专用页手动启动。";
         Log.Information("Task plans saved");
     }
 

@@ -31,12 +31,15 @@ public partial class App : Application
         try
         {
             // Smoke tests use a disposable directory, never the user's profile.
+            var screenTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-ScreenTest.marker"));
+            if (RealExecutionPolicy.BuildPermitsRealExecution && !screenTest)
+                throw new InvalidOperationException("单次测试包缺少隔离数据标记，拒绝启动。");
             var preview = e.Args.Contains("--m4-preview")
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    preview ? "VIvian-M4A-Preview" : "VIvian");
+                    screenTest ? "VIvian-M4A-ScreenTest" : preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
             // One instance per data directory, decided before the database or logs are touched.
             _instance = SingleInstanceGuard.Acquire(root);
@@ -70,7 +73,11 @@ public partial class App : Application
                 services.AddSingleton<IProcessSupervisor>(_ => RealExecutionPolicy.BuildPermitsRealExecution
                     ? new WindowsProcessSupervisor() : new RefusingProcessSupervisor());
                 services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(),
-                    sp.GetRequiredService<IProcessSupervisor>(), admitReal: adapter =>
+                    sp.GetRequiredService<IProcessSupervisor>(),
+                    options: RealExecutionPolicy.BuildPermitsRealExecution ? SchedulerOptions.Default with
+                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(45) }
+                    : SchedulerOptions.Default,
+                    admitReal: adapter =>
                         RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<MainViewModel>();
@@ -100,6 +107,9 @@ public partial class App : Application
                     {
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
+                        if (RealExecutionPolicy.BuildPermitsRealExecution &&
+                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != "screen_test" || vm.CanStartMarch7th))
+                            throw new InvalidOperationException("One-attempt screen test admission is not constrained");
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);

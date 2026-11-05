@@ -30,10 +30,12 @@ public partial class App : Application
         try
         {
             // Smoke tests use a disposable directory, never the user's profile.
+            var preview = e.Args.Contains("--m4-preview")
+                || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    e.Args.Contains("--m4-preview") ? "VIvian-M4A-Preview" : "VIvian");
+                    preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
             // One instance per data directory, decided before the database or logs are touched.
             _instance = SingleInstanceGuard.Acquire(root);

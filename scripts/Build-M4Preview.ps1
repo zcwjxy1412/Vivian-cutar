@@ -6,6 +6,7 @@ if (-not (Test-Path "$source/VIvian.exe")) { throw '请先运行 Build.ps1 生�
 if (Test-Path $target) { throw '预览目录已存在，请先检查，不自动覆盖。' }
 Copy-Item $source $target -Recurse
 Copy-Item 'docs/M4A_PREVIEW_WINDOWS.md' "$target/使用说明-M4A预览.md"
+'VIvian M4-A preview: isolated data directory' | Set-Content "$target/VIvian-M4A-Preview.marker" -Encoding ascii
 '@echo off' + "`r`n" + 'cd /d "%~dp0"' + "`r`n" + '"%~dp0VIvian.exe" --m4-preview' + "`r`n" |
     Set-Content "$target/启动M4A预览.cmd" -Encoding ascii
 $archive = 'artifacts/VIvian-M4A-preview-win-x64.zip'

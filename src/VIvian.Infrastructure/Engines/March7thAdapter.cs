@@ -99,9 +99,15 @@ internal sealed class March7thRun : IEngineRun
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
             var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id);
-            var reason = parsed.Outcome == RunOutcome.Indeterminate ? ReasonCodes.NoCompletionEvidence
-                : parsed.Outcome == RunOutcome.Failed ? ReasonCodes.ReportedFailure : ReasonCodes.ReportedCancel;
-            return new RunVerdict(parsed.Outcome, reason, [new Evidence(RunId, EvidenceKind.Note, parsed.Detail, DateTimeOffset.UtcNow)]);
+            var reason = parsed.Outcome switch
+            {
+                RunOutcome.Success => ReasonCodes.Completed,
+                RunOutcome.Failed => ReasonCodes.ReportedFailure,
+                RunOutcome.Cancelled => ReasonCodes.ReportedCancel,
+                _ => ReasonCodes.NoCompletionEvidence,
+            };
+            var kind = parsed.Outcome == RunOutcome.Success ? EvidenceKind.CompletionReported : EvidenceKind.Note;
+            return new RunVerdict(parsed.Outcome, reason, [new Evidence(RunId, kind, parsed.Detail, DateTimeOffset.UtcNow)]);
         }
         catch (Exception ex) when (ex is TimeoutException or IOException)
         { return Unknown("入口进程或日志采集未能确认终态。"); }

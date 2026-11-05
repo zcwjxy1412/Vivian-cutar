@@ -11,3 +11,5 @@
 - 用户本人在上游界面完成首次免责声明并核对游戏路径后，重新运行同一官方发行包的隔离 `--status`：`cliState=Completed`、`ExitCode=0`、`cleanup=Confirmed`、`OutputTruncated=false`、`fileSnapshotIncomplete=false`、`readyForUacValidation=true`、`block=None`。仅证明基本前置条件通过；未执行游戏任务或请求 UAC。脱敏结果位于本机状态探针目录的 `状态结果.json`。
 - M4-A2：按官方 v2026.10.31 `utils/runs.py` 核对，最终记录的 `pid` / `pid_create_time` 属于实际任务进程；`utils/cli_entry.py` 的停止回执 `acknowledged` 只表示指令已收到。代码增加精确 RunId 回执、PID 与创建时间观察，仍要求本次终态记录及自身 Job 清理；无法确认则返回 Unconfirmed。365 项本机测试通过，独立 WPF 冒烟通过。真实执行闸门未打开。
 - 无 UAC 的无害边界工具本机试跑：普通权限工作进程及其子进程的身份匹配，停止标记送达后两者退出。提权路径尚未执行；独立方案见 `M4A2_UAC_TEST_PLAN_2026-11-05.md`。
+- 用户单独批准后，执行一次无游戏 UAC 边界工具：系统 UAC 结果为 accepted，启动句柄 PID 与本次工作进程记录一致；工作进程与其子进程均为提权状态、父子 PID 匹配，停止前均为 Running，停止标记送达后均为 Exited，工具结果 `cleanupConfirmed=true`；按报告中的两个 PID 复查均已不存在。报告位于 `E:\auto agent game\M4A2-UAC-probe-result\结果.json`。这仅验证无害类比进程，真实 March7thAssistant Worker 与游戏行为仍未实测。
+- 核对固定上游 `screen_test`：任务会打开/连接星铁并逐项切换可达界面；代码只在本次运行全部切换记录和计数一致、上游终态匹配时认定完成，退出码 0 单独不构成证据。该证据规则通过合成测试，真实任务未运行；首次游戏测试副作用与停止方案见 `M4A2_FIRST_GAME_TEST_PLAN_2026-11-05.md`。

@@ -11,7 +11,7 @@ namespace VIvian.Infrastructure.Engines.Cli;
 public static partial class March7thTaskContract
 {
     private static readonly HashSet<string> Tasks =
-        ["main", "daily", "power", "routine", "divergent", "currencywars", "fight", "universe"];
+        ["main", "daily", "power", "routine", "divergent", "currencywars", "fight", "universe", "screen_test"];
 
     [GeneratedRegex(@"^\d{8}-\d{6}-[0-9a-f]{4}$", RegexOptions.CultureInvariant)]
     private static partial Regex RunIdPattern();
@@ -76,6 +76,8 @@ public static partial class March7thTaskContract
             {
                 // Pinned upstream utils/runs.py derives `success` directly from exit code 0.
                 // This record proves an exit, not that the requested game work was completed.
+                ("success", 0) when task == "screen_test" && March7thScreenTestEvidence.ProvesComplete(output)
+                    => new(id, RunOutcome.Success, "本次界面测试的启动数、逐项切换记录和完成计数一致。"),
                 ("success", 0) => new(id, RunOutcome.Indeterminate, "上游 success 由退出码 0 推导；缺少独立任务完成证据。"),
                 ("failed", _) => new(id, RunOutcome.Failed, "上游运行记录报告失败。"),
                 ("blocked", _) => new(id, RunOutcome.Failed, "上游运行记录报告任务未执行。"),

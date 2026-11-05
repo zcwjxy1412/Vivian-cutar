@@ -36,3 +36,18 @@ jobs:
             artifacts/tests
             artifacts/smoke
             artifacts/VIvian-win-x64.zip
+      - name: Build and run harmless desktop probe
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-DesktopProbe.ps1
+      - name: Upload self-contained desktop probe
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-DesktopProbe-win-x64
+          path: |
+            artifacts/VIvian-DesktopProbe-win-x64.zip
+            artifacts/VIvian-DesktopProbe-win-x64.zip.sha256
+          if-no-files-found: error

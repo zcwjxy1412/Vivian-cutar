@@ -99,14 +99,15 @@ internal static class OdOut
 
 internal sealed class OneDragonFixture : IAsyncDisposable
 {
-    public string Root { get; } = Path.Combine(Path.GetTempPath(), "vivian-od-" + Guid.NewGuid().ToString("N"));
+    public string Root { get; }
     public FakeLauncherSupervisor Supervisor { get; } = new();
     public FakeOdProbe Probe { get; } = new();
     public OneDragonRunRegistry Registry { get; } = new();
     public RunContext Context { get; } = new(Guid.NewGuid(), Guid.NewGuid(), GameId.ZenlessZoneZero, DateTimeOffset.UtcNow);
 
-    public OneDragonFixture(bool createInstall = true, bool runtimeLauncher = true)
+    public OneDragonFixture(bool createInstall = true, bool runtimeLauncher = true, string folderPrefix = "vivian-od-")
     {
+        Root = Path.Combine(Path.GetTempPath(), folderPrefix + Guid.NewGuid().ToString("N"));
         if (!createInstall) return;
         Directory.CreateDirectory(Root);
         File.WriteAllBytes(Path.Combine(Root, runtimeLauncher ? OneDragonContract.EntryProgram : OneDragonContract.RawLauncherProgram), [0x4D, 0x5A]);
@@ -269,8 +270,8 @@ public sealed class OneDragonPreflightTests
     [Fact]
     public async Task InvalidInstallationPathIsRefused()
     {
-        // Temporary test folders are never "D:\ascii" paths, so the documented rule fails them.
-        await using var f = new OneDragonFixture();
+        // A space and non-ASCII characters break the documented rule on every OS (a plain temp path may pass on Windows).
+        await using var f = new OneDragonFixture(folderPrefix: "vivian od 测试-");
         var report = await OneDragonInstallationInspector.InspectAsync(f.Root);
         Assert.Contains(report.Checks, c => c.Id == "od:path" && c.State == CheckState.Failed);
         Assert.False((await f.Adapter().PreflightAsync(Ctx, default)).CanStart);

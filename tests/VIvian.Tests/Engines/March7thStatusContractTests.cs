@@ -14,13 +14,13 @@ public class March7thStatusContractTests
     {
         var result = March7thStatusContract.Parse(Ready);
         Assert.True(result.ReadyForUacValidation);
-        Assert.Contains("尚未证明", result.Detail);
+        Assert.Contains("仍需桌面验证", result.Detail);
+        Assert.True(March7thStatusContract.Parse(Ready.Replace(",\"elevation\":\"uac\"", "")).ReadyForUacValidation);
     }
 
     [Theory]
     [InlineData("\"first_run_completed\":true", "\"first_run_completed\":false")]
     [InlineData("\"active_run\":null", "\"active_run\":{\"run_id\":\"busy\"}")]
-    [InlineData("\"elevation\":\"uac\"", "\"elevation\":\"task\"")]
     [InlineData("\"game_path_exists\":true", "\"game_path_exists\":false")]
     [InlineData("\"schema\":1", "\"schema\":2")]
     public void RefusesUnsafeOrUnknownSnapshot(string from, string to)

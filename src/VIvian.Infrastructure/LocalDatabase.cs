@@ -28,7 +28,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -63,6 +63,18 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         PRAGMA user_version=2;
         """;
 
+    // M3 pre-desktop: the user's task plans and application preferences.
+    private const string SchemaV3 = """
+        CREATE TABLE task_plans(game INTEGER PRIMARY KEY CHECK(game BETWEEN 0 AND 2),
+            plan_json TEXT NOT NULL, rule_version TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>=1));
+        CREATE TABLE app_preferences(id INTEGER PRIMARY KEY CHECK(id=1),
+            log_retention_days INTEGER NOT NULL CHECK(log_retention_days BETWEEN 3 AND 90),
+            include_run_history INTEGER NOT NULL CHECK(include_run_history IN (0,1)),
+            release_archive_path TEXT NOT NULL, revision INTEGER NOT NULL CHECK(revision>=0));
+        INSERT INTO app_preferences VALUES(1,14,1,'',0);
+        PRAGMA user_version=3;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -86,6 +98,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 1)
         {
             command.CommandText = SchemaV2;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 2)
+        {
+            command.CommandText = SchemaV3;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

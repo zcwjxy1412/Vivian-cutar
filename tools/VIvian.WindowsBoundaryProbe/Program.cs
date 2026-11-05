@@ -115,6 +115,53 @@ await Check("B4 退出码不等于完成证据", async () =>
         run.RunId, null, null, null, run.Cleanup.ToString(), 0, $"结果={run.Outcome}；原因={run.ReasonCode}");
 });
 
+await Check("B4a 引擎静默卡死后安全停止", async () =>
+{
+    var db = new LocalDatabase(Path.Combine(root, "stall.db")); await db.InitializeAsync();
+    var options = new SchedulerOptions(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(8),
+        TimeSpan.FromSeconds(12), new RunLimits(TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(2)));
+    var sw = Stopwatch.StartNew();
+    var result = await new QueueScheduler(db, new WindowsProcessSupervisor(), options).RunAsync([
+        new QueueItem(GameId.Genshin, new FakeEngineAdapter(GameId.Genshin, engine, "hang-silent"))
+    ]).WaitAsync(TimeSpan.FromSeconds(25));
+    var run = result.Runs.Single();
+    return new("B4a 引擎静默卡死后安全停止",
+        run.Outcome == RunOutcome.Indeterminate && run.ReasonCode == ReasonCodes.Stalled &&
+        run.Cleanup == CleanupState.Confirmed ? "PASS" : "FAIL",
+        run.RunId, null, null, sw.ElapsedMilliseconds, run.Cleanup.ToString(), null,
+        $"结果={run.Outcome}；原因={run.ReasonCode}；队列={result.Status}");
+});
+
+await Check("B4b 拒绝优雅停止后 Job 清理", async () =>
+{
+    var id = Guid.NewGuid();
+    await using var group = await Start(id, "ignore-stop");
+    using var child = Process.GetProcessById(group.RootProcessId);
+    var sw = Stopwatch.StartNew();
+    var sent = await group.SendInputLineAsync("stop", CancellationToken.None);
+    var stillRunning = !await ProcessExited(child, TimeSpan.FromMilliseconds(400));
+    var cleanup = await group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+    var gone = await ProcessExited(child, TimeSpan.FromSeconds(5));
+    return new("B4b 拒绝优雅停止后 Job 清理",
+        sent && stillRunning && cleanup == CleanupState.Confirmed && gone ? "PASS" : "FAIL",
+        id, group.RootProcessId, group.RootStartTime, sw.ElapsedMilliseconds, cleanup.ToString(), null,
+        $"优雅停止已发出={sent}；仍在运行={stillRunning}；强制清理后退出={gone}");
+});
+
+await Check("B4c 启动失败不产生进程", async () =>
+{
+    var id = Guid.NewGuid();
+    var missing = Path.Combine(root, "missing.exe");
+    try {
+        await new WindowsProcessSupervisor().StartAsync(new ProcessLaunchSpec(missing, [], root), id, CancellationToken.None);
+        return new("B4c 启动失败不产生进程", "FAIL", id, null, null, null, null, null, "不存在的文件却被启动");
+    }
+    catch (EngineStartException ex) {
+        return new("B4c 启动失败不产生进程", ex.NothingStarted ? "PASS" : "FAIL", id, null, null, null,
+            CleanupState.NotRequired.ToString(), null, $"NothingStarted={ex.NothingStarted}");
+    }
+});
+
 await Check("B5 独立宿主崩溃及重启对账", async () =>
 {
     var database = Path.Combine(root, "crash.db");
@@ -138,6 +185,7 @@ await Check("B5 独立宿主崩溃及重启对账", async () =>
 
 results.Add(new("C 桌面 UAC 同意/拒绝", "NOT RUN", null, null, null, null, null, null, "需要用户单独授权及亲自操作"));
 results.Add(new("D 官方发行包 CLI", "NOT RUN", null, null, null, null, null, null, "需要用户单独授权；真实命令未经验证"));
+results.Add(new("B 迟到启动、未知清理和数据库写入故障注入", "NOT RUN", null, null, null, null, null, null, "现有 Windows CI 有定向单测；桌面探针尚未覆盖，阶段 B 完整验收须补测"));
 var reportPath = Path.Combine(root, "报告.json");
 await File.WriteAllTextAsync(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }), new UTF8Encoding(false));
 var summary = new StringBuilder($"VIvian 阶段 B 本机无害进程报告\n系统：{report.WindowsVersion}\n工具版本：{report.ToolVersion}\n用户安装包：{report.InstalledVersion}\n开始时间：{report.StartedAt:O}\n");

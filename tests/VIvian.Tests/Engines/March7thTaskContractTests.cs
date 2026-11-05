@@ -21,7 +21,7 @@ public class March7thTaskContractTests
     }
 
     [Theory]
-    [InlineData("success", 0, RunOutcome.Success)]
+    [InlineData("success", 0, RunOutcome.Indeterminate)]
     [InlineData("failed", 1, RunOutcome.Failed)]
     [InlineData("blocked", 4, RunOutcome.Failed)]
     [InlineData("stopped", 6, RunOutcome.Cancelled)]

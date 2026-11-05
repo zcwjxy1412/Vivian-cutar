@@ -62,7 +62,17 @@ public sealed class MainViewModel : ObservableObject
 
     private string _releaseArchivePath = "";
     /// <summary>A March7thAssistant release archive the user downloaded from the official GitHub release.</summary>
-    public string ReleaseArchivePath { get => _releaseArchivePath; set => Set(ref _releaseArchivePath, value); }
+    public string ReleaseArchivePath
+    {
+        get => _releaseArchivePath;
+        set
+        {
+            if (_releaseArchivePath == value) return;
+            Set(ref _releaseArchivePath, value);
+            _march7thEvidence = null;
+            ReleaseStatus = "发行包路径已改变，请重新核对。";
+        }
+    }
     private string _releaseStatus = "尚未核对官方发行包。";
     public string ReleaseStatus { get => _releaseStatus; private set => Set(ref _releaseStatus, value); }
     // Session only: a verified official archive's m7a.exe hash. Not stored; verify again after restarting.
@@ -144,6 +154,9 @@ public sealed class MainViewModel : ObservableObject
     private async Task VerifyReleaseAsync()
     {
         var path = ReleaseArchivePath.Trim().Trim('"');
+        // Archive evidence belongs to one exact user selection. A failed recheck must
+        // never leave a previously verified executable authorised in this session.
+        _march7thEvidence = null;
         ReleaseStatus = "正在计算 SHA-256（大文件需要一些时间）…";
         var result = await Task.Run(() => March7thReleaseVerifier.VerifyAsync(path));
         if (result.Check == ReleaseCheck.Verified) _march7thEvidence = result.Evidence;

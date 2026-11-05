@@ -34,9 +34,10 @@ try
     var runner = new CliDiagnosticRunner(new WindowsProcessSupervisor(), new ApprovedStatusGate());
     var result = await runner.RunAsync(copy, "m7a.exe", operation, authorization);
     Console.WriteLine($"CLI 状态：{result.State}；退出码：{result.ExitCode?.ToString() ?? "未知"}；清理：{result.Cleanup}；耗时：{result.Duration.TotalSeconds:F1} 秒");
-    if (result.State != CliRunState.Completed || result.ExitCode != 0 || result.Cleanup != CleanupState.Confirmed)
+    if (result.State != CliRunState.Completed || result.ExitCode != 0 || result.Cleanup != CleanupState.Confirmed
+        || result.OutputTruncated || result.Changes is null || result.Changes.Incomplete)
     {
-        Console.WriteLine("状态查询未通过；请勿执行真实任务。"); return 1;
+        Console.WriteLine("状态查询或证据采集未通过；请勿执行真实任务。"); return 1;
     }
     var status = March7thStatusContract.Parse(string.Join('\n', result.Output));
     Console.WriteLine(status.ReadyForUacValidation ? "状态检查通过；下一步仍需单独 UAC 归属验证。" : "状态检查阻断：" + status.Detail);

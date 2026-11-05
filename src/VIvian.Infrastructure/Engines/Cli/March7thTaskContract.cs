@@ -74,7 +74,9 @@ public static partial class March7thTaskContract
                 return new(id, RunOutcome.Failed, "上游运行记录包含错误。");
             return (status, recordedExit) switch
             {
-                ("success", 0) => new(id, RunOutcome.Success, "上游运行记录明确成功，任务与退出码一致。"),
+                // Pinned upstream utils/runs.py derives `success` directly from exit code 0.
+                // This record proves an exit, not that the requested game work was completed.
+                ("success", 0) => new(id, RunOutcome.Indeterminate, "上游 success 由退出码 0 推导；缺少独立任务完成证据。"),
                 ("failed", _) => new(id, RunOutcome.Failed, "上游运行记录报告失败。"),
                 ("blocked", _) => new(id, RunOutcome.Failed, "上游运行记录报告任务未执行。"),
                 ("stopped", _) => new(id, RunOutcome.Cancelled, "上游运行记录报告停止。"),

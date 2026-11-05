@@ -28,7 +28,7 @@ public class March7thTaskContractTests
     [InlineData("aborted", 1, RunOutcome.Indeterminate)]
     public void RecordOutcomeRequiresMatchingRunTaskAndExit(string status, int exit, RunOutcome expected)
     {
-        var text = "启动中\n" + $$"""{"run_id":"{{Id}}","task":"daily","status":"{{status}}","lock":"acquired","exit_code":{{exit}}}""";
+        var text = "启动中\n" + $$"""{"schema":1,"ended_at":"2026-10-31T12:40:00","run_id":"{{Id}}","task":"daily","status":"{{status}}","lock":"acquired","exit_code":{{exit}}}""";
         Assert.Equal(expected, March7thTaskContract.ParseFinalRecord(text, "daily", exit, Id).Outcome);
         Assert.Equal(RunOutcome.Indeterminate, March7thTaskContract.ParseFinalRecord(text, "power", exit, Id).Outcome);
         Assert.Equal(RunOutcome.Indeterminate, March7thTaskContract.ParseFinalRecord(text, "daily", exit, "20261031-123456-ffff").Outcome);
@@ -37,7 +37,7 @@ public class March7thTaskContractTests
     [Fact]
     public void ExitZeroWithoutOwnedEvidenceRemainsUnknown()
     {
-        var text = $$"""{"run_id":"{{Id}}","task":"daily","status":"success","lock":"acquired","exit_code":0}""";
+        var text = $$"""{"schema":1,"ended_at":"2026-10-31T12:40:00","run_id":"{{Id}}","task":"daily","status":"success","lock":"acquired","exit_code":0}""";
         Assert.Equal(RunOutcome.Indeterminate, March7thTaskContract.ParseFinalRecord("仅退出码 0", "daily", 0, Id).Outcome);
         Assert.Equal(RunOutcome.Indeterminate, March7thTaskContract.ParseFinalRecord(text, "daily", 1, Id).Outcome);
         Assert.Equal(RunOutcome.Indeterminate, March7thTaskContract.ParseFinalRecord(text.Replace("acquired", "unavailable"), "daily", 0, Id).Outcome);

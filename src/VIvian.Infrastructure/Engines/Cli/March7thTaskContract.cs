@@ -62,6 +62,8 @@ public static partial class March7thTaskContract
             var status = String("effective_status") ?? String("status");
             var recordedTask = String("task");
             var recordedExit = Int("exit_code");
+            if (Int("schema") != 1 || string.IsNullOrWhiteSpace(String("ended_at")))
+                return Unknown("运行记录协议或结束时间缺失。");
             if (id != expectedUpstreamRunId || recordedTask != task)
                 return Unknown("运行编号或任务标识未能匹配本次请求。");
             if (String("lock") != "acquired")

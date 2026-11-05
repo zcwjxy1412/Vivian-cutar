@@ -12,6 +12,7 @@
 | [`M3_PREREQUISITES.md`](M3_PREREQUISITES.md) | 接入真实引擎之前必须满足的条件 |
 | [`evidence/EVIDENCE_INDEX.md`](evidence/EVIDENCE_INDEX.md) | M3 证据索引：已固定的上游源码事实与仍为 Pending 的实测项 |
 | [`RUN_ON_WINDOWS.md`](RUN_ON_WINDOWS.md) | 下载和运行 Windows 开发版（模拟引擎） |
+| [`M3_DESKTOP_TEST_HANDOFF.md`](M3_DESKTOP_TEST_HANDOFF.md) | 预桌面阶段结束后交给 Codex 的桌面测试交接 |
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | 故障排查 |
 
 ## 2. 验收记录（保留，不改写）

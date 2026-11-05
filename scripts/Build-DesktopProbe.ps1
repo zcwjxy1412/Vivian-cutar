@@ -10,6 +10,7 @@ foreach ($project in @('tools/VIvian.WindowsBoundaryProbe', 'tests/VIvian.FakeEn
     Copy-Item (Join-Path $output "$name.exe") $target -Force
 }
 Copy-Item 'scripts/Run-DesktopProbe.ps1' $target -Force
+Copy-Item 'scripts/Run-DesktopProbe.cmd' $target -Force
 Copy-Item 'docs/DESKTOP_PROBE_README.md' (Join-Path $target '使用说明.md') -Force
 @"
 源提交：$env:VIVIAN_SOURCE_COMMIT

@@ -4,7 +4,7 @@
 
 1. 从本 PR 的成功 Windows validation 运行下载 `VIvian-DesktopProbe-win-x64` Artifact，解开外层 Artifact，核对其中 ZIP 的 SHA-256 与 `.sha256` 文件一致。
 2. 将 `VIvian-DesktopProbe-win-x64.zip` 解压至新的空目录。保留三个 EXE 在同一目录。
-3. 右键 `Run-DesktopProbe.ps1`，选择“使用 PowerShell 运行”；如系统阻止脚本，可打开 PowerShell，在解压目录执行 `& '.\VIvian.WindowsBoundaryProbe.exe'`。**不要提升为管理员**。
+3. 双击 `Run-DesktopProbe.cmd`。如系统阻止批处理，可打开 PowerShell，在解压目录执行 `& '.\VIvian.WindowsBoundaryProbe.exe'`。**不要提升为管理员**。
 4. 测试完成后，把终端末尾的“报告目录”中的 `报告.json` 和 `摘要.txt` 发给 Codex。报告默认位于当前账户的临时目录 `VIvian-DesktopProbe` 下。若工具异常退出，请提供终端错误截图。
 
 工具只创建和结束自己的 FakeEngine、对照进程与 CrashHost；CrashHost 崩溃测试只结束该测试宿主。SQLite 数据只写在新建的临时测试目录，不读取或修改 `%LOCALAPPDATA%\VIvian`，也不接触用户已安装的 `E:\auto agent game\VIvian-win-x64\VIvian.exe`。

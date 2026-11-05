@@ -14,6 +14,8 @@ public class March7thTaskContractTests
         Assert.Equal(["--control", Id, "stop", "--json"], March7thTaskContract.StopArguments(Id));
         Assert.Throws<ArgumentException>(() => March7thTaskContract.StartArguments("--force"));
         Assert.Throws<ArgumentException>(() => March7thTaskContract.StopArguments("current"));
+        Assert.Equal(Id, March7thTaskContract.CaptureRunId(["[m7a] 运行任务需要管理员权限，请在 UAC 弹窗中选择「是」。运行编号 " + Id]));
+        Assert.Null(March7thTaskContract.CaptureRunId(["运行编号 " + Id, "[m7a] 运行编号 20261031-123456-ffff"]));
     }
 
     [Theory]

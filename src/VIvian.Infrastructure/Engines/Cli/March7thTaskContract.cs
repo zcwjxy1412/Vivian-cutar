@@ -16,6 +16,17 @@ public static partial class March7thTaskContract
     [GeneratedRegex(@"^\d{8}-\d{6}-[0-9a-f]{4}$", RegexOptions.CultureInvariant)]
     private static partial Regex RunIdPattern();
 
+    [GeneratedRegex(@"\[m7a\].*运行编号 (?<id>\d{8}-\d{6}-[0-9a-f]{4})(?:\s|$)", RegexOptions.CultureInvariant)]
+    private static partial Regex LaunchLine();
+
+    /// <summary>只能从本次启动的标准输出中取得编号；调用方须拒绝多个不同编号。</summary>
+    public static string? CaptureRunId(IEnumerable<string> launchOutput)
+    {
+        var ids = launchOutput.Select(line => LaunchLine().Match(line)).Where(match => match.Success)
+            .Select(match => match.Groups["id"].Value).Distinct(StringComparer.Ordinal).Take(2).ToList();
+        return ids.Count == 1 ? ids[0] : null;
+    }
+
     public static IReadOnlyList<string> StartArguments(string task)
     {
         if (!Tasks.Contains(task)) throw new ArgumentException("任务不在已核对的白名单内。", nameof(task));

@@ -26,6 +26,19 @@ jobs:
             artifacts/VIvian-win-x64.zip.sha256
             artifacts/BUILD-INFO.txt
           if-no-files-found: error
+      - name: Build isolated March7th status probe
+        if: success()
+        shell: pwsh
+        run: ./scripts/Build-March7thProbe.ps1
+      - name: Upload M4 March7th status probe
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4-March7th-Status-Probe-win-x64
+          path: |
+            artifacts/VIvian-M4-March7th-Status-Probe-win-x64.zip
+            artifacts/VIvian-M4-March7th-Status-Probe-win-x64.zip.sha256
+          if-no-files-found: error
       - name: Preserve build evidence and portable preview
         if: always()
         uses: actions/upload-artifact@v6

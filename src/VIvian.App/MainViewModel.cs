@@ -7,6 +7,7 @@ using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Engines;
+using VIvian.Infrastructure.Engines.Cli;
 namespace VIvian.App;
 
 /// <summary>Where VIvian keeps its own files. Nothing outside these folders is written by the application.</summary>
@@ -59,6 +60,34 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand MoveDownCommand { get; }
     public AsyncCommand SavePreferencesCommand { get; }
     public AsyncCommand ExportDiagnosticsCommand { get; }
+    public AsyncCommand StartMarch7thCommand { get; }
+    public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = EngineCatalog.March7th.Tasks;
+    private EngineTaskDefinition? _march7thTask = EngineCatalog.March7th.Tasks.FirstOrDefault(t => t.Id == "daily");
+    public EngineTaskDefinition? March7thTask
+    {
+        get => _march7thTask;
+        set { Set(ref _march7thTask, value); March7thConfirmedThisRun = false; }
+    }
+    private bool _march7thConfirmedThisRun;
+    private string? _confirmedInstallPath;
+    private string? _confirmedArchivePath;
+    private string? _confirmedTask;
+    public bool March7thConfirmedThisRun
+    {
+        get => _march7thConfirmedThisRun;
+        set
+        {
+            Set(ref _march7thConfirmedThisRun, value);
+            var card = Engines.Single(e => e.Id == GameId.StarRail);
+            _confirmedInstallPath = value ? card.InstallPath : null;
+            _confirmedArchivePath = value ? ReleaseArchivePath : null;
+            _confirmedTask = value ? March7thTask?.Id : null;
+            Raise(nameof(CanStartMarch7th));
+        }
+    }
+    public string March7thExecutionBlock => "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。";
+    public bool CanStartMarch7th => RealExecutionPolicy.BuildPermitsRealExecution && March7thConfirmedThisRun
+        && _march7thEvidence is not null && March7thTask is not null && Queue.IsIdle;
 
     private string _releaseArchivePath = "";
     /// <summary>A March7thAssistant release archive the user downloaded from the official GitHub release.</summary>
@@ -70,6 +99,7 @@ public sealed class MainViewModel : ObservableObject
             if (_releaseArchivePath == value) return;
             Set(ref _releaseArchivePath, value);
             _march7thEvidence = null;
+            March7thConfirmedThisRun = false;
             ReleaseStatus = "发行包路径已改变，请重新核对。";
         }
     }
@@ -105,6 +135,7 @@ public sealed class MainViewModel : ObservableObject
         MoveDownCommand = new(() => SelectedPlan?.Move(1));
         SavePreferencesCommand = new(() => RunAsync(SavePreferencesAsync), HandleError);
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
+        StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
         SelectedEngine = Engines[0];
     }
 
@@ -160,6 +191,7 @@ public sealed class MainViewModel : ObservableObject
         ReleaseStatus = "正在计算 SHA-256（大文件需要一些时间）…";
         var result = await Task.Run(() => March7thReleaseVerifier.VerifyAsync(path));
         if (result.Check == ReleaseCheck.Verified) _march7thEvidence = result.Evidence;
+        Raise(nameof(CanStartMarch7th));
         ReleaseStatus = result.Check switch
         {
             ReleaseCheck.Verified => "已验证：" + result.Detail,
@@ -180,6 +212,26 @@ public sealed class MainViewModel : ObservableObject
             catch (Exception ex) when (ex is SettingsConflictException or ArgumentException) { }
         }
         await InspectAsync(Engines.Single(e => e.Id == GameId.StarRail));
+    }
+
+    private async Task StartMarch7thAsync()
+    {
+        if (!RealExecutionPolicy.BuildPermitsRealExecution) { Status = March7thExecutionBlock; return; }
+        var card = Engines.Single(e => e.Id == GameId.StarRail);
+        if (!March7thConfirmedThisRun || _confirmedInstallPath != card.InstallPath
+            || _confirmedArchivePath != ReleaseArchivePath || _confirmedTask != March7thTask?.Id)
+        { Status = "安装目录、发行包或任务选择已改变；请重新确认本次真实执行。"; return; }
+        if (_march7thEvidence is null || March7thTask is null)
+        { Status = "请先核对固定版本的官方发行包并选择任务。"; return; }
+        March7thTaskContract.StartArguments(March7thTask.Id); // whitelist, even for a programmatic command call
+        var adapter = new March7thAdapter(card.InstallPath, _march7thEvidence, March7thTask.Id,
+            () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath);
+        try
+        {
+            var result = await Queue.RunMarch7thAsync(adapter);
+            Status = result is null ? "已有队列正在运行。" : "星铁本次任务已结束；请在“调度与监控”查看结果与清理状态。";
+        }
+        finally { March7thConfirmedThisRun = false; }
     }
 
     public void ReportReconciled(int count)

@@ -7,7 +7,7 @@ using VIvian.Infrastructure.Engines.Cli;
 namespace VIvian.Infrastructure.Engines;
 
 /// <summary>Fixed-release task runner. The scheduler's real-execution admission remains closed until UAC ownership is validated.</summary>
-internal sealed class March7thAdapter(string installDirectory, March7thReleaseEvidence release, string task,
+public sealed class March7thAdapter(string installDirectory, March7thReleaseEvidence release, string task,
     Func<bool> userConfirmedThisRun) : IGameAdapter
 {
     public GameId Game => GameId.StarRail;
@@ -51,6 +51,7 @@ internal sealed class March7thRun : IEngineRun
     private readonly List<string> _output = [];
     private readonly Task<RunVerdict> _verdict;
     private string? _upstreamRunId;
+    private bool _runIdConflict;
     private bool _outputTruncated;
 
     public March7thRun(Guid runId, ISupervisedProcessGroup group, IProcessSupervisor supervisor,
@@ -69,14 +70,23 @@ internal sealed class March7thRun : IEngineRun
         {
             await foreach (var line in _group.OutputLines.ConfigureAwait(false))
             {
+                string? displayed = null;
                 lock (_output)
                 {
-                    if (_output.Count < 4000) _output.Add(line.Length <= 4000 ? line : line[..4000]);
-                    else _outputTruncated = true;
-                    _upstreamRunId = March7thTaskContract.CaptureRunId(_output);
+                    if (line.Length > 32768) _outputTruncated = true;
+                    var retained = line.Length <= 32768 ? line : line[..32768];
+                    displayed = line.Length <= 4000 ? line : line[..4000];
+                    if (_output.Count == 4000) { _output.RemoveAt(0); _outputTruncated = true; }
+                    _output.Add(retained);
+                    var found = March7thTaskContract.CaptureRunId([line]);
+                    if (found is not null && !_runIdConflict)
+                    {
+                        if (_upstreamRunId is null) _upstreamRunId = found;
+                        else if (_upstreamRunId != found) { _upstreamRunId = null; _runIdConflict = true; }
+                    }
                 }
-                _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow, RunEventKind.Output,
-                    line.Length <= 4000 ? line : line[..4000]));
+                if (displayed is not null)
+                    _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow, RunEventKind.Output, displayed));
             }
         });
         try
@@ -85,7 +95,9 @@ internal sealed class March7thRun : IEngineRun
             await reader.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             string? id; string output; bool truncated;
             lock (_output) { id = _upstreamRunId; output = string.Join('\n', _output); truncated = _outputTruncated; }
-            if (id is null || truncated) return Unknown("上游运行编号或完整输出缺失。");
+            if (id is null) return Unknown("上游运行编号缺失或冲突。");
+            if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
+                return Unknown("上游终态记录过长，无法完整核对。");
             var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id);
             var reason = parsed.Outcome == RunOutcome.Indeterminate ? ReasonCodes.NoCompletionEvidence
                 : parsed.Outcome == RunOutcome.Failed ? ReasonCodes.ReportedFailure : ReasonCodes.ReportedCancel;
@@ -108,18 +120,39 @@ internal sealed class March7thRun : IEngineRun
         if (id is null) return new(CleanupState.Unconfirmed, ReasonCodes.CleanupUnconfirmed);
         await using var control = await _supervisor.StartAsync(new ProcessLaunchSpec(_cli,
             March7thTaskContract.StopArguments(id), _directory), RunId, ct).ConfigureAwait(false);
+        var controlOutput = new List<string>();
+        var controlTruncated = false;
+        var drain = Task.Run(async () =>
+        {
+            await foreach (var line in control.OutputLines.ConfigureAwait(false))
+            {
+                if (controlOutput.Count < 20 && line.Length <= 4000) controlOutput.Add(line);
+                else controlTruncated = true;
+            }
+        });
         var exit = await control.WaitForRootExitAsync(ct).ConfigureAwait(false);
         var cleanup = await control.TerminateAllAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
-        var requested = exit == 0 && cleanup == CleanupState.Confirmed;
+        await drain.WaitAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+        var requested = exit == 0 && cleanup == CleanupState.Confirmed && !controlTruncated
+            && March7thStopContract.Acknowledged(string.Join('\n', controlOutput), id);
         return new(requested ? CleanupState.Pending : CleanupState.Unconfirmed,
             requested ? ReasonCodes.UserStop : ReasonCodes.CleanupUnconfirmed);
     }
 
     public async Task<CleanupState> ReconcileAsync(CancellationToken ct)
     {
-        await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
-        // UAC may detach the worker from our Job. A successful CLI stop request alone cannot prove its exit.
-        return CleanupState.Unconfirmed;
+        // A stop receipt can precede worker exit. Give the frontend a bounded chance to follow
+        // the elevated process and emit its final record before closing our own Job.
+        try { await _verdict.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false); }
+        catch (TimeoutException) { /* still running: cleanup remains unconfirmed */ }
+        var own = await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+        string? id; string output;
+        lock (_output) { id = _upstreamRunId; output = string.Join('\n', _output); }
+        if (own != CleanupState.Confirmed || id is null) return CleanupState.Unconfirmed;
+        // The elevated worker may be outside our Job. Its exact PID + creation time must be absent
+        // and the final record must belong to this run; a stop acknowledgement is insufficient.
+        return March7thWorkerExit.Check(output, id, _task) == WorkerExitState.Exited
+            ? CleanupState.Confirmed : CleanupState.Unconfirmed;
     }
 
     public ValueTask DisposeAsync() => _group.DisposeAsync();

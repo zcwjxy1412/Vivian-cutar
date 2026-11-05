@@ -73,6 +73,39 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 
+<TabItem Header="星铁实测"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+<TextBlock Text="March7thAssistant · 单次真实任务" FontSize="24" FontWeight="SemiBold"/>
+<Border Style="{StaticResource Notice}" Margin="0,14,0,12"><StackPanel>
+<TextBlock Text="执行安全闸门" FontWeight="SemiBold" Foreground="#F2CC85"/>
+<TextBlock Text="{Binding March7thExecutionBlock}" Foreground="#E8D9BC" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel>
+<TextBlock Text="上游安装与固定版本" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="支持版本：March7thAssistant v2026.10.31；游戏路径须由上游设置，并在状态查询中核对。" Foreground="{StaticResource Muted}" Margin="0,6,0,10"/>
+<TextBlock Text="{Binding Engines[1].InstallPath, StringFormat=安装目录：{0}}" Foreground="{StaticResource Muted}"/>
+<TextBlock Text="{Binding Engines[1].Compatibility, StringFormat=安装检查：{0}}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
+<TextBlock Text="{Binding ReleaseStatus}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
+<TextBlock Text="跨权限安全停止：待实机验证；当前不能运行真实任务。" Foreground="#F2CC85" Margin="0,5,0,0"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel>
+<TextBlock Text="任务与本次确认" FontSize="18" FontWeight="SemiBold"/>
+<ComboBox ItemsSource="{Binding March7thTasks}" SelectedItem="{Binding March7thTask}" DisplayMemberPath="Title" Width="260" HorizontalAlignment="Left" Margin="0,10,0,10" AutomationProperties.Name="星铁真实任务选择"/>
+<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我了解这会运行真实游戏自动化任务，仅确认本次执行" AutomationProperties.Name="确认本次星铁真实任务"/>
+<WrapPanel Margin="0,12,0,0">
+<Button Content="启动本次星铁任务" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,10,0"/>
+<Button Content="紧急停止当前任务" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Background="#F08A80"/>
+</WrapPanel>
+<TextBlock Text="首次真实任务必须先完成 UAC 与 Worker 实测，并另行取得你的单次游戏操作授权。" Foreground="{StaticResource Muted}" Margin="0,10,0,0"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Card}"><StackPanel>
+<TextBlock Text="运行状态、日志与结果" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Queue.Current}" Margin="0,8,0,0"/>
+<TextBlock Text="{Binding Queue.Status}" Foreground="{StaticResource Muted}" Margin="0,4,0,8"/>
+<ListBox ItemsSource="{Binding Queue.LogLines}" Height="180" Background="#101A2A" Foreground="#EEF3FB"/>
+<TextBlock Text="执行历史及清理结果详见“调度与监控”。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+</StackPanel></Border>
+</StackPanel></ScrollViewer></TabItem>
+
 <TabItem Header="任务管理"><Grid>
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Border Style="{StaticResource Notice}"><StackPanel>

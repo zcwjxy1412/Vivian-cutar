@@ -9,3 +9,5 @@
 - 修复 UTF-8 捕获和脱敏结构化报告后，重新在官方隔离副本执行状态查询：`cliState=Completed`、`ExitCode=0`、`cleanup=Confirmed`、`OutputTruncated=false`、`fileSnapshotIncomplete=false`、`block=FirstRunNotConfirmed`。明确阻断字段为上游首次免责声明未由本人确认；用户需自行在上游界面完成，不由 VIvian 代为确认。报告位于本机独立状态探针目录的 `状态结果.json`，不含原始路径或账号内容。
 - 真实任务、UAC 归属与跨权限停止仍未验证，应用真实执行闸门保持关闭。
 - 用户本人在上游界面完成首次免责声明并核对游戏路径后，重新运行同一官方发行包的隔离 `--status`：`cliState=Completed`、`ExitCode=0`、`cleanup=Confirmed`、`OutputTruncated=false`、`fileSnapshotIncomplete=false`、`readyForUacValidation=true`、`block=None`。仅证明基本前置条件通过；未执行游戏任务或请求 UAC。脱敏结果位于本机状态探针目录的 `状态结果.json`。
+- M4-A2：按官方 v2026.10.31 `utils/runs.py` 核对，最终记录的 `pid` / `pid_create_time` 属于实际任务进程；`utils/cli_entry.py` 的停止回执 `acknowledged` 只表示指令已收到。代码增加精确 RunId 回执、PID 与创建时间观察，仍要求本次终态记录及自身 Job 清理；无法确认则返回 Unconfirmed。365 项本机测试通过，独立 WPF 冒烟通过。真实执行闸门未打开。
+- 无 UAC 的无害边界工具本机试跑：普通权限工作进程及其子进程的身份匹配，停止标记送达后两者退出。提权路径尚未执行；独立方案见 `M4A2_UAC_TEST_PLAN_2026-11-05.md`。

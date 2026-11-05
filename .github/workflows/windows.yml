@@ -52,6 +52,19 @@ jobs:
             artifacts/VIvian-M4-March7th-Status-Probe-win-x64.zip
             artifacts/VIvian-M4-March7th-Status-Probe-win-x64.zip.sha256
           if-no-files-found: error
+      - name: Build harmless UAC boundary probe without running it
+        if: success()
+        shell: pwsh
+        run: ./scripts/Build-UacBoundaryProbe.ps1
+      - name: Upload M4-A2 UAC boundary probe
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4A2-UAC-Boundary-Probe-win-x64
+          path: |
+            artifacts/VIvian-M4A2-UAC-Boundary-Probe-win-x64.zip
+            artifacts/VIvian-M4A2-UAC-Boundary-Probe-win-x64.zip.sha256
+          if-no-files-found: error
       - name: Preserve build evidence and portable preview
         if: always()
         uses: actions/upload-artifact@v6

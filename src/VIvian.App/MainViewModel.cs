@@ -562,15 +562,25 @@ public sealed class MainViewModel : ObservableObject
     public async Task SaveFeedbackAsync()
     {
         await ExportDiagnosticsAsync();
-        await WriteDiagnosticSessionAsync();
+        await WriteDiagnosticSessionSafelyAsync();
     }
 
     private async Task StartDiagnosticSessionAsync()
     {
-        var feedbackRoot = FeedbackDirectory.DefaultRoot;
-        foreach (var name in new[] { "待处理截图", "对应日志", "历史反馈", "测试报告" })
-            Directory.CreateDirectory(Path.Combine(feedbackRoot, name));
-        var root = FeedbackDirectory.Resolve(_paths.ExportDirectory);
+        string root;
+        try
+        {
+            var feedbackRoot = FeedbackDirectory.DefaultRoot;
+            foreach (var name in new[] { "待处理截图", "对应日志", "历史反馈", "测试报告" })
+                Directory.CreateDirectory(Path.Combine(feedbackRoot, name));
+            root = FeedbackDirectory.Resolve(_paths.ExportDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            root = _paths.ExportDirectory;
+            Directory.CreateDirectory(root);
+            Log.Warning("Feedback folder unavailable; session saved in app data: {ErrorType}", ex.GetType().Name);
+        }
         _sessionPath = Path.Combine(root, $"会话-{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{_diagnosticSessionId}.json");
         await WriteDiagnosticSessionSafelyAsync();
         Log.Information("Diagnostic session {SessionId} started", _diagnosticSessionId);

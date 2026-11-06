@@ -33,10 +33,10 @@ VIvian 不重写这些引擎，而是通过可以独立维护的适配器调用�
 从 [Releases](https://github.com/zcwjxy1412/Vivian-cutar/releases) 下载 `VIvian-<版本>-win-x64.zip`，解压到一个新目录，运行 `VIvian.exe`。这是自包含发布，不需要另外安装 .NET。当前版本未签名，Windows SmartScreen 可能会提示。
 
 - **模拟队列**：为每款游戏选择一种模拟情形，开始队列，观察串行调度、紧急停止和结果判定
-- **引擎设置**：保存三个引擎的安装目录（目前只保存，不会使用）
+- **引擎设置**：启动时发现已知安装并保存有效路径；星铁配置可读取并编辑少量已核对的布尔参数
 - **概览 / 自检记录**：基础自检
 
-数据保存在 `%LOCALAPPDATA%\VIvian`，日志在其中的 `logs` 子目录。
+固定 M5 测试版的数据保存在 `%LOCALAPPDATA%\VIvian-M5-DailyTest`，与正式版隔离；脱敏反馈另存于 `E:\auto agent game\截图反馈\对应日志`。
 
 ## 当前状态与安全门禁（M5 分支）
 
@@ -70,7 +70,7 @@ VIvian 不重写这些引擎，而是通过可以独立维护的适配器调用�
 
 ### CI 与发布
 
-- 每次推送和 PR 都会在 GitHub `windows-latest` 上运行完整流程（`Windows validation` 工作流）。冒烟测试会检查：第二个实例被拒绝、模拟队列跑通、紧急停止耗时、界面线程响应、文字对比度（WCAG AA），并为每个标签页截图
+- `main` 推送和 PR 在 GitHub `windows-latest` 上运行完整流程（`Windows validation` 工作流），避免同一功能分支的 push 与 PR 重复执行。冒烟测试检查：第二个实例被拒绝、模拟队列跑通、紧急停止耗时、界面线程响应、文字对比度（WCAG AA），并为每个标签页截图
 - 发布：在 Actions → **Release** → Run workflow 中填写版本号。由 Windows CI 构建并验证通过后才会创建 Release；同名版本已存在时会直接停止，不会覆盖。如果存在 `docs/RELEASE_NOTES/<版本>.md`，会把它放在说明的最前面
 
 ## 工程结构

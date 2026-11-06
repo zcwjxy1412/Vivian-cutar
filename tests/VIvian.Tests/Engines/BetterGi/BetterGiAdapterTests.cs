@@ -75,7 +75,7 @@ public sealed class BetterGiArgumentTests
         Assert.StartsWith("0af68c2", BetterGiContract.PinnedCommit);
         Assert.False(BetterGiContract.LaunchContractVerified);
         Assert.False(BetterGiContract.CompletionSignalsVerified);
-#if !(M4_SCREEN_TEST || M4_MANUAL_TEST)
+#if !(M4_SCREEN_TEST || M4_MANUAL_TEST || M5_DAILY_TEST)
         Assert.False(RealExecutionPolicy.BuildPermitsRealExecution);
 #endif
         // Closed in every build, including the M4-F1 manual-test build: only March7th screen_test may run.

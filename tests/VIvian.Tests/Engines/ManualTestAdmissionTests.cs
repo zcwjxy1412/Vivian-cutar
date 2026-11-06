@@ -52,6 +52,20 @@ public class ManualTestAdmissionTests
         Assert.Equal(ManualTestState.InstallNotVerified,
             ManualTestPolicy.Evaluate(Ready with { ReleaseArchiveVerified = false }).State);
     }
+#elif M5_DAILY_TEST
+    [Fact]
+    public void DailyRequiresFreshConsentAndConfirmedCleanup()
+    {
+        var daily = Ready with { TaskId = "daily" };
+        Assert.True(ManualTestPolicy.Evaluate(daily).Allowed);
+        Assert.Equal(ManualTestState.NotAvailable, ManualTestPolicy.Evaluate(Ready).State);
+        Assert.Equal(ManualTestState.NeedsConfirmation,
+            ManualTestPolicy.Evaluate(daily with { UserConfirmedThisRun = false }).State);
+        Assert.Equal(ManualTestState.CleanupUnconfirmed,
+            ManualTestPolicy.Evaluate(daily with { HasUnresolvedCleanup = true }).State);
+        Assert.Equal(ManualTestState.Running,
+            ManualTestPolicy.Evaluate(daily with { QueueRunning = true }).State);
+    }
 #elif M4_SCREEN_TEST
     [Fact]
     public void OneShotPackageStaysConsumedAfterItsAttempt()

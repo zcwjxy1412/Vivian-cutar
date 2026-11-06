@@ -57,11 +57,20 @@ public sealed record EngineCapability(
     bool LaunchesUpstreamCode, bool EnabledInVivian, string Source, string Note);
 
 /// <summary>
-/// A task identifier taken from upstream source or documentation. It is a candidate only: VIvian never sends it to an
-/// engine until the exact release has been observed to accept it and its completion signals are verified.
+/// A versioned task identifier and its source evidence. Execution is decided separately by RealExecutionPolicy.
 /// </summary>
 public sealed record EngineTaskDefinition(
-    string Id, string Title, CapabilityStatus Status, EvidenceLevel Evidence, string Source, string Note);
+    string Id, string Title, CapabilityStatus Status, EvidenceLevel Evidence, string Source, string Note,
+    TaskFrequency Frequency = TaskFrequency.OnDemand,
+    string Invocation = "", string CompletionSignal = "", string[]? Dependencies = null,
+    string[]? Preconditions = null, string[]? ParameterPaths = null);
+
+public enum TaskFrequency { Daily, Weekly, OnDemand }
+public enum ParameterAccess { VerifiedReadWrite, VerifiedReadOnly, UpstreamManaged, UnknownIncompatible }
+public sealed record EngineParameterDefinition(
+    string Path, string Title, string Description, string DataType, string AllowedValues,
+    string DefaultValue, string Scope, string Dependencies, string TaskImpact,
+    string ConfigSource, ParameterAccess Access, string Source);
 
 public enum PrivilegeRequirement
 {
@@ -119,6 +128,7 @@ public sealed record EngineProfile(
     IReadOnlyList<string> UnsupportedVersions)
 {
     public EngineCapability Capability(EngineCapabilityId id) => Capabilities.Single(c => c.Id == id);
+    public IReadOnlyList<EngineParameterDefinition> Parameters { get; init; } = [];
 }
 
 /// <summary>Where an engine stands on this machine, from the most to the least blocking.</summary>
@@ -182,15 +192,15 @@ public sealed record ExecutionDecision(bool Allowed, string ReasonCode, string E
 /// </summary>
 public static class RealExecutionPolicy
 {
-#if M4_SCREEN_TEST && M4_MANUAL_TEST
+#if (M4_SCREEN_TEST && M4_MANUAL_TEST) || (M5_DAILY_TEST && (M4_SCREEN_TEST || M4_MANUAL_TEST))
 #error 单次测试包与可重复手动实测版不能同时启用。
 #endif
-#if M4_SCREEN_TEST || M4_MANUAL_TEST
+#if M4_SCREEN_TEST || M4_MANUAL_TEST || M5_DAILY_TEST
     public static bool BuildPermitsRealExecution => true;
 #else
     public static bool BuildPermitsRealExecution => false;
 #endif
-#if M4_MANUAL_TEST
+#if M4_MANUAL_TEST || M5_DAILY_TEST
     /// <summary>M4-F1: each completed, reconciled run may be followed by another manually confirmed run.</summary>
     public static bool IsReusableManualTest => true;
 #else
@@ -199,7 +209,14 @@ public static class RealExecutionPolicy
     /// <summary>M4-D: the whole package permits exactly one attempt (tracked by a marker file).</summary>
     public static bool IsOneShotScreenTest => BuildPermitsRealExecution && !IsReusableManualTest;
 
-    public static bool AllowsTask(string task) => BuildPermitsRealExecution && task == "screen_test";
+#if M5_DAILY_TEST
+    public static bool IsM5DailyTest => true;
+#else
+    public static bool IsM5DailyTest => false;
+#endif
+
+    public static bool AllowsTask(string task) => BuildPermitsRealExecution &&
+        (IsM5DailyTest ? task == "daily" : task == "screen_test");
 
     public static ExecutionDecision Evaluate(EngineReadinessReport report)
     {

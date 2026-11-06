@@ -93,6 +93,26 @@ jobs:
             artifacts/VIvian-M4-F1-ManualTest-win-x64.zip.sha256
             artifacts/m4f1-manual-test/BUILD-INFO.txt
           if-no-files-found: error
+      - name: Test M5 daily build flavor
+        if: success()
+        shell: pwsh
+        run: dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M5DailyTestBuild=true --results-directory artifacts/tests-m5 --logger "trx;LogFileName=m5-daily-build.trx"
+      - name: Build M5 daily manual-test package
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-M5DailyTest.ps1
+      - name: Upload M5 daily manual-test package
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M5-DailyTest-win-x64
+          path: |
+            artifacts/VIvian-M5-DailyTest-win-x64.zip
+            artifacts/VIvian-M5-DailyTest-win-x64.zip.sha256
+            artifacts/m5-daily-test/BUILD-INFO.txt
+          if-no-files-found: error
       - name: Build isolated March7th status probe
         if: success()
         shell: pwsh

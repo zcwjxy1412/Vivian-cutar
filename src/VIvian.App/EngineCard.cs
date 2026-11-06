@@ -50,7 +50,9 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public EngineReadinessReport? Report { get; private set; }
 
     /// <summary>What this build lets the user do with the engine for real. Only March7th screen_test can ever run.</summary>
-    public string Execution => Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
+    public string Execution => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
+        ? "真实任务：仅 daily，可在“真实任务测试”页逐次由本人确认启动；其他任务未开放。"
+        : Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
         ? "真实任务：仅 screen_test，可在“真实任务测试”页逐次由本人确认启动；其他任务未开放。"
         : Id == GameId.StarRail && RealExecutionPolicy.BuildPermitsRealExecution
         ? "仅单次 screen_test 可在“星铁实测”页由本人确认启动；其他真实任务未开放。"

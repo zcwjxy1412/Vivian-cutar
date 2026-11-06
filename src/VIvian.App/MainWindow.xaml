@@ -15,9 +15,22 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TabControl Grid.Row="1" Background="#0D1523" BorderThickness="0" Padding="0,20,0,0">
 
 <TabItem Header="概览"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+<Border Style="{StaticResource Card}" Visibility="{Binding M5Visibility}"><StackPanel>
+<TextBlock Text="星铁 · 每日实训" FontSize="22" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding VersionText}" Foreground="#93B3FF" Margin="0,5,0,8"/>
+<TextBlock Text="{Binding DiagnosticSessionText}" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+<TextBlock Text="{Binding ManualTestStateText}" FontWeight="SemiBold" Foreground="#F2CC85" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="{Binding Configuration.Status, StringFormat=配置同步：{0}}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
+<TextBlock Text="{Binding LastRealResultText}" Foreground="{StaticResource Muted}" Margin="0,5,0,8"/>
+<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏测试（仅 daily）" AutomationProperties.Name="确认本次星铁 daily"/>
+<WrapPanel Margin="0,10,0,0"><Button Content="开始本次真实测试" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,8,0"/>
+<Button Content="停止当前任务" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Margin="0,0,8,0"/>
+<Button Content="保存反馈" Command="{Binding SaveFeedbackCommand}"/></WrapPanel>
+<TextBlock Text="需要 UAC 时请由本人决定；启动 VIvian 不会自动运行游戏。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+</StackPanel></Border>
 <Border Style="{StaticResource Card}" Padding="24" Margin="0,0,0,16"><StackPanel>
 <TextBlock Text="准备好你的三段旅程" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="在“引擎管理”中填写三个引擎的安装目录，VIvian 会只读检查它们。真实自动日常要等每款引擎通过 Windows 桌面上的兼容与安全验证后才会开放；在此之前可在“调度与监控”中用模拟引擎体验调度、停止和结果判定。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
+<TextBlock Text="VIvian 会在启动时自动发现已安装的引擎并核对固定版本。缺少引擎会显示未检测到，不妨碍其他功能。真实任务仅在明确确认后执行。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
 <WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="检查全部引擎（只读）" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="运行基础自检" Command="{Binding CheckCommand}" Margin="0,0,10,8"/><TextBlock Text="只读取文件信息，不启动任何程序或游戏" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/></WrapPanel>
 </StackPanel></Border>
 <Border Style="{StaticResource Notice}"><StackPanel>

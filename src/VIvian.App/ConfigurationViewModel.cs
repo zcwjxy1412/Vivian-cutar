@@ -49,7 +49,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         _snapshot = null; Parameters.Clear();
         Status = "已切换游戏；点击“读取上游配置”。";
     }
-    private Task ReadAsync()
+    public Task ReadAsync()
     {
         var path = _installPath(_game);
         if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎管理”填写安装目录。"; return Task.CompletedTask; }

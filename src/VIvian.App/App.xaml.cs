@@ -9,6 +9,7 @@ using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Simulation;
 using VIvian.Infrastructure.Processes;
+using VIvian.Infrastructure.Diagnostics;
 
 namespace VIvian.App;
 
@@ -17,13 +18,16 @@ public partial class App : Application
     private IHost? _host;
     private SingleInstanceGuard? _instance;
     private bool _smoke;
+    private bool _startupCheck;
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         _smoke = e.Args.Contains("--smoke-test");
+        _startupCheck = e.Args.Contains("--startup-check");
         DispatcherUnhandledException += (_, args) =>
         {
-            Log.Fatal("Unhandled UI error: {ErrorType}", args.Exception.GetType().Name);
+            Log.Fatal("Unhandled UI error: {ErrorType}; {Stack}", args.Exception.GetType().Name,
+                Redactor.ForCurrentUser().Redact(args.Exception.ToString()));
             args.Handled = true;
             if (!_smoke) MessageBox.Show("程序遇到未处理错误，将退出。请查看本地日志。", "VIvian");
             Shutdown(1);
@@ -112,8 +116,15 @@ public partial class App : Application
             if (reconciled.Count > 0)
                 Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
             var vm = _host.Services.GetRequiredService<MainViewModel>();
-            await vm.InitializeAsync();
+            await vm.InitializeAsync(autoPrepare: !_smoke);
             vm.ReportReconciled(reconciled.Count);
+            if (_startupCheck)
+            {
+                await File.WriteAllTextAsync(Path.Combine(root, "startup.ok"),
+                    $"{DateTimeOffset.UtcNow:O} {AppPaths.Version} {AppPaths.Commit} auto discovery and diagnostics completed");
+                Shutdown(0);
+                return;
+            }
             var window = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = window;
             if (_smoke)
@@ -160,7 +171,8 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Error("Startup failed: {ErrorType}", ex.GetType().Name);
+            Log.Error("Startup failed: {ErrorType}; {Stack}", ex.GetType().Name,
+                Redactor.ForCurrentUser().Redact(ex.ToString()));
             if (!_smoke) MessageBox.Show("启动失败。请检查数据目录权限、磁盘空间及数据库版本；原数据不会自动删除。", "VIvian");
             Shutdown(1);
         }

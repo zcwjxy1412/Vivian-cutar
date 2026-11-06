@@ -181,8 +181,13 @@ public sealed record ExecutionDecision(bool Allowed, string ReasonCode, string E
 /// </summary>
 public static class RealExecutionPolicy
 {
-    /// <summary>False in every pre-desktop development build.</summary>
+    /// <summary>Only the separately stamped, one-task Windows test build permits explicit screen_test admission.</summary>
+#if M4_SCREEN_TEST
+    public static bool BuildPermitsRealExecution => true;
+#else
     public static bool BuildPermitsRealExecution => false;
+#endif
+    public static bool AllowsTask(string task) => BuildPermitsRealExecution && task == "screen_test";
 
     public static ExecutionDecision Evaluate(EngineReadinessReport report)
     {
@@ -190,6 +195,8 @@ public static class RealExecutionPolicy
         // Even a future build that permits execution needs verified identity plus verified launch and completion
         // evidence for this exact release; until then the answer stays no.
         return new(false, Execution.ReasonCodes.RealAdapterUnverified,
-            "此开发版不启动任何真实引擎：进程归属、UAC 边界与完成证据尚待 Windows 桌面实测。");
+            BuildPermitsRealExecution
+                ? "此单次测试包只允许从星铁实测页确认 screen_test，且必须通过即时状态检查。"
+                : "此开发版不启动任何真实引擎：进程归属、UAC 边界与完成证据尚待 Windows 桌面实测。");
     }
 }

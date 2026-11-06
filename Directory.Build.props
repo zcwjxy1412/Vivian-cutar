@@ -7,5 +7,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <DefineConstants Condition="'$(M4ScreenTestBuild)' == 'true'">$(DefineConstants);M4_SCREEN_TEST</DefineConstants>
   </PropertyGroup>
 </Project>

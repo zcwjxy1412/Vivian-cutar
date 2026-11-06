@@ -151,7 +151,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="{Binding Current}" Foreground="{StaticResource Muted}" AutomationProperties.LiveSetting="Polite"/>
 </StackPanel></Grid>
 <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<DockPanel Margin="0,0,8,0"><TextBlock DockPanel.Dock="Top" Text="运行日志（模拟）" FontSize="16" Margin="0,0,0,8"/>
+<DockPanel Margin="0,0,8,0"><TextBlock DockPanel.Dock="Top" Text="运行日志" FontSize="16" Margin="0,0,0,8"/>
 <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
 <ListBox ItemsSource="{Binding LogLines}" Background="#101A2A" Foreground="#EEF3FB" BorderThickness="0" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#EEF3FB"/></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel>
 <DockPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock DockPanel.Dock="Top" Text="执行历史（清理状态与结果分开记录）" FontSize="16" Margin="0,0,0,8"/>
@@ -161,7 +161,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="请先确认相关引擎和游戏都已关闭。你的确认会单独记录，不会改写原判定。" Foreground="#E8C2BE" Margin="0,4,0,8"/>
 <Button Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel></Border>
 <ListView ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="6">
-<TextBlock Text="{Binding When}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+<TextBlock Text="{Binding When}" Foreground="#93B3FF"/><TextBlock Text="{Binding RunId, StringFormat=RunId {0:D}}" Foreground="#93B3FF" Margin="0,4,0,0"/><TextBlock Text="{Binding Summary}" Margin="0,4,0,0" TextWrapping="Wrap"/>
 </StackPanel></DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
 </Grid></Grid></TabItem>
 

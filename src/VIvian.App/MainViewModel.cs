@@ -316,7 +316,8 @@ public sealed class MainViewModel : ObservableObject
             [GameId.Genshin] = [("C:\\Program Files\\BetterGI", "BetterGI.exe"),
                 ("E:\\auto agent game\\BetterGI", "BetterGI.exe")],
             [GameId.StarRail] = [("E:\\auto agent game\\March7thAssistant-official-v2026.10.31\\March7thAssistant_full", "m7a.exe")],
-            [GameId.ZenlessZoneZero] = [("E:\\auto agent game\\OneDragon", "OneDragon-RuntimeLauncher.exe"),
+            [GameId.ZenlessZoneZero] = [("E:\\VIvianEngines\\OneDragon-v2.6.0", "OneDragon-RuntimeLauncher.exe"),
+                ("E:\\auto agent game\\OneDragon", "OneDragon-RuntimeLauncher.exe"),
                 ("E:\\ZenlessZoneZero-OneDragon", "OneDragon-RuntimeLauncher.exe"),
                 ("C:\\Program Files\\OneDragon", "OneDragon-RuntimeLauncher.exe")],
         };

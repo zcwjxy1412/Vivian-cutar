@@ -222,7 +222,7 @@ public sealed class QueueViewModel : ObservableObject
 
     private void OnRunChanged(RunUpdate update)
     {
-        Current = RunPresentation.Summary(update);
+        Current = $"RunId {update.RunId:D} · {RunPresentation.Summary(update)}";
         if (update.Phase is RunPhase.Finished or RunPhase.Blocked)
             AppendLog(update.At, "—— " + RunPresentation.Summary(update));
     }

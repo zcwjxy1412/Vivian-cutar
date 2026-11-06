@@ -68,10 +68,10 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v6
         with:
-          name: VIvian-M4A-screen-test-win-x64
+          name: VIvian-M4D-screen-test-r3-win-x64
           path: |
-            artifacts/VIvian-M4A-screen-test-win-x64.zip
-            artifacts/VIvian-M4A-screen-test-win-x64.zip.sha256
+            artifacts/VIvian-M4D-screen-test-r3-win-x64.zip
+            artifacts/VIvian-M4D-screen-test-r3-win-x64.zip.sha256
           if-no-files-found: error
       - name: Build isolated March7th status probe
         if: success()

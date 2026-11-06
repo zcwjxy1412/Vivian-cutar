@@ -63,7 +63,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Grid.Column="1" Text="{Binding Note}" Foreground="{StaticResource Muted}" Margin="10,0,0,0"/>
 </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<WrapPanel Margin="0,12,0,0"><Button Content="保存路径并检查" Command="{Binding SaveCommand}" Margin="0,0,10,8"/><Button Content="重新检查（只读）" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}" Margin="0,0,10,8"/></WrapPanel>
+<WrapPanel Margin="0,12,0,0"><Button Content="自动填入已发现目录" Command="{Binding AutoDiscoverCommand}" Margin="0,0,10,8"/><Button Content="保存路径并检查" Command="{Binding SaveCommand}" Margin="0,0,10,8"/><Button Content="重新检查（只读）" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}" Margin="0,0,10,8"/></WrapPanel>
 <Border Style="{StaticResource Card}" Margin="0,20,0,0"><StackPanel>
 <TextBlock Text="核对星铁官方发行包（验证证据）" FontSize="18" Margin="0,0,0,6"/>
 <TextBlock Text="选择从 March7thAssistant 官方 GitHub Release 下载的 March7thAssistant_full.zip（v2026.10.31）。VIvian 计算它的 SHA-256 并与官方公布的摘要比对，再从压缩包内读取 m7a.exe 的摘要，用来核对上面填写的安装目录。不解压、不运行任何文件；核对结果只在本次运行中有效，文件位置会被记住。" Foreground="{StaticResource Muted}" Margin="0,0,0,10"/>

@@ -9,6 +9,19 @@ public class March7thTaskContractTests
     private const string Id = "20261031-123456-ab12";
 
     [Fact]
+    public void ExactUacCancellationExplainsFailureButNeverProvesCleanup()
+    {
+        var text = $$"""{"run_id":"{{Id}}","status":"not_started","exit_code":5,"error":"[WinError 1223] 操作已被用户取消。"}""";
+        var cancelled = March7thTaskContract.ParseFinalRecord(text, "screen_test", 5, Id);
+        Assert.Equal(RunOutcome.Indeterminate, cancelled.Outcome);
+        Assert.Contains("UAC 已取消", cancelled.Detail);
+        Assert.DoesNotContain("已确认清理", cancelled.Detail);
+        Assert.DoesNotContain("UAC 已取消", March7thTaskContract.ParseFinalRecord(text, "screen_test", 5,
+            "20261031-123456-ffff").Detail);
+        Assert.DoesNotContain("UAC 已取消", March7thTaskContract.ParseFinalRecord(text, "screen_test", 0, Id).Detail);
+    }
+
+    [Fact]
     public void CommandsUseWhitelistedTasksAndExactRunId()
     {
         Assert.Equal(["daily", "--after-finish", "None", "--json"], March7thTaskContract.StartArguments("daily"));

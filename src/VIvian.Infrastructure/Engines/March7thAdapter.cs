@@ -110,6 +110,8 @@ internal sealed class March7thRun : IEngineRun
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
             var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id);
+            if (parsed.Detail.StartsWith("上游报告 UAC 已取消", StringComparison.Ordinal))
+                _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow, RunEventKind.Warning, parsed.Detail));
             if (parsed.Outcome == RunOutcome.Success)
             {
                 var own = await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None)

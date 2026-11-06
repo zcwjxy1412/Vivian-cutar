@@ -57,6 +57,7 @@ public sealed class MainViewModel : ObservableObject
     public EngineCard? SelectedEngine { get => _selectedEngine; set => Set(ref _selectedEngine, value); }
 
     public AsyncCommand SaveCommand { get; }
+    public AsyncCommand AutoDiscoverCommand { get; }
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand CheckCommand { get; }
     public AsyncCommand InspectMarch7thCommand { get; }
@@ -149,6 +150,7 @@ public sealed class MainViewModel : ObservableObject
         _statusSupervisor = statusSupervisor;
         _oneShotConsumed = File.Exists(OneShotMarker);
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
+        AutoDiscoverCommand = new(() => RunAsync(AutoDiscoverAsync), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeCoreAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
         InspectMarch7thCommand = new(() => RunAsync(() => InspectAsync(Engines.Single(e => e.Id == GameId.StarRail))), HandleError);
@@ -305,6 +307,30 @@ public sealed class MainViewModel : ObservableObject
         await CheckEnginesCoreAsync();
         Status = "路径已保存并完成只读检查；未运行引擎，也未改动上游配置。";
         Log.Information("Local settings saved for {Count} games", snapshot.Count);
+    }
+
+    private async Task AutoDiscoverAsync()
+    {
+        var candidates = new Dictionary<GameId, (string Root, string Program)[]>
+        {
+            [GameId.Genshin] = [("C:\\Program Files\\BetterGI", "BetterGI.exe"),
+                ("E:\\auto agent game\\BetterGI", "BetterGI.exe")],
+            [GameId.StarRail] = [("E:\\auto agent game\\March7thAssistant-official-v2026.10.31\\March7thAssistant_full", "m7a.exe")],
+            [GameId.ZenlessZoneZero] = [("E:\\auto agent game\\OneDragon", "OneDragon-RuntimeLauncher.exe"),
+                ("E:\\ZenlessZoneZero-OneDragon", "OneDragon-RuntimeLauncher.exe"),
+                ("C:\\Program Files\\OneDragon", "OneDragon-RuntimeLauncher.exe")],
+        };
+        var count = 0;
+        foreach (var card in Engines.Where(e => string.IsNullOrWhiteSpace(e.InstallPath)))
+        {
+            var match = candidates[card.Id].FirstOrDefault(c => File.Exists(Path.Combine(c.Root, c.Program)));
+            if (match.Root is null) continue;
+            card.InstallPath = match.Root;
+            await InspectAsync(card);
+            count++;
+        }
+        Status = count == 0 ? "未发现可自动填入的新安装目录；可以手动选择。"
+            : $"已自动填入 {count} 个安装目录并完成只读检查；请核对后点击“保存路径并检查”。";
     }
 
     private async Task LoadTasksAsync()

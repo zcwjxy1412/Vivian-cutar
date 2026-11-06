@@ -62,6 +62,12 @@ public static partial class March7thTaskContract
             var status = String("effective_status") ?? String("status");
             var recordedTask = String("task");
             var recordedExit = Int("exit_code");
+            // The pinned launcher emits this short record when Windows refuses elevation, before
+            // a Worker record exists. It proves the request was cancelled, not that cleanup is confirmed.
+            if (id == expectedUpstreamRunId && status == "not_started" && recordedExit == 5
+                && processExitCode == 5 && String("error")?.Contains("WinError 1223", StringComparison.Ordinal) == true)
+                return new(id, RunOutcome.Indeterminate,
+                    "上游报告 UAC 已取消，任务未运行；缺少 Worker 终态证据，清理仍需核对。");
             if (Int("schema") != 1 || string.IsNullOrWhiteSpace(String("ended_at")))
                 return Unknown("运行记录协议或结束时间缺失。");
             if (id != expectedUpstreamRunId || recordedTask != task)

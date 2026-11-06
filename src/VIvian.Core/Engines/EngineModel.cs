@@ -215,8 +215,15 @@ public static class RealExecutionPolicy
     public static bool IsM5DailyTest => false;
 #endif
 
+    /// <summary>
+    /// The single real task of the M5 build. Upstream "routine" = Daily.prepare_daily(ignore_refresh=True) + reward:
+    /// it spends stamina (Power.run, support character) before daily practice, which "daily" alone never does —
+    /// the 2026-11-06 real run of "daily" stopped at 300/500 for exactly that reason.
+    /// </summary>
+    public const string M5RealTask = "routine";
+
     public static bool AllowsTask(string task) => BuildPermitsRealExecution &&
-        (IsM5DailyTest ? task == "daily" : task == "screen_test");
+        (IsM5DailyTest ? task == M5RealTask : task == "screen_test");
 
     public static ExecutionDecision Evaluate(EngineReadinessReport report)
     {

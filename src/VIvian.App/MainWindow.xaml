@@ -22,7 +22,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="{Binding ManualTestStateText}" FontWeight="SemiBold" Foreground="#F2CC85" AutomationProperties.LiveSetting="Polite"/>
 <TextBlock Text="{Binding Configuration.Status, StringFormat=配置同步：{0}}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
 <TextBlock Text="{Binding LastRealResultText}" Foreground="{StaticResource Muted}" Margin="0,5,0,8"/>
-<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏测试（仅 daily）" AutomationProperties.Name="确认本次星铁 daily"/>
+<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏任务：日常（清体力 + 每日实训 + 领奖）" AutomationProperties.Name="确认本次星铁日常"/>
 <CheckBox IsChecked="{Binding AllowTemporaryConfigurationThisRun}" Content="{Binding TemporaryConfigurationText}" Visibility="{Binding TemporaryConfigurationVisibility}" Margin="0,6,0,0" AutomationProperties.Name="允许本次临时修改上游设置"/>
 <StackPanel Visibility="{Binding PendingRestoreVisibility}" Margin="0,6,0,0"><TextBlock Text="{Binding PendingRestoreText}" Foreground="#F2CC85"/>
 <Button Content="恢复临时配置" Command="{Binding RestoreConfigurationCommand}" HorizontalAlignment="Left" Margin="0,6,0,0" AutomationProperties.Name="恢复临时配置"/></StackPanel>
@@ -132,7 +132,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Border Style="{StaticResource Notice}"><StackPanel>
 <TextBlock Text="三游戏任务目录与配置" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="任务选择会保存为计划。星铁 daily 的真实执行仍需在专用页逐次确认；其他待验证任务不会自动运行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
+<TextBlock Text="任务选择会保存为计划。星铁“日常”的真实执行仍需在专用页逐次确认；其他待验证任务不会自动运行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
 </StackPanel></Border>
 <DockPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock Text="游戏：" VerticalAlignment="Center" Margin="0,0,8,0"/>
 <ComboBox ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" MinWidth="320" HorizontalAlignment="Left" AutomationProperties.Name="选择游戏"/></DockPanel>

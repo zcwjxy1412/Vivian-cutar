@@ -136,7 +136,7 @@ public partial class App : Application
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
                         if (RealExecutionPolicy.BuildPermitsRealExecution &&
-                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != (RealExecutionPolicy.IsM5DailyTest ? "daily" : "screen_test") || vm.CanStartMarch7th))
+                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != (RealExecutionPolicy.IsM5DailyTest ? RealExecutionPolicy.M5RealTask : "screen_test") || vm.CanStartMarch7th))
                             throw new InvalidOperationException("Real-test admission is not constrained");
                         if (RealExecutionPolicy.IsReusableManualTest && !vm.ManualTestStateText.Contains("未通过安装核验", StringComparison.Ordinal))
                             throw new InvalidOperationException("Manual-test page does not report the unverified installation");

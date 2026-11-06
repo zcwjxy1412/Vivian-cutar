@@ -18,6 +18,8 @@ public static class March7thTaskRequirements
     public static IReadOnlyDictionary<string, string> For(string task) => task switch
     {
         "daily" => new Dictionary<string, string> { ["reward_enable"] = "true" },
+        // routine: Daily.prepare_daily gates stamina on power_enable and daily practice on daily_enable.
+        "routine" => new Dictionary<string, string> { ["reward_enable"] = "true", ["power_enable"] = "true", ["daily_enable"] = "true" },
         _ => new Dictionary<string, string>(),
     };
 }

@@ -150,3 +150,57 @@ public sealed class M5DailyReadinessTests : IDisposable
         Assert.Equal(RunOutcome.Indeterminate, silent.Outcome);
     }
 }
+
+/// <summary>Regression from the 2026-11-06 real run: "daily" alone never spends stamina and stops at 300/500.</summary>
+public sealed class M5RoutineTaskTests
+{
+    private const string Id = "20261106-080829-b43d";
+    private static string Final(string task) => "{\"schema\":1,\"run_id\":\"" + Id + "\",\"task\":\"" + task +
+        "\",\"status\":\"success\",\"lock\":\"acquired\",\"exit_code\":0,\"ended_at\":\"2026-11-06T08:12:42-05:00\"}";
+
+    // Trimmed from the user's real run log (logs/runs/20261106-080829-b43d.log).
+    private const string RealDailyRun = """
+        开始日常任务
+        2026-11-06 08:09:30,000 | INFO | 当前累计分数：100/500
+        2026-11-06 08:10:00,000 | INFO | 完成任务: 派遣委托或收取1次委托奖励 (+100分)，当前分数: 200/500
+        2026-11-06 08:10:01,000 | INFO | 任务无法完成: 累计消耗120点开拓力
+        2026-11-06 08:10:02,000 | INFO | 任务无法完成: 使用支援角色并获得战斗胜利1次
+        2026-11-06 08:10:30,000 | INFO | 完成任务: 使用1次「万能合成机」 (+100分)，当前分数: 300/500
+        2026-11-06 08:11:30,000 | INFO | 每日实训未完成
+        """;
+
+    [Fact]
+    public void M5BuildRunsRoutineWhichSpendsStaminaBeforeDailyPractice()
+    {
+        Assert.Equal("routine", VIvian.Core.Engines.RealExecutionPolicy.M5RealTask);
+        Assert.Equal(["routine", "--after-finish", "None", "--non-interactive", "--json"], March7thTaskContract.StartArguments("routine"));
+        var required = March7thTaskRequirements.For("routine");
+        Assert.Equal("true", required["power_enable"]);
+        Assert.Equal("true", required["daily_enable"]);
+        Assert.Equal("true", required["reward_enable"]);
+        var routine = VIvian.Core.Engines.EngineCatalog.March7th.Tasks.Single(t => t.Id == "routine");
+        Assert.Equal(VIvian.Core.Engines.TaskFrequency.Daily, routine.Frequency);
+        Assert.Contains("routine", routine.Invocation);
+    }
+
+    [Fact]
+    public void RealThreeHundredPointRunIsFailedNotSuccess()
+    {
+        foreach (var task in new[] { "daily", "routine" })
+            Assert.Equal(VIvian.Core.Execution.RunOutcome.Failed,
+                March7thTaskContract.ParseFinalRecord(RealDailyRun + "\n" + Final(task), task, 0, Id).Outcome);
+    }
+
+    [Fact]
+    public void RoutineReachingFiveHundredIsSuccess()
+    {
+        var output = """
+            开始清体力
+            开始日常任务
+            2026-11-06 08:20:00,000 | INFO | 任务无法完成: 累计消灭20个敌人
+            2026-11-06 08:20:10,000 | INFO | 实训分数已达标
+            2026-11-06 08:20:20,000 | INFO | 每日实训已完成
+            """ + "\n" + Final("routine");
+        Assert.Equal(VIvian.Core.Execution.RunOutcome.Success, March7thTaskContract.ParseFinalRecord(output, "routine", 0, Id).Outcome);
+    }
+}

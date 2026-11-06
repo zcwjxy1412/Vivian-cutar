@@ -10,7 +10,7 @@ public sealed class TaskRow(EngineTaskDefinition task, bool enabled) : Observabl
 {
     public string TaskId { get; } = task.Id;
     public string Title { get; } = task.Title;
-    public string Status { get; } = RealExecutionPolicy.IsM5DailyTest && task.Id == "daily"
+    public string Status { get; } = RealExecutionPolicy.IsM5DailyTest && task.Id == RealExecutionPolicy.M5RealTask
         ? "可执行 · 逐次确认" : task.Status switch
     {
         CapabilityStatus.Verified => "已验证",

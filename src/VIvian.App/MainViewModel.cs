@@ -103,7 +103,7 @@ public sealed class MainViewModel : ObservableObject
         ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
         : EngineCatalog.March7th.Tasks;
     private EngineTaskDefinition? _march7thTask = EngineCatalog.March7th.Tasks.FirstOrDefault(t => t.Id ==
-        (RealExecutionPolicy.IsM5DailyTest ? "daily" : RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
+        (RealExecutionPolicy.IsM5DailyTest ? RealExecutionPolicy.M5RealTask : RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
     public EngineTaskDefinition? March7thTask
     {
         get => _march7thTask;
@@ -185,7 +185,7 @@ public sealed class MainViewModel : ObservableObject
     private bool _oneShotConsumed;
     private string OneShotMarker => Path.Combine(_paths.DataDirectory, "screen_test.attempted");
     public string March7thExecutionBlock => RealExecutionPolicy.IsM5DailyTest
-        ? "仅开放 daily；每次核验发行包、安装、配置及清理状态，并由本人确认。缺少完成证据时结果为未知。"
+        ? "仅开放“日常（清体力 + 每日实训 + 领奖）”；每次核验发行包、安装、配置及清理状态，并由本人确认。缺少完成证据时结果为未知。"
         : !RealExecutionPolicy.BuildPermitsRealExecution
         ? "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。"
         : RealExecutionPolicy.IsReusableManualTest

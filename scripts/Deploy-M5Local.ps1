@@ -49,7 +49,7 @@ try {
   if (-not $startup.WaitForExit(120000)) { throw '固定版自动发现启动检查超时；保留进程与旧版以便诊断。' }
   $startupProof = Join-Path $env:LOCALAPPDATA 'VIvian-M5-DailyTest\startup.ok'
   if ($startup.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $startupProof) -or
-      -not ((Get-Content -LiteralPath $startupProof -Raw).Contains($commit))) {
+      -not ((Get-Content -LiteralPath $startupProof -Raw).Contains($commit.Substring(0,12)))) {
     throw "固定版自动发现启动检查失败（$($startup.ExitCode)）。"
   }
   $desktop = [Environment]::GetFolderPath('Desktop')

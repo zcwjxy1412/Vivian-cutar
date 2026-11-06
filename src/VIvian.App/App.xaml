@@ -128,7 +128,7 @@
 <Style TargetType="Expander">
 <Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="Background" Value="Transparent"/><Setter Property="Margin" Value="0,10,0,0"/>
 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Expander"><DockPanel>
-<ToggleButton DockPanel.Dock="Top" Content="{TemplateBinding Header}" Cursor="Hand" FocusVisualStyle="{x:Null}" IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+<ToggleButton DockPanel.Dock="Top" Content="{TemplateBinding Header}" Background="Transparent" BorderThickness="0" Cursor="Hand" FocusVisualStyle="{x:Null}" IsChecked="{Binding IsExpanded, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
 <ToggleButton.Template><ControlTemplate TargetType="ToggleButton">
 <Border x:Name="Head" Background="Transparent" Padding="0,6" BorderThickness="0,0,0,1" BorderBrush="Transparent"><StackPanel Orientation="Horizontal">
 <Path x:Name="Chevron" Data="M 0,0 L 4,4 L 0,8" Stroke="{StaticResource Muted}" StrokeThickness="1.6" VerticalAlignment="Center" Margin="2,0,12,0"/>

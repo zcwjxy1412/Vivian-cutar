@@ -24,6 +24,31 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(saved.Select(x => x.InstallPath), reloaded.Select(x => x.InstallPath));
         Assert.All(reloaded, x => Assert.Equal(1L, x.Revision));
     }
+    [Fact] public async Task SingleEnginePathPersistsAcrossRestartWithoutTouchingOthers()
+    {
+        var db = await CreateAsync();
+        var initial = await db.LoadSettingsAsync();
+        // Another window saved BetterGI's path first.
+        var genshin = await db.SaveSettingAsync(initial[0] with { InstallPath = @"C:\Program Files\BetterGI" });
+        var star = await db.SaveSettingAsync(initial[1] with { InstallPath = @"E:\auto agent game\March7th 官方\March7thAssistant_full" });
+        Assert.Equal(1L, star.Revision);
+        // "Restart": a fresh instance over the same file, initialised again (schema migration must keep rows).
+        var reopened = new LocalDatabase(DbPath);
+        await reopened.InitializeAsync();
+        var reloaded = await reopened.LoadSettingsAsync();
+        Assert.Equal(genshin, reloaded[0]);
+        Assert.Equal(star, reloaded[1]);
+        Assert.Equal(initial[2], reloaded[2]);
+    }
+    [Fact] public async Task SingleEnginePathRejectsStaleRevisionAndInvalidInput()
+    {
+        var db = await CreateAsync();
+        var initial = await db.LoadSettingsAsync();
+        await db.SaveSettingAsync(initial[1] with { InstallPath = "first" });
+        await Assert.ThrowsAsync<SettingsConflictException>(() => db.SaveSettingAsync(initial[1] with { InstallPath = "stale" }));
+        await Assert.ThrowsAsync<ArgumentException>(() => db.SaveSettingAsync(initial[1] with { InstallPath = "a\nb" }));
+        Assert.Equal("first", (await db.LoadSettingsAsync())[1].InstallPath);
+    }
     [Fact] public async Task ConflictRollsBackWholeBatchIncludingEarlierUpdates()
     {
         var db = await CreateAsync();

@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Threading;
 using VIvian.Core;
 using VIvian.Core.Execution;
+using VIvian.Core.Engines;
 using VIvian.Infrastructure.Simulation;
 
 namespace VIvian.App;
@@ -91,9 +92,19 @@ public sealed class QueueViewModel : ObservableObject
 
     public async Task<QueueResult?> RunDemoAsync(IReadOnlyList<(GameId Game, DemoScenario Scenario)>? plan = null)
     {
-        if (IsRunning) return null;
         var items = (plan ?? Games.Where(g => g.Include).Select(g => (g.Game, g.Scenario.Value)).ToList())
             .Select(p => new QueueItem(p.Game, new DemoEngineAdapter(p.Game, p.Scenario, Step), Limits)).ToList();
+        return await RunItemsAsync(items, simulation: true);
+    }
+
+    /// <summary>Explicit, one-item user action only. Never called from saved plans or a timer.</summary>
+    public Task<QueueResult?> RunMarch7thAsync(IGameAdapter adapter) => RunItemsAsync(
+        [new QueueItem(GameId.StarRail, adapter, new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)))],
+        simulation: false);
+
+    private async Task<QueueResult?> RunItemsAsync(IReadOnlyList<QueueItem> items, bool simulation)
+    {
+        if (IsRunning) return null;
         if (items.Count == 0)
         {
             Status = "请至少选择一款游戏。";
@@ -104,15 +115,15 @@ public sealed class QueueViewModel : ObservableObject
         _stop = stop;
         IsRunning = true;
         LogLines.Clear();
-        Status = "模拟队列运行中…（可随时紧急停止）";
+        Status = simulation ? "模拟队列运行中…（可随时紧急停止）" : "星铁任务运行中…（可随时紧急停止）";
         try
         {
             var queueTask = Task.Run(() => _scheduler.RunAsync(items, stop.Token));
             _queueTask = queueTask;
             var result = await queueTask;
-            Status = RunPresentation.SimulationLabel + RunPresentation.QueueStatusText(result)
+            Status = (simulation ? RunPresentation.SimulationLabel : "【真实任务】") + RunPresentation.QueueStatusText(result)
                 + (result.NotStarted.Count > 0 ? "；未启动：" + string.Join("、", result.NotStarted.Select(RunPresentation.GameName)) : "");
-            Serilog.Log.Information("Simulation queue finished: {Status} {Reason}", result.Status, result.BlockReason);
+            Serilog.Log.Information("Queue finished: {Status} {Reason}", result.Status, result.BlockReason);
             return result;
         }
         finally
@@ -211,7 +222,7 @@ public sealed class QueueViewModel : ObservableObject
 
     private void OnRunChanged(RunUpdate update)
     {
-        Current = RunPresentation.Summary(update);
+        Current = $"RunId {update.RunId:D} · {RunPresentation.Summary(update)}";
         if (update.Phase is RunPhase.Finished or RunPhase.Blocked)
             AppendLog(update.At, "—— " + RunPresentation.Summary(update));
     }

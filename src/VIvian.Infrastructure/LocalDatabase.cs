@@ -144,6 +144,26 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         tx.Commit();
     }
 
+    public async Task<EngineSetting> SaveSettingAsync(EngineSetting setting, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(setting);
+        // Reuse the full validation rules on a single row.
+        SettingsValidation.Validate([setting,
+            .. Enum.GetValues<GameId>().Where(g => g != setting.Game).Select(g => new EngineSetting(g, "", 0))]);
+        await using var c = await OpenAsync(ct);
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = """
+            UPDATE engine_settings SET install_path=$path,revision=revision+1
+            WHERE game=$game AND revision=$revision RETURNING revision;
+            """;
+        cmd.Parameters.AddWithValue("$path", setting.InstallPath);
+        cmd.Parameters.AddWithValue("$game", (int)setting.Game);
+        cmd.Parameters.AddWithValue("$revision", setting.Revision);
+        var revision = await cmd.ExecuteScalarAsync(ct);
+        if (revision is not long next) throw new SettingsConflictException();
+        return setting with { Revision = next };
+    }
+
     public async Task AppendAsync(DiagnosticRecord record, CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);

@@ -18,8 +18,20 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public EngineProfile Profile => EngineCatalog.For(Id);
     public string PinnedVersion => $"支持基准：{Profile.EngineName} {Profile.PinnedVersion}（证据待桌面验证）";
     public long Revision { get; set; }
+    /// <summary>The install path as last loaded from or written to the database (to detect unsaved edits).</summary>
+    public string SavedInstallPath { get; set; } = "";
     private string _installPath = "";
-    public string InstallPath { get => _installPath; set => Set(ref _installPath, value); }
+    public string InstallPath
+    {
+        get => _installPath;
+        set
+        {
+            if (_installPath == value) return;
+            Set(ref _installPath, value);
+            Report = null;
+            Compatibility = "路径已改变，请重新检查";
+        }
+    }
     private string _compatibility = "尚未检查";
     /// <summary>Short state shown on the card.</summary>
     public string Compatibility { get => _compatibility; set => Set(ref _compatibility, value); }
@@ -37,8 +49,14 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public IReadOnlyList<CapabilityRow> Capabilities { get; } = EngineCatalog.For(id).Capabilities.Select(ToRow).ToList();
     public EngineReadinessReport? Report { get; private set; }
 
-    /// <summary>Real task execution is not available for any engine in this build.</summary>
-    public string Execution => "真实任务执行：未开放（此开发版只做只读检查与模拟运行）";
+    /// <summary>What this build lets the user do with the engine for real. Only March7th screen_test can ever run.</summary>
+    public string Execution => Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
+        ? "真实任务：仅 screen_test，可在“真实任务测试”页逐次由本人确认启动；其他任务未开放。"
+        : Id == GameId.StarRail && RealExecutionPolicy.BuildPermitsRealExecution
+        ? "仅单次 screen_test 可在“星铁实测”页由本人确认启动；其他真实任务未开放。"
+        : RealExecutionPolicy.BuildPermitsRealExecution
+        ? "真实任务执行：未开放（此引擎尚未完成实机验证）"
+        : "真实任务执行：未开放（此开发版只做只读检查与模拟运行）";
 
     public void Show(string state, string brush, string detail)
     {

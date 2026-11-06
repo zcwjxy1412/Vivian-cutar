@@ -8,6 +8,7 @@ using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Simulation;
+using VIvian.Infrastructure.Processes;
 
 namespace VIvian.App;
 
@@ -30,10 +31,29 @@ public partial class App : Application
         try
         {
             // Smoke tests use a disposable directory, never the user's profile.
+            var screenTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-ScreenTest.marker"));
+            var manualTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-F1-ManualTest.marker"));
+            // Each real-execution build must carry its own marker (and only its own): its data stays isolated.
+            if (RealExecutionPolicy.IsOneShotScreenTest && (!screenTest || manualTest))
+                throw new InvalidOperationException("单次测试包缺少隔离数据标记，拒绝启动。");
+            if (RealExecutionPolicy.IsReusableManualTest && (!manualTest || screenTest))
+                throw new InvalidOperationException("手动实测版缺少隔离数据标记，拒绝启动。");
+            if (!RealExecutionPolicy.BuildPermitsRealExecution && manualTest)
+                throw new InvalidOperationException("普通构建不能使用手动实测版的数据目录。");
+            var threeEnginePreview = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-ThreeEngine-Preview.marker"));
+            if (threeEnginePreview && RealExecutionPolicy.BuildPermitsRealExecution)
+                throw new InvalidOperationException("三引擎预览包不允许真实执行许可。");
+            var preview = e.Args.Contains("--m4-preview")
+                || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
-                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VIvian");
+                : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    RealExecutionPolicy.IsReusableManualTest ? "VIvian-M4-ManualTest"
+                    : screenTest ? "VIvian-M4A-ScreenTest-R3" : threeEnginePreview ? "VIvian-M4-ThreeEngine-Preview"
+                    : preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
+            // Smoke runs must never write into the user's screenshot-feedback folder.
+            if (_smoke) Environment.SetEnvironmentVariable("VIVIAN_FEEDBACK_DIR", Path.Combine(root, "no-feedback-folder"));
             // One instance per data directory, decided before the database or logs are touched.
             _instance = SingleInstanceGuard.Acquire(root);
             if (!_instance.IsOwner)
@@ -61,9 +81,17 @@ public partial class App : Application
                 services.AddSingleton<ITaskPlanStore>(database);
                 services.AddSingleton<IPreferenceStore>(database);
                 services.AddSingleton(new AppPaths(root));
-                // M2 simulation mode: the only supervisor available refuses to start processes.
-                services.AddSingleton<IProcessSupervisor, RefusingProcessSupervisor>();
-                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(), sp.GetRequiredService<IProcessSupervisor>()));
+                // The current build still injects the refusing supervisor. A separately reviewed
+                // real-execution build would use the existing Windows Job supervisor.
+                services.AddSingleton<IProcessSupervisor>(_ => RealExecutionPolicy.BuildPermitsRealExecution
+                    ? new WindowsProcessSupervisor() : new RefusingProcessSupervisor());
+                services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(),
+                    sp.GetRequiredService<IProcessSupervisor>(),
+                    options: RealExecutionPolicy.BuildPermitsRealExecution ? SchedulerOptions.Default with
+                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(45) }
+                    : SchedulerOptions.Default,
+                    admitReal: adapter =>
+                        RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
@@ -92,6 +120,11 @@ public partial class App : Application
                     {
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
+                        if (RealExecutionPolicy.BuildPermitsRealExecution &&
+                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != "screen_test" || vm.CanStartMarch7th))
+                            throw new InvalidOperationException("Real-test admission is not constrained");
+                        if (RealExecutionPolicy.IsReusableManualTest && !vm.ManualTestStateText.Contains("未通过安装核验", StringComparison.Ordinal))
+                            throw new InvalidOperationException("Manual-test page does not report the unverified installation");
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
@@ -111,7 +144,13 @@ public partial class App : Application
                 };
             }
             window.Show();
-            Log.Information("VIvian {Version} started. Real engines are not enabled.", AppPaths.Version);
+            // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
+            Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
+                RealExecutionPolicy.IsReusableManualTest
+                    ? "Manual-test build: March7thAssistant screen_test only, each run confirmed by the user; no scheduled or unattended real runs."
+                    : RealExecutionPolicy.BuildPermitsRealExecution
+                    ? "One-attempt screen_test package: a single user-confirmed March7thAssistant screen_test."
+                    : "Real engines are not enabled in this build.");
         }
         catch (Exception ex)
         {
@@ -186,6 +225,8 @@ public partial class App : Application
         var fixtures = Path.Combine(root, "engine-fixtures");
         var bgi = Directory.CreateDirectory(Path.Combine(fixtures, "BetterGI")).FullName;
         await File.WriteAllTextAsync(Path.Combine(bgi, "BetterGI.exe"), "harmless fixture, never executed");
+        foreach (var folder in VIvian.Infrastructure.Engines.BetterGi.BetterGiContract.RequiredFolders)
+            Directory.CreateDirectory(Path.Combine(bgi, folder));
         var m7a = Directory.CreateDirectory(Path.Combine(fixtures, "March7thAssistant")).FullName;
         await File.WriteAllTextAsync(Path.Combine(m7a, "m7a.exe"), "harmless fixture, never executed");
         Directory.CreateDirectory(Path.Combine(m7a, "assets", "config"));

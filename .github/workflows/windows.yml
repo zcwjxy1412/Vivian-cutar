@@ -5,7 +5,7 @@ permissions:
 jobs:
   build-test:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-dotnet@v5
@@ -25,6 +25,99 @@ jobs:
             artifacts/VIvian-win-x64.zip
             artifacts/VIvian-win-x64.zip.sha256
             artifacts/BUILD-INFO.txt
+          if-no-files-found: error
+      - name: Build isolated M4-A WPF preview
+        if: success()
+        shell: pwsh
+        run: ./scripts/Build-M4Preview.ps1
+      - name: Upload M4-A WPF preview
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4A-preview-win-x64
+          path: |
+            artifacts/VIvian-M4A-preview-win-x64.zip
+            artifacts/VIvian-M4A-preview-win-x64.zip.sha256
+          if-no-files-found: error
+      - name: Build isolated three-engine integration preview
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-M4ThreeEnginePreview.ps1
+      - name: Upload three-engine integration preview
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4-ThreeEngine-Preview-win-x64
+          path: |
+            artifacts/VIvian-M4-ThreeEngine-Preview-win-x64.zip
+            artifacts/VIvian-M4-ThreeEngine-Preview-win-x64.zip.sha256
+          if-no-files-found: error
+      - name: Build approved one-attempt March7th screen test package
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-M4ScreenTest.ps1
+      - name: Verify special-build status and stop launch boundaries
+        if: success()
+        shell: pwsh
+        run: dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M4ScreenTestBuild=true --filter FullyQualifiedName~StatusAndExactStopUseAuxiliarySupervisorWhileTaskUsesSingleRunLaunch
+      - name: Upload M4-A one-attempt screen test package
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4D-screen-test-r3-win-x64
+          path: |
+            artifacts/VIvian-M4D-screen-test-r3-win-x64.zip
+            artifacts/VIvian-M4D-screen-test-r3-win-x64.zip.sha256
+          if-no-files-found: error
+      - name: Test M4-F1 manual-test build flavor
+        if: success()
+        shell: pwsh
+        run: dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M4ManualTestBuild=true --results-directory artifacts/tests-manual --logger "trx;LogFileName=manual-test-build.trx"
+      - name: Build M4-F1 reusable manual real-test package
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-M4ManualTest.ps1
+      - name: Upload M4-F1 manual real-test package
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4-F1-ManualTest-win-x64
+          path: |
+            artifacts/VIvian-M4-F1-ManualTest-win-x64.zip
+            artifacts/VIvian-M4-F1-ManualTest-win-x64.zip.sha256
+            artifacts/m4f1-manual-test/BUILD-INFO.txt
+          if-no-files-found: error
+      - name: Build isolated March7th status probe
+        if: success()
+        shell: pwsh
+        run: ./scripts/Build-March7thProbe.ps1
+      - name: Upload M4 March7th status probe
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4-March7th-Status-Probe-win-x64
+          path: |
+            artifacts/VIvian-M4-March7th-Status-Probe-win-x64.zip
+            artifacts/VIvian-M4-March7th-Status-Probe-win-x64.zip.sha256
+          if-no-files-found: error
+      - name: Build harmless UAC boundary probe without running it
+        if: success()
+        shell: pwsh
+        run: ./scripts/Build-UacBoundaryProbe.ps1
+      - name: Upload M4-A2 UAC boundary probe
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4A2-UAC-Boundary-Probe-win-x64
+          path: |
+            artifacts/VIvian-M4A2-UAC-Boundary-Probe-win-x64.zip
+            artifacts/VIvian-M4A2-UAC-Boundary-Probe-win-x64.zip.sha256
           if-no-files-found: error
       - name: Preserve build evidence and portable preview
         if: always()

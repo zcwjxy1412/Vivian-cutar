@@ -8,6 +8,11 @@ public interface ISettingsStore
 {
     Task<IReadOnlyList<EngineSetting>> LoadSettingsAsync(CancellationToken ct = default);
     Task SaveSettingsAsync(IReadOnlyList<EngineSetting> settings, CancellationToken ct = default);
+    /// <summary>
+    /// Updates one engine's install path only (optimistic revision check). Other engines' rows are untouched, so a
+    /// path chosen on one page never overwrites a newer value saved for another engine.
+    /// </summary>
+    Task<EngineSetting> SaveSettingAsync(EngineSetting setting, CancellationToken ct = default);
 }
 public interface IDiagnosticStore
 {

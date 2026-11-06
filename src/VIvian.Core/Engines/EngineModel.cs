@@ -175,21 +175,78 @@ public sealed record EngineReadinessReport(
 public sealed record ExecutionDecision(bool Allowed, string ReasonCode, string Explanation);
 
 /// <summary>
-/// The single place that decides whether a real engine may be launched. In this build the answer is always no:
-/// launching requires desktop evidence (process ownership across UAC, completion signals, side effects) that has
-/// not been collected. The scheduler blocks non-simulation adapters independently of this policy.
+/// The single place that decides whether a real engine may be launched. Default builds never launch one.
+/// Two separately stamped Windows test builds exist: the consumed M4-D one-attempt screen_test package
+/// (<c>M4_SCREEN_TEST</c>) and the M4-F1 reusable manual-test build (<c>M4_MANUAL_TEST</c>). Both admit only
+/// March7thAssistant <c>screen_test</c>, only after a per-run user confirmation; scheduling stays closed.
 /// </summary>
 public static class RealExecutionPolicy
 {
-    /// <summary>False in every pre-desktop development build.</summary>
+#if M4_SCREEN_TEST && M4_MANUAL_TEST
+#error 单次测试包与可重复手动实测版不能同时启用。
+#endif
+#if M4_SCREEN_TEST || M4_MANUAL_TEST
+    public static bool BuildPermitsRealExecution => true;
+#else
     public static bool BuildPermitsRealExecution => false;
+#endif
+#if M4_MANUAL_TEST
+    /// <summary>M4-F1: each completed, reconciled run may be followed by another manually confirmed run.</summary>
+    public static bool IsReusableManualTest => true;
+#else
+    public static bool IsReusableManualTest => false;
+#endif
+    /// <summary>M4-D: the whole package permits exactly one attempt (tracked by a marker file).</summary>
+    public static bool IsOneShotScreenTest => BuildPermitsRealExecution && !IsReusableManualTest;
+
+    public static bool AllowsTask(string task) => BuildPermitsRealExecution && task == "screen_test";
 
     public static ExecutionDecision Evaluate(EngineReadinessReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
-        // Even a future build that permits execution needs verified identity plus verified launch and completion
-        // evidence for this exact release; until then the answer stays no.
+        // The readiness report alone never authorises a launch; the manual-test page adds the per-run checks.
         return new(false, Execution.ReasonCodes.RealAdapterUnverified,
-            "此开发版不启动任何真实引擎：进程归属、UAC 边界与完成证据尚待 Windows 桌面实测。");
+            IsReusableManualTest
+                ? "只读检查本身不授权执行：真实任务只能在“真实任务测试”页逐次确认后启动，且每次都要通过即时状态检查。"
+                : BuildPermitsRealExecution
+                ? "此单次测试包只允许从星铁实测页确认 screen_test，且必须通过即时状态检查。"
+                : "此开发版不启动任何真实引擎：进程归属、UAC 边界与完成证据尚待 Windows 桌面实测。");
+    }
+}
+
+/// <summary>Inputs for one manual real-test admission decision. Every field is re-evaluated before each run.</summary>
+public sealed record ManualTestInputs(
+    string? TaskId, bool UserConfirmedThisRun, bool SelectionUnchangedSinceConfirmation,
+    bool ReleaseArchiveVerified, bool InstallIdentityVerified, bool QueueIdle, bool QueueRunning,
+    bool HasUnresolvedCleanup, bool OneShotConsumed);
+
+public enum ManualTestState { NotAvailable, InstallNotVerified, NeedsConfirmation, Ready, Running, CleanupUnconfirmed, Consumed }
+
+public sealed record ManualTestAdmission(bool Allowed, ManualTestState State, string Text);
+
+/// <summary>
+/// Per-run admission for the real-test page. Pure and side-effect free so it can be unit tested. A run is admitted only
+/// when the build permits it, the task is whitelisted, the installation was verified, no earlier run is still
+/// unreconciled (Cleanup Unconfirmed keeps the queue blocked) and the user confirmed this exact selection.
+/// </summary>
+public static class ManualTestPolicy
+{
+    public static ManualTestAdmission Evaluate(ManualTestInputs i)
+    {
+        ArgumentNullException.ThrowIfNull(i);
+        if (!RealExecutionPolicy.BuildPermitsRealExecution || !RealExecutionPolicy.AllowsTask(i.TaskId ?? ""))
+            return new(false, ManualTestState.NotAvailable, "此版本不开放该真实任务。");
+        if (RealExecutionPolicy.IsOneShotScreenTest && i.OneShotConsumed)
+            return new(false, ManualTestState.Consumed, "本包的单次 screen_test 许可已使用；不会自动重试。");
+        if (i.QueueRunning) return new(false, ManualTestState.Running, "正在执行");
+        if (i.HasUnresolvedCleanup)
+            return new(false, ManualTestState.CleanupUnconfirmed,
+                "清理未确认：上一次运行的进程退出尚未确认。请先在“调度与监控”核对并处理，再开始下一次。");
+        if (!i.QueueIdle) return new(false, ManualTestState.Running, "正在执行");
+        if (!i.ReleaseArchiveVerified || !i.InstallIdentityVerified)
+            return new(false, ManualTestState.InstallNotVerified, "未通过安装核验：请先核对官方发行包与安装目录。");
+        if (!i.UserConfirmedThisRun || !i.SelectionUnchangedSinceConfirmation)
+            return new(false, ManualTestState.NeedsConfirmation, "可以进行手动实测：请确认游戏账号已登录，再勾选“仅确认本次执行”。");
+        return new(true, ManualTestState.Ready, "可以进行手动实测：已确认本次执行，点击开始后由你亲自处理 UAC。");
     }
 }

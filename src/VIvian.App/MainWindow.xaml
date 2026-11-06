@@ -10,7 +10,6 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <Style x:Key="Panel" TargetType="Border"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="22"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
 <Style x:Key="Notice" TargetType="Border"><Setter Property="Background" Value="{StaticResource WarnBack}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="16,12"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
 <Style x:Key="Page" TargetType="ScrollViewer"><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="Padding" Value="40,34,40,24"/></Style>
-<Style TargetType="Expander"><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="Margin" Value="0,10,0,0"/></Style>
 <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{StaticResource StarRail}"/></Style>
 
 <!-- Navigation: the TabControl is drawn as a left rail. Tag carries the game colour (Transparent for non-game pages). -->
@@ -32,14 +31,14 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <TabControl.Template><ControlTemplate TargetType="TabControl">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="232"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 <Border Background="{StaticResource Rail}"><DockPanel>
-<StackPanel DockPanel.Dock="Top" Margin="26,30,20,26"><TextBlock Text="VIvian" FontSize="26" FontWeight="Light"/><TextBlock Text="三款游戏，一处出发" Foreground="{StaticResource Muted}" FontSize="13" Margin="0,4,0,0"/></StackPanel>
+<StackPanel DockPanel.Dock="Top" Margin="26,30,20,26"><TextBlock Text="VIvian" FontSize="26" FontWeight="Light" Foreground="{StaticResource Text}"/><TextBlock Text="三款游戏，一处出发" Foreground="{StaticResource Muted}" FontSize="13" Margin="0,4,0,0"/></StackPanel>
 <Border DockPanel.Dock="Bottom" Margin="20,12,20,22" Padding="12,10" CornerRadius="8" Background="{StaticResource WarnBack}">
-<TextBlock Text="{Binding ExecutionBanner}" Foreground="{StaticResource WarnText}" FontSize="12" LineHeight="18"/></Border>
+<TextBlock Text="{Binding ExecutionBanner}" Foreground="{StaticResource WarnText}" FontSize="12" LineHeight="18" TextWrapping="Wrap"/></Border>
 <TabPanel IsItemsHost="True" Background="{StaticResource Rail}" KeyboardNavigation.TabIndex="1"/></DockPanel></Border>
 <Grid Grid.Column="1"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <ContentPresenter ContentSource="SelectedContent"/>
 <Border Grid.Row="1" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="40,10">
-<TextBlock Text="{Binding Status}" Foreground="{StaticResource Muted}" FontSize="13" AutomationProperties.LiveSetting="Polite"/></Border></Grid></Grid>
+<TextBlock Text="{Binding Status}" Foreground="{StaticResource Muted}" FontSize="13" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/></Border></Grid></Grid>
 </ControlTemplate></TabControl.Template>
 
 <!-- ============ 今日 ============ -->

@@ -107,7 +107,7 @@ public sealed class MainViewModel : ObservableObject
         ? "无害 UAC 边界已核对；上游 Worker 的停止结果需以本次实测为准。"
         : "跨权限安全停止：待实机验证；当前不能运行真实任务。";
     public string March7thConsentNote => RealExecutionPolicy.BuildPermitsRealExecution
-        ? "本包仅含已获单次授权的 screen_test。启动前核对路径及任务；UAC 由你亲自操作。"
+        ? "本包只支持单次 screen_test；实际游戏操作需单独授权。启动前核对路径及任务；UAC 由你亲自操作。"
         : "首次真实任务必须先完成 UAC 与 Worker 实测，并另行取得你的单次游戏操作授权。";
     public bool CanStartMarch7th => RealExecutionPolicy.AllowsTask(March7thTask?.Id ?? "") && !_oneShotConsumed
         && March7thConfirmedThisRun && _march7thEvidence is not null && Queue.IsIdle && !Queue.HasUnresolved

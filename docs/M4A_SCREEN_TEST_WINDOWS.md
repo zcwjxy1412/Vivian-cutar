@@ -1,6 +1,6 @@
 # VIvian M4-A2 星铁单次实机测试包
 
-本包是修复首次启动许可冲突后的第二次独立测试包，**运行前仍需单独取得用户对第二次游戏测试的确认**。请解压到全新目录，保留 `VIvian-M4A-ScreenTest.marker`，启动 `VIvian.exe`。它使用独立的 `%LOCALAPPDATA%\VIvian-M4A-ScreenTest-R2`，保留首次尝试的记录，也不覆盖原 VIvian 安装及 `%LOCALAPPDATA%\VIvian` 数据。
+本包是 M4-D 的第三个独立单次测试包，**制作包的授权不等于运行游戏的授权；运行前仍需单独确认**。请解压到全新目录，保留 `VIvian-M4A-ScreenTest.marker`，启动 `VIvian.exe`。它使用独立的 `%LOCALAPPDATA%\VIvian-M4A-ScreenTest-R3`，保留前两次尝试的记录，也不覆盖原 VIvian 安装及 `%LOCALAPPDATA%\VIvian` 数据。
 
 1. 在“引擎管理”选择已核对官方发行包的 March7thAssistant 安装目录，并选择官方 `March7thAssistant_full.zip` 核对 SHA-256。不要选择原有 VIvian 的安装目录。
 2. 在“星铁实测”确认任务仅为“界面可切换性测试”。它会打开或连接星铁，并切换可达界面；可能写入上游日志、配置、错误截图，账号状态仍可能受界面操作影响。若未准备好，请不要勾选确认。

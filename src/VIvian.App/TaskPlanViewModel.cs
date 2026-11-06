@@ -10,13 +10,14 @@ public sealed class TaskRow(EngineTaskDefinition task, bool enabled) : Observabl
 {
     public string TaskId { get; } = task.Id;
     public string Title { get; } = task.Title;
-    public string Status { get; } = task.Status switch
+    public string Status { get; } = RealExecutionPolicy.IsM5DailyTest && task.Id == "daily"
+        ? "可执行 · 逐次确认" : task.Status switch
     {
         CapabilityStatus.Verified => "已验证",
         CapabilityStatus.Unsupported => "不支持",
         _ => "候选 · 未验证 · 不可执行",
     };
-    public string Note { get; } = $"上游标识 {task.Id} · 证据级别 {task.Evidence} · {task.Note}";
+    public string Note { get; } = $"{task.Frequency switch { TaskFrequency.Daily => "每日", TaskFrequency.Weekly => "每周", _ => "按需" }} · 上游标识 {task.Id} · 证据级别 {task.Evidence} · {task.Note}";
     private bool _enabled = enabled;
     public bool Enabled { get => _enabled; set { if (_enabled != value) { _enabled = value; Raise(); Changed?.Invoke(); } } }
     public event Action? Changed;

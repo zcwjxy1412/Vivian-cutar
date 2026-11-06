@@ -31,7 +31,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly ITaskPlanStore _plans;
     private readonly IPreferenceStore _preferences;
     private readonly IRunHistory _runs;
-    private readonly IProcessSupervisor _statusSupervisor;
+    private readonly IUnifiedTaskControl _control;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
     private string _status = RealExecutionPolicy.IsReusableManualTest
@@ -45,15 +45,18 @@ public sealed class MainViewModel : ObservableObject
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}）· "
-        + (RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
+        + (RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训手动实测版（逐次确认）"
+            : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
             : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
-    public string ExecutionBanner => RealExecutionPolicy.IsReusableManualTest
+    public string ExecutionBanner => RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训 · 每次需本人确认与 UAC · 无定时执行"
+        : RealExecutionPolicy.IsReusableManualTest
         ? "手动实测版 · 星铁 screen_test · 每次需本人确认与 UAC · 无定时/无人值守执行"
         : RealExecutionPolicy.BuildPermitsRealExecution
         ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
     public string RealTestTabHeader => RealExecutionPolicy.IsReusableManualTest ? "真实任务测试" : "星铁实测";
-    public string RealTestTitle => RealExecutionPolicy.IsReusableManualTest
+    public string RealTestTitle => RealExecutionPolicy.IsM5DailyTest ? "星铁 · 每日实训真实任务"
+        : RealExecutionPolicy.IsReusableManualTest
         ? "真实任务测试 · 星铁 March7thAssistant screen_test" : "March7thAssistant · 单次真实任务";
     public string StartButtonText => RealExecutionPolicy.IsReusableManualTest ? "开始本次真实任务测试" : "启动本次星铁任务";
     public ObservableCollection<EngineCard> Engines { get; } =
@@ -61,7 +64,8 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<DiagnosticRecord> History { get; } = [];
     public ObservableCollection<TaskPlanViewModel> TaskPlans { get; } = [];
     private TaskPlanViewModel? _selectedPlan;
-    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set => Set(ref _selectedPlan, value); }
+    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set { Set(ref _selectedPlan, value); if (value is not null) Configuration?.SelectGame(value.Game); } }
+    public ConfigurationViewModel Configuration { get; }
     private EngineCard? _selectedEngine;
     public EngineCard? SelectedEngine { get => _selectedEngine; set => Set(ref _selectedEngine, value); }
 
@@ -83,7 +87,7 @@ public sealed class MainViewModel : ObservableObject
         ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
         : EngineCatalog.March7th.Tasks;
     private EngineTaskDefinition? _march7thTask = EngineCatalog.March7th.Tasks.FirstOrDefault(t => t.Id ==
-        (RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
+        (RealExecutionPolicy.IsM5DailyTest ? "daily" : RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
     public EngineTaskDefinition? March7thTask
     {
         get => _march7thTask;
@@ -108,7 +112,9 @@ public sealed class MainViewModel : ObservableObject
     }
     private bool _oneShotConsumed;
     private string OneShotMarker => Path.Combine(_paths.DataDirectory, "screen_test.attempted");
-    public string March7thExecutionBlock => !RealExecutionPolicy.BuildPermitsRealExecution
+    public string March7thExecutionBlock => RealExecutionPolicy.IsM5DailyTest
+        ? "仅开放 daily；每次核验发行包、安装、配置及清理状态，并由本人确认。缺少完成证据时结果为未知。"
+        : !RealExecutionPolicy.BuildPermitsRealExecution
         ? "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。"
         : RealExecutionPolicy.IsReusableManualTest
         ? "每次运行都要：核对安装、即时状态检查、上一次运行清理已确认、本人勾选确认。失败不会自动重试。"
@@ -117,7 +123,9 @@ public sealed class MainViewModel : ObservableObject
     public string March7thStopStatus => RealExecutionPolicy.BuildPermitsRealExecution
         ? "无害 UAC 边界已核对；上游 Worker 的停止结果需以本次实测为准。"
         : "跨权限安全停止：待实机验证；当前不能运行真实任务。";
-    public string March7thConsentNote => RealExecutionPolicy.IsReusableManualTest
+    public string March7thConsentNote => RealExecutionPolicy.IsM5DailyTest
+        ? "每日实训会操作真实游戏与账号。请先确认登录状态、原软件配置与本次任务，再由本人处理 UAC。"
+        : RealExecutionPolicy.IsReusableManualTest
         ? "开始前请先手动打开星铁并确认账号已登录（登录过期会导致测试失败）。UAC 弹窗由你本人核对 m7a.exe 路径后处理；VIvian 不会自动提权。"
         : RealExecutionPolicy.BuildPermitsRealExecution
         ? "本包只支持单次 screen_test；实际游戏操作需单独授权。启动前核对路径及任务；UAC 由你亲自操作。"
@@ -175,7 +183,10 @@ public sealed class MainViewModel : ObservableObject
         IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
-        _statusSupervisor = statusSupervisor;
+        _control = new UnifiedTaskControl(queue, runs, statusSupervisor);
+        Configuration = new ConfigurationViewModel(_control,
+            game => Engines.Single(e => e.Id == game).InstallPath,
+            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"));
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>
@@ -332,7 +343,15 @@ public sealed class MainViewModel : ObservableObject
         { Status = "安装身份未核对，或有上次运行尚未确认清理；任务未启动。"; return; }
         if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
         if (!admission.Allowed) { Status = admission.Text; return; }
-        March7thTaskContract.StartArguments(March7thTask.Id); // whitelist, even for a programmatic command call
+        if (RealExecutionPolicy.IsM5DailyTest)
+        {
+            ConfigurationSnapshot config;
+            try { config = _control.ReadConfiguration(GameId.StarRail, card.InstallPath); }
+            catch (Exception ex) { Status = "上游配置检查失败，任务未启动：" + ex.Message; return; }
+            if (config.Values.Single(v => v.Schema.Path == "pause_after_success").Value != "false" ||
+                config.Values.Single(v => v.Schema.Path == "exit_after_failure").Value != "true")
+            { Status = "请在原软件中关闭“成功后暂停”并开启“失败后退出”，重新读取配置后再执行。"; return; }
+        }
         await PersistInstallPathAsync(card);
         if (RealExecutionPolicy.IsReusableManualTest)
         {
@@ -356,11 +375,13 @@ public sealed class MainViewModel : ObservableObject
             Raise(nameof(CanStartMarch7th)); Raise(nameof(March7thExecutionBlock));
         }
         catch (IOException) { _oneShotConsumed = true; Status = "单次许可标记已存在或无法写入；任务未启动。"; return; }
-        var adapter = new March7thAdapter(card.InstallPath, _march7thEvidence, March7thTask.Id,
-            () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath, _statusSupervisor);
         try
         {
-            var result = await Queue.RunMarch7thAsync(adapter);
+            var plan = _control.CreateTaskPlan(GameId.StarRail, [March7thTask.Id]);
+            var result = await _control.ExecuteTaskPlan(plan, new RealTaskAuthorization(card.InstallPath,
+                _march7thEvidence, () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath
+                    && _confirmedArchivePath == ReleaseArchivePath && _confirmedTask == March7thTask?.Id,
+                card.Report?.Compatibility == CompatibilityClass.IdentityVerified));
             Status = result is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
         }
         finally
@@ -469,7 +490,8 @@ public sealed class MainViewModel : ObservableObject
         Status = $"设置已保存。已按新的保留期清理 {removed.Count} 个旧日志文件。";
     }
 
-    private static string BuildKind => RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版"
+    private static string BuildKind => RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训手动实测版"
+        : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版"
         : RealExecutionPolicy.BuildPermitsRealExecution ? "M4-D 单次测试包" : "开发版（模拟）";
 
     public async Task ExportDiagnosticsAsync()

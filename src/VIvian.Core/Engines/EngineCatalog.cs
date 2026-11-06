@@ -58,12 +58,14 @@ public static class EngineCatalog
         Tasks:
         [
             new("main", "完整运行", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
-            new("daily", "每日实训", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
-            new("power", "清体力", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
+            new("daily", "每日实训", Pending, B, M7Cli, "固定版本 CLI 有此入口；实际完成与跨 UAC 清理待实测。", TaskFrequency.Daily,
+                "m7a.exe daily --after-finish None --json", "本次 RunId 日志须有实训达标与领取奖励后的完成通知", [],
+                ["固定版本与安装身份核验", "上游配置可读取", "任务前后完成证据可核对"], ["daily_enable", "daily_tasks", "reward_enable"]),
+            new("power", "清体力", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。", TaskFrequency.Daily),
             new("routine", "日常", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
-            new("currencywars", "货币战争", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
+            new("currencywars", "货币战争", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。", TaskFrequency.Weekly),
             new("fight", "锄大地", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
-            new("universe", "模拟/差分宇宙", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
+            new("universe", "模拟/差分宇宙", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。", TaskFrequency.Weekly),
             new("screen_test", "界面可切换性测试", Pending, B, M7Cli, "逐项切换游戏界面；只在用户单次授权后执行，仍会操作游戏。"),
         ],
         Launch: new("m7a.exe", WritesToStandardOutput: true, PrivilegeRequirement.ElevationRequested, ProcessTopology.LauncherWithWorker,
@@ -82,7 +84,19 @@ public static class EngineCatalog
             "--status / --list 可能在安装目录创建并删除写权限探测文件；缺少 config.yaml 时可能生成它（级别 B/D）。",
             "任务运行会回写 config.yaml 中的时间戳与计数，写入 logs\\ 与截图，并启动游戏（级别 B/C）。",
         ],
-        UnsupportedVersions: ["< v2026.8.28（研究报告：非零退出码仍提示完成的缺陷）"]);
+        UnsupportedVersions: ["< v2026.8.28（研究报告：非零退出码仍提示完成的缺陷）"])
+    {
+        Parameters =
+        [
+            new("daily_enable", "启用每日实训", "完整运行和日常任务中的每日实训开关；单独执行 daily 的作用待实测。", "boolean", "true/false", "true", "日常与完整运行", "无", "每日实训", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:177"),
+            new("power_enable", "启用清体力", "完整运行和日常任务中的清体力总开关；单独执行 power 不受影响。", "boolean", "true/false", "true", "日常与完整运行", "无", "清体力、历战余响", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:94"),
+            new("reward_enable", "启用领取奖励", "奖励领取总开关。", "boolean", "true/false", "true", "领取奖励", "无", "每日实训奖励及其他奖励", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:166"),
+            new("daily_tasks", "每日实训任务明细", "由原软件管理的任务列表；当前只读。", "list", "上游定义", "[]", "每日实训", "上游任务结构", "每日实训", "config.yaml", ParameterAccess.UpstreamManaged, "v2026.10.31 assets/config/config.example.yaml:190"),
+            new("power_plan", "体力计划", "由原软件管理的副本计划；当前只读。", "list", "上游定义", "[]", "清体力", "副本类型和次数", "清体力", "config.yaml", ParameterAccess.UpstreamManaged, "v2026.10.31 assets/config/config.example.yaml:95"),
+            new("pause_after_success", "成功后暂停", "daily 实测前须在原软件中关闭，以便程序退出并形成终态。", "boolean", "true/false", "true", "进程退出", "daily 实测需为 false", "真实任务", "config.yaml", ParameterAccess.VerifiedReadOnly, "v2026.10.31 assets/config/config.example.yaml:28"),
+            new("exit_after_failure", "失败后退出", "daily 实测前须在原软件中开启，以免错误时无限等待。", "boolean", "true/false", "false", "进程退出", "daily 实测需为 true", "真实任务", "config.yaml", ParameterAccess.VerifiedReadOnly, "v2026.10.31 assets/config/config.example.yaml:31"),
+        ]
+    };
 
     public static EngineProfile BetterGi { get; } = new(
         GameId.Genshin, "BetterGI", "v0.66.0", "0af68c2", "bgi-v0.66.0-r1",
@@ -118,7 +132,7 @@ public static class EngineCatalog
         ],
         Tasks:
         [
-            new("startOneDragon", "一条龙（当前选中配置）", Pending, B, BgiCli, "候选入口，未在真实发行包上实测。"),
+            new("startOneDragon", "一条龙（当前选中配置）", Pending, B, BgiCli, "候选入口，未在真实发行包上实测。", TaskFrequency.Daily),
             new("startOneDragon:<config>", "一条龙（指定配置）", Pending, B, BgiCli, "配置名不匹配时的行为未知。"),
             new("--startGroups", "配置组", Pending, B, BgiCli, "候选入口，未在真实发行包上实测。"),
         ],
@@ -138,7 +152,10 @@ public static class EngineCatalog
             "每次启动都会把 bettergi:// 协议注册到当前路径（HKCR），多副本时会改写用户的协议指向（级别 B）。",
             "运行期和退出时整体回写 User\\config.json，外部修改会被覆盖（级别 B）。",
         ],
-        UnsupportedVersions: ["v0.63.0、v0.65.0（研究报告标注的高风险版本）", "refactor/20260930 预览版（配置结构不兼容）"]);
+        UnsupportedVersions: ["v0.63.0、v0.65.0（研究报告标注的高风险版本）", "refactor/20260930 预览版（配置结构不兼容）"])
+    {
+        Parameters = [new("User/config.json", "原软件设置", "BetterGI 会整体回写配置，VIvian 只显示位置并交由原软件修改。", "json", "原软件管理", "", "当前安装", "上游进程必须退出", "一条龙", "User/config.json", ParameterAccess.UpstreamManaged, BgiResearch)]
+    };
 
     public static EngineProfile OneDragon { get; } = new(
         GameId.ZenlessZoneZero, "ZenlessZoneZero-OneDragon", "v2.6.0", "5f2e473", "zzzod-v2.6.0-r1",
@@ -176,7 +193,7 @@ public static class EngineCatalog
         ],
         Tasks:
         [
-            new("-o", "一条龙", Pending, B, OdCli, "候选入口，未在真实发行包上实测。"),
+            new("-o", "一条龙", Pending, B, OdCli, "候选入口，未在真实发行包上实测。", TaskFrequency.Daily),
             new("-o -c", "一条龙并关闭游戏", Pending, C, OdResearch, "-c 只见于文档。"),
         ],
         Launch: new("OneDragon-RuntimeLauncher.exe", WritesToStandardOutput: false, PrivilegeRequirement.ElevationRequested, ProcessTopology.Unknown,
@@ -195,7 +212,10 @@ public static class EngineCatalog
             "启动器默认会联网拉取代码更新并覆盖 src\\（级别 C）。",
             "写入 .log\\ 与运行记录（级别 C）。",
         ],
-        UnsupportedVersions: ["< v2.4.4（研究报告：早期启动器工作目录缺陷）"]);
+        UnsupportedVersions: ["< v2.4.4（研究报告：早期启动器工作目录缺陷）"])
+    {
+        Parameters = [new("config", "账号实例配置", "多个账号实例并存；未绑定明确实例时只发现配置目录。", "yaml", "实例专属", "", "指定账号实例", "明确实例标识", "一条龙", "config/", ParameterAccess.UpstreamManaged, OdResearch)]
+    };
 
     public static IReadOnlyList<EngineProfile> All { get; } = [BetterGi, March7th, OneDragon];
 

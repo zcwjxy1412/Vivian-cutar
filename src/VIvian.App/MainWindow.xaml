@@ -113,10 +113,10 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </StackPanel></ScrollViewer></TabItem>
 
 <TabItem Header="任务管理"><Grid>
-<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <Border Style="{StaticResource Notice}"><StackPanel>
-<TextBlock Text="任务计划：可以选择和排序，但不会执行" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="这里保存任务计划，不会因勾选而运行游戏。候选任务仍待实机验证；星铁单次 screen_test 只能从专用页手动确认启动。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
+<TextBlock Text="三游戏任务目录与配置" FontWeight="SemiBold" Foreground="#F2CC85"/>
+<TextBlock Text="任务选择会保存为计划。星铁 daily 的真实执行仍需在专用页逐次确认；其他待验证任务不会自动运行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
 </StackPanel></Border>
 <DockPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock Text="游戏：" VerticalAlignment="Center" Margin="0,0,8,0"/>
 <ComboBox ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" MinWidth="320" HorizontalAlignment="Left" AutomationProperties.Name="选择游戏"/></DockPanel>
@@ -134,7 +134,19 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <StackPanel Grid.Row="3" Margin="0,12,0,0">
 <TextBlock Text="{Binding SelectedPlan.Validation}" Foreground="#F2CC85" Margin="0,0,0,10" AutomationProperties.LiveSetting="Polite"/>
 <WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="保存任务选择" Command="{Binding SaveTasksCommand}" Margin="0,0,10,0"/><Button Content="放弃修改" Command="{Binding ReloadTasksCommand}"/></WrapPanel>
-</StackPanel></Grid></TabItem>
+</StackPanel>
+<Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,12,0,0" DataContext="{Binding Configuration}"><StackPanel>
+<TextBlock Text="上游配置 · 当前值与同步" FontSize="17" FontWeight="SemiBold"/>
+<TextBlock Text="星铁仅开放已核对的布尔参数；体力计划与每日任务明细由原软件管理。" Foreground="{StaticResource Muted}" Margin="0,5,0,8"/>
+<WrapPanel><Button Content="读取上游配置" Command="{Binding ReadCommand}" Margin="0,0,8,0"/><Button Content="保存参数" Command="{Binding SaveCommand}" Margin="0,0,8,0"/><Button Content="复制上游设置文件路径" Command="{Binding OpenSettingsCommand}"/></WrapPanel>
+<TextBlock Text="{Binding Status}" Foreground="#F2CC85" Margin="0,8,0,8" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+<ScrollViewer MaxHeight="190" VerticalScrollBarVisibility="Auto"><ItemsControl ItemsSource="{Binding Parameters}"><ItemsControl.ItemTemplate><DataTemplate>
+<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
+<StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Path}" Foreground="{StaticResource Muted}" FontSize="11"/></StackPanel>
+<StackPanel Grid.Column="1"><TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" AutomationProperties.Name="{Binding Title}"/><TextBlock Text="{Binding Description}" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/></StackPanel>
+<TextBlock Grid.Column="2" Text="{Binding State}" Foreground="#F2CC85" Margin="8,0,0,0"/></Grid>
+</DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
+</StackPanel></Border></Grid></TabItem>
 
 <TabItem Header="调度与监控"><Grid DataContext="{Binding Queue}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

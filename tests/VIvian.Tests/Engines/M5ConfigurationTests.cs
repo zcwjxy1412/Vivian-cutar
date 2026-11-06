@@ -1,0 +1,100 @@
+using VIvian.Core;
+using VIvian.Core.Engines;
+using VIvian.Infrastructure.Engines;
+using VIvian.Infrastructure.Engines.Cli;
+using Xunit;
+
+namespace VIvian.Tests.Engines;
+
+public sealed class M5ConfigurationTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "vivian-m5-" + Guid.NewGuid().ToString("N"));
+    private readonly VersionedConfigurationControl _service = new();
+    private string Config => Path.Combine(_root, "config.yaml");
+
+    public M5ConfigurationTests()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "assets", "config"));
+        File.WriteAllText(Path.Combine(_root, "assets", "config", "version.txt"), "v2026.10.31\n");
+        File.WriteAllText(Config,
+            "# keep comment\r\ndaily_enable: true # daily\r\npower_enable: true\r\nreward_enable: true\r\npause_after_success: false\r\nexit_after_failure: true\r\nunknown_future: 42 # untouched\r\n");
+    }
+    public void Dispose() => Directory.Delete(_root, recursive: true);
+
+    [Fact]
+    public void RegistryMapsPinnedDailyAndAllThreeEngines()
+    {
+        var daily = _service.GetTaskSchema(GameId.StarRail, "daily");
+        Assert.Equal(TaskFrequency.Daily, daily.Frequency);
+        Assert.Contains("daily", daily.Invocation);
+        Assert.Contains("RunId", daily.CompletionSignal);
+        Assert.Equal("v2026.10.31", EngineCatalog.March7th.PinnedVersion);
+        Assert.NotEmpty(_service.ListTasks(GameId.Genshin));
+        Assert.NotEmpty(_service.ListTasks(GameId.ZenlessZoneZero));
+        Assert.Equal(ParameterAccess.UpstreamManaged,
+            EngineCatalog.OneDragon.Parameters.Single().Access);
+    }
+
+    [Fact]
+    public void EditPreservesUnknownFieldsCommentsAndCrLfAndCanRestoreBackup()
+    {
+        var before = File.ReadAllBytes(Config);
+        var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
+        var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["daily_enable"] = "false" });
+        Assert.True(_service.ValidateChanges(proposal, false).Valid);
+        var result = _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false);
+        Assert.Equal("false", result.Snapshot.Values.Single(x => x.Schema.Path == "daily_enable").Value);
+        var text = File.ReadAllText(Config);
+        Assert.Contains("unknown_future: 42 # untouched\r\n", text);
+        Assert.Contains("daily_enable: false # daily\r\n", text);
+        Assert.Equal(before, File.ReadAllBytes(result.BackupPath));
+        Assert.True(File.Exists(result.AuditPath));
+        File.Copy(result.BackupPath, Config, overwrite: true);
+        Assert.Equal(before, File.ReadAllBytes(Config));
+    }
+
+    [Fact]
+    public void ExternalChangeConflictAndRunningWriteAreBlocked()
+    {
+        var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
+        var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["power_enable"] = "false" });
+        Assert.False(_service.ValidateChanges(proposal, true).Valid);
+        File.AppendAllText(Config, "external: true\r\n");
+        Assert.Throws<IOException>(() => _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false));
+    }
+
+    [Fact]
+    public void InvalidValueAndVersionAreBlocked()
+    {
+        var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
+        var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["reward_enable"] = "maybe" });
+        Assert.False(_service.ValidateChanges(proposal, false).Valid);
+        Assert.Throws<ArgumentException>(() => _service.ProposeChanges(snapshot,
+            new Dictionary<string, string> { ["unknown_future"] = "false" }));
+        File.WriteAllText(Path.Combine(_root, "assets", "config", "version.txt"), "v2026.11.01");
+        Assert.Throws<InvalidOperationException>(() => _service.ReadConfiguration(GameId.StarRail, _root));
+    }
+
+    [Theory]
+    [InlineData("开始日常任务\n当前累计分数：500/500\n实训分数已达标\n每日实训已完成", true)]
+    [InlineData("开始日常任务\n当前累计分数：400/500", false)]
+    [InlineData("开始日常任务\n实训分数已达标\n每日实训已完成\n任务无法完成: 拍照", false)]
+    [InlineData("实训分数已达标", false)]
+    public void DailyCompletionRequiresTaskEvidenceWithoutConflict(string output, bool expected)
+        => Assert.Equal(expected, March7thDailyEvidence.ProvesComplete(output));
+
+    [Fact]
+    public void ExitZeroWithoutDailyEvidenceRemainsIndeterminate()
+    {
+        const string id = "20261106-120000-abcd";
+        var final = "{\"schema\":1,\"run_id\":\"" + id +
+            "\",\"task\":\"daily\",\"status\":\"success\",\"lock\":\"acquired\",\"exit_code\":0,\"ended_at\":\"2026-11-06T12:01:00Z\"}";
+        var unknown = March7thTaskContract.ParseFinalRecord("开始日常任务\n当前累计分数：400/500\n" + final,
+            "daily", 0, id);
+        Assert.Equal(VIvian.Core.Execution.RunOutcome.Indeterminate, unknown.Outcome);
+        var complete = March7thTaskContract.ParseFinalRecord("开始日常任务\n当前累计分数：500/500\n每日实训已完成\n" + final,
+            "daily", 0, id);
+        Assert.True(March7thDailyEvidence.ProvesComplete("开始日常任务\n当前累计分数：500/500\n每日实训已完成\n" + final), complete.Detail);
+        Assert.Equal(VIvian.Core.Execution.RunOutcome.Success, complete.Outcome);
+    }
+}

@@ -87,6 +87,8 @@ public static partial class March7thTaskContract
                 // Same exit-code-derived `success`, but this run's own summary proves the screens were not switched.
                 ("success", 0) when task == "screen_test" && March7thScreenTestEvidence.ProvesFailure(output) is { } failure
                     => new(id, RunOutcome.Failed, failure.Describe()),
+                ("success", 0) when task == "daily" && March7thDailyEvidence.ProvesComplete(output)
+                    => new(id, RunOutcome.Success, "本次运行日志出现实训达标与奖励领取后的完成通知。"),
                 ("success", 0) => new(id, RunOutcome.Indeterminate, "上游 success 由退出码 0 推导；缺少独立任务完成证据。"),
                 ("failed", _) => new(id, RunOutcome.Failed, "上游运行记录报告失败。"),
                 ("blocked", _) => new(id, RunOutcome.Failed, "上游运行记录报告任务未执行。"),

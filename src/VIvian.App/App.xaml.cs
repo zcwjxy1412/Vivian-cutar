@@ -33,11 +33,14 @@ public partial class App : Application
             // Smoke tests use a disposable directory, never the user's profile.
             var screenTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-ScreenTest.marker"));
             var manualTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-F1-ManualTest.marker"));
+            var m5Daily = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M5-DailyTest.marker"));
             // Each real-execution build must carry its own marker (and only its own): its data stays isolated.
             if (RealExecutionPolicy.IsOneShotScreenTest && (!screenTest || manualTest))
                 throw new InvalidOperationException("单次测试包缺少隔离数据标记，拒绝启动。");
-            if (RealExecutionPolicy.IsReusableManualTest && (!manualTest || screenTest))
+            if (RealExecutionPolicy.IsReusableManualTest && !RealExecutionPolicy.IsM5DailyTest && (!manualTest || screenTest || m5Daily))
                 throw new InvalidOperationException("手动实测版缺少隔离数据标记，拒绝启动。");
+            if (RealExecutionPolicy.IsM5DailyTest && (!m5Daily || manualTest || screenTest))
+                throw new InvalidOperationException("M5 每日实训包缺少独立标记，拒绝启动。");
             if (!RealExecutionPolicy.BuildPermitsRealExecution && manualTest)
                 throw new InvalidOperationException("普通构建不能使用手动实测版的数据目录。");
             var threeEnginePreview = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-ThreeEngine-Preview.marker"));
@@ -48,7 +51,8 @@ public partial class App : Application
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    RealExecutionPolicy.IsReusableManualTest ? "VIvian-M4-ManualTest"
+                    RealExecutionPolicy.IsM5DailyTest ? "VIvian-M5-DailyTest"
+                    : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M4-ManualTest"
                     : screenTest ? "VIvian-M4A-ScreenTest-R3" : threeEnginePreview ? "VIvian-M4-ThreeEngine-Preview"
                     : preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
@@ -121,7 +125,7 @@ public partial class App : Application
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
                         if (RealExecutionPolicy.BuildPermitsRealExecution &&
-                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != "screen_test" || vm.CanStartMarch7th))
+                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != (RealExecutionPolicy.IsM5DailyTest ? "daily" : "screen_test") || vm.CanStartMarch7th))
                             throw new InvalidOperationException("Real-test admission is not constrained");
                         if (RealExecutionPolicy.IsReusableManualTest && !vm.ManualTestStateText.Contains("未通过安装核验", StringComparison.Ordinal))
                             throw new InvalidOperationException("Manual-test page does not report the unverified installation");
@@ -146,7 +150,9 @@ public partial class App : Application
             window.Show();
             // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
             Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
-                RealExecutionPolicy.IsReusableManualTest
+                RealExecutionPolicy.IsM5DailyTest
+                    ? "M5 daily manual-test build: per-run consent, pinned identity and cleanup admission."
+                    : RealExecutionPolicy.IsReusableManualTest
                     ? "Manual-test build: March7thAssistant screen_test only, each run confirmed by the user; no scheduled or unattended real runs."
                     : RealExecutionPolicy.BuildPermitsRealExecution
                     ? "One-attempt screen_test package: a single user-confirmed March7thAssistant screen_test."

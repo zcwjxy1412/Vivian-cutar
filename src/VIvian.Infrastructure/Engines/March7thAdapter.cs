@@ -47,7 +47,8 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
         var group = await supervisor.StartAsync(new ProcessLaunchSpec(install.CliPath,
             March7thTaskContract.StartArguments(task), installDirectory), context.RunId, ct).ConfigureAwait(false);
         // The task capability is single-use; exact-RunId control commands are separately Job-supervised.
-        return new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task);
+        return new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task,
+            March7thDailyTemplates.Read(Path.Combine(installDirectory, "config.yaml")));
     }
 }
 
@@ -58,6 +59,7 @@ internal sealed class March7thRun : IEngineRun
     private readonly string _cli;
     private readonly string _directory;
     private readonly string _task;
+    private readonly March7thDailyTemplates _templates;
     private readonly Channel<RunEvent> _events = Channel.CreateUnbounded<RunEvent>();
     private readonly List<string> _output = [];
     private readonly Task<RunVerdict> _verdict;
@@ -66,9 +68,10 @@ internal sealed class March7thRun : IEngineRun
     private bool _outputTruncated;
 
     public March7thRun(Guid runId, ISupervisedProcessGroup group, IProcessSupervisor supervisor,
-        string cli, string directory, string task)
+        string cli, string directory, string task, March7thDailyTemplates? templates = null)
     {
         RunId = runId; _group = group; _supervisor = supervisor; _cli = cli; _directory = directory; _task = task;
+        _templates = templates ?? March7thDailyTemplates.Default;
         _verdict = ObserveAsync();
     }
 
@@ -109,7 +112,7 @@ internal sealed class March7thRun : IEngineRun
             if (id is null) return Unknown("上游运行编号缺失或冲突。");
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
-            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id);
+            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates);
             // The verdict's reason is part of the run's own record (UI log, database events, diagnostic export).
             _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow,
                 parsed.Outcome == RunOutcome.Success ? RunEventKind.Evidence : RunEventKind.Warning,

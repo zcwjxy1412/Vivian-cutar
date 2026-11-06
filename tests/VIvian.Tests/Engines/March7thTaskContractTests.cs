@@ -24,7 +24,7 @@ public class March7thTaskContractTests
     [Fact]
     public void CommandsUseWhitelistedTasksAndExactRunId()
     {
-        Assert.Equal(["daily", "--after-finish", "None", "--json"], March7thTaskContract.StartArguments("daily"));
+        Assert.Equal(["daily", "--after-finish", "None", "--non-interactive", "--json"], March7thTaskContract.StartArguments("daily"));
         Assert.Equal(["--control", Id, "stop", "--json"], March7thTaskContract.StopArguments(Id));
         Assert.Throws<ArgumentException>(() => March7thTaskContract.StartArguments("--force"));
         Assert.Throws<ArgumentException>(() => March7thTaskContract.StopArguments("current"));

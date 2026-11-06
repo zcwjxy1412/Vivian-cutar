@@ -78,7 +78,12 @@ public sealed class M5ConfigurationTests : IDisposable
     [Theory]
     [InlineData("开始日常任务\n当前累计分数：500/500\n实训分数已达标\n每日实训已完成", true)]
     [InlineData("开始日常任务\n当前累计分数：400/500", false)]
-    [InlineData("开始日常任务\n实训分数已达标\n每日实训已完成\n任务无法完成: 拍照", false)]
+    // Upstream logs "任务无法完成" for sub-tasks it does not implement and keeps going; a later verified 500 counts.
+    [InlineData("开始日常任务\n任务无法完成: 累计消耗120点开拓力\n实训分数已达标\n2026-11-06 12:00:00,000 | INFO | 每日实训已完成", true)]
+    [InlineData("开始日常任务\n每日实训已完成\n每日实训未完成", false)]
+    [InlineData("每日实训已完成\n开始日常任务", false)]
+    [InlineData("开始日常任务\n每日实训已完成\n发生错误 xyz", false)]
+    [InlineData("开始日常任务\n日志提到每日实训已完成之类的说明文字", false)]
     [InlineData("实训分数已达标", false)]
     public void DailyCompletionRequiresTaskEvidenceWithoutConflict(string output, bool expected)
         => Assert.Equal(expected, March7thDailyEvidence.ProvesComplete(output));

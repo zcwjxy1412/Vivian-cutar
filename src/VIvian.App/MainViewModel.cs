@@ -107,7 +107,7 @@ public sealed class MainViewModel : ObservableObject
     public EngineTaskDefinition? March7thTask
     {
         get => _march7thTask;
-        set { Set(ref _march7thTask, value); March7thConfirmedThisRun = false; }
+        set { Set(ref _march7thTask, value); March7thConfirmedThisRun = false; AllowTemporaryConfigurationThisRun = false; RefreshTemporaryConfigurationNeeds(); }
     }
     private bool _march7thConfirmedThisRun;
     private string? _confirmedInstallPath;
@@ -126,6 +126,62 @@ public sealed class MainViewModel : ObservableObject
             RaiseAdmission();
         }
     }
+    private bool _allowTemporaryConfiguration;
+    /// <summary>Per-run consent to the listed temporary upstream setting changes; never carried over.</summary>
+    public bool AllowTemporaryConfigurationThisRun
+    {
+        get => _allowTemporaryConfiguration;
+        set => Set(ref _allowTemporaryConfiguration, value);
+    }
+    private string _temporaryConfigurationText = "";
+    public string TemporaryConfigurationText
+    {
+        get => _temporaryConfigurationText;
+        private set { Set(ref _temporaryConfigurationText, value); Raise(nameof(TemporaryConfigurationVisibility)); }
+    }
+    public Visibility TemporaryConfigurationVisibility =>
+        RealExecutionPolicy.IsM5DailyTest && TemporaryConfigurationText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    private string _pendingRestoreText = "";
+    public string PendingRestoreText
+    {
+        get => _pendingRestoreText;
+        private set { Set(ref _pendingRestoreText, value); Raise(nameof(PendingRestoreVisibility)); }
+    }
+    public Visibility PendingRestoreVisibility => PendingRestoreText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public AsyncCommand RestoreConfigurationCommand { get; }
+
+    /// <summary>Shows which settings the selected task would temporarily change. Read-only; never writes.</summary>
+    private void RefreshTemporaryConfigurationNeeds()
+    {
+        if (!RealExecutionPolicy.IsM5DailyTest || March7thTask is null) { TemporaryConfigurationText = ""; return; }
+        var path = Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
+        if (string.IsNullOrWhiteSpace(path)) { TemporaryConfigurationText = ""; return; }
+        try
+        {
+            var snapshot = _control.ReadConfiguration(GameId.StarRail, path);
+            var changes = TemporaryConfigurationManager.Plan(snapshot, March7thTaskRequirements.For(March7thTask.Id));
+            TemporaryConfigurationText = changes.Count == 0 ? "" :
+                "允许本次临时修改：" + TemporaryConfigurationManager.Describe(changes, snapshot) + "（结束后自动恢复并核对）";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        { TemporaryConfigurationText = ""; }
+    }
+
+    private void ShowRestore(RestoreResult result)
+    {
+        PendingRestoreText = result.State == RestoreState.Blocked
+            ? "临时配置尚未恢复：" + result.Detail + " 关闭星铁助手后点击“恢复临时配置”。" : "";
+        Log.Information("Temporary configuration restore: {State}", result.State);
+    }
+
+    private async Task RestoreConfigurationAsync()
+    {
+        var result = await Task.Run(_control.RestorePendingConfiguration);
+        ShowRestore(result);
+        Status = result.Detail;
+        RefreshTemporaryConfigurationNeeds();
+    }
+
     private bool _oneShotConsumed;
     private string OneShotMarker => Path.Combine(_paths.DataDirectory, "screen_test.attempted");
     public string March7thExecutionBlock => RealExecutionPolicy.IsM5DailyTest
@@ -140,7 +196,7 @@ public sealed class MainViewModel : ObservableObject
         ? "无害 UAC 边界已核对；上游 Worker 的停止结果需以本次实测为准。"
         : "跨权限安全停止：待实机验证；当前不能运行真实任务。";
     public string March7thConsentNote => RealExecutionPolicy.IsM5DailyTest
-        ? "每日实训会操作真实游戏与账号。请先确认登录状态、原软件配置与本次任务，再由本人处理 UAC。"
+        ? "每日实训会操作真实游戏与账号。请先登录游戏并关闭星铁助手窗口，再由本人处理 UAC。VIvian 以非交互模式运行，无需修改“成功后暂停/失败后退出”。"
         : RealExecutionPolicy.IsReusableManualTest
         ? "开始前请先手动打开星铁并确认账号已登录（登录过期会导致测试失败）。UAC 弹窗由你本人核对 m7a.exe 路径后处理；VIvian 不会自动提权。"
         : RealExecutionPolicy.BuildPermitsRealExecution
@@ -199,7 +255,7 @@ public sealed class MainViewModel : ObservableObject
         IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
-        _control = new UnifiedTaskControl(queue, runs, statusSupervisor);
+        _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
             () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"));
@@ -225,10 +281,14 @@ public sealed class MainViewModel : ObservableObject
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
+        RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         Configuration.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ConfigurationViewModel.Status) && _sessionPath is not null)
-                _ = WriteDiagnosticSessionSafelyAsync();
+            if (e.PropertyName == nameof(ConfigurationViewModel.Status))
+            {
+                RefreshTemporaryConfigurationNeeds();
+                if (_sessionPath is not null) _ = WriteDiagnosticSessionSafelyAsync();
+            }
         };
         SelectedEngine = Engines[0];
     }
@@ -260,6 +320,8 @@ public sealed class MainViewModel : ObservableObject
                 ReleaseArchivePath = archive;
                 await VerifyReleaseAsync();
             }
+            // An interrupted earlier run may have left a temporary change: restore it before anything else.
+            if (_control.HasPendingConfigurationRestore) await RestoreConfigurationAsync();
             if (!string.IsNullOrWhiteSpace(Engines.Single(e => e.Id == GameId.StarRail).InstallPath))
                 try { await Configuration.ReadAsync(); }
                 catch (Exception ex) { Status = "已发现星铁，但配置读取失败：" + UserFacingError.Describe(ex); }
@@ -381,14 +443,16 @@ public sealed class MainViewModel : ObservableObject
         { Status = "安装身份未核对，或有上次运行尚未确认清理；任务未启动。"; return; }
         if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
         if (!admission.Allowed) { Status = admission.Text; return; }
+        var allowTemporary = AllowTemporaryConfigurationThisRun;
         if (RealExecutionPolicy.IsM5DailyTest)
         {
-            ConfigurationSnapshot config;
-            try { config = _control.ReadConfiguration(GameId.StarRail, card.InstallPath); }
+            if (_control.HasPendingConfigurationRestore)
+            { Status = "上一次运行的临时配置尚未恢复；请先点击“恢复临时配置”。任务未启动。"; return; }
+            IReadOnlyList<TemporaryChange> changes;
+            try { changes = _control.RequiredTemporaryChanges(card.InstallPath, March7thTask.Id); }
             catch (Exception ex) { Status = "上游配置检查失败，任务未启动：" + ex.Message; return; }
-            if (config.Values.Single(v => v.Schema.Path == "pause_after_success").Value != "false" ||
-                config.Values.Single(v => v.Schema.Path == "exit_after_failure").Value != "true")
-            { Status = "请在原软件中关闭“成功后暂停”并开启“失败后退出”，重新读取配置后再执行。"; return; }
+            if (changes.Count > 0 && !allowTemporary)
+            { RefreshTemporaryConfigurationNeeds(); Status = "本任务需要临时修改上游设置：请勾选“允许本次临时修改”后再开始。"; return; }
         }
         await PersistInstallPathAsync(card);
         if (RealExecutionPolicy.IsReusableManualTest)
@@ -419,13 +483,18 @@ public sealed class MainViewModel : ObservableObject
             var result = await _control.ExecuteTaskPlan(plan, new RealTaskAuthorization(card.InstallPath,
                 _march7thEvidence, () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath
                     && _confirmedArchivePath == ReleaseArchivePath && _confirmedTask == March7thTask?.Id,
-                card.Report?.Compatibility == CompatibilityClass.IdentityVerified));
-            Status = result is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
+                card.Report?.Compatibility == CompatibilityClass.IdentityVerified, allowTemporary));
+            Status = result.Queue is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
+            if (result.Restore is not null) { ShowRestore(result.Restore); Status += " " + result.Restore.Detail; }
         }
         finally
         {
             // Never carried over: the next attempt needs a new, explicit confirmation.
             March7thConfirmedThisRun = false;
+            AllowTemporaryConfigurationThisRun = false;
+            if (_control.HasPendingConfigurationRestore && PendingRestoreText.Length == 0)
+                PendingRestoreText = "临时配置尚未恢复；关闭星铁助手后点击“恢复临时配置”。";
+            RefreshTemporaryConfigurationNeeds();
             try { await RefreshLastRunsAsync(); } catch (Exception ex) { Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
             await SaveFeedbackAsync();
             RaiseAdmission();

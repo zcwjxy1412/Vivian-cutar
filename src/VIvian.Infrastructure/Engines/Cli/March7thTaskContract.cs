@@ -31,7 +31,9 @@ public static partial class March7thTaskContract
     {
         if (!Tasks.Contains(task)) throw new ArgumentException("任务不在已核对的白名单内。", nameof(task));
         // 禁止从上游配置继承关机、睡眠或脚本等完成后动作；末尾 JSON 是运行记录。
-        return [task, "--after-finish", "None", "--json"];
+        // --non-interactive（main.py / utils/console.py should_skip_pause）：任何情况下都不等待按回车，
+        // 因此 pause_after_success / exit_after_failure 不再影响本次运行，且无需改动用户配置。
+        return [task, "--after-finish", "None", "--non-interactive", "--json"];
     }
 
     public static IReadOnlyList<string> StopArguments(string upstreamRunId)
@@ -41,7 +43,8 @@ public static partial class March7thTaskContract
         return ["--control", upstreamRunId, "stop", "--json"];
     }
 
-    public static March7thTaskResult ParseFinalRecord(string output, string task, int processExitCode, string expectedUpstreamRunId)
+    public static March7thTaskResult ParseFinalRecord(string output, string task, int processExitCode, string expectedUpstreamRunId,
+        March7thDailyTemplates? dailyTemplates = null)
     {
         if (!Tasks.Contains(task)) throw new ArgumentException("任务不在已核对的白名单内。", nameof(task));
         if (!RunIdPattern().IsMatch(expectedUpstreamRunId)) throw new ArgumentException("缺少本次启动时捕获的上游运行编号。", nameof(expectedUpstreamRunId));
@@ -87,8 +90,13 @@ public static partial class March7thTaskContract
                 // Same exit-code-derived `success`, but this run's own summary proves the screens were not switched.
                 ("success", 0) when task == "screen_test" && March7thScreenTestEvidence.ProvesFailure(output) is { } failure
                     => new(id, RunOutcome.Failed, failure.Describe()),
-                ("success", 0) when task == "daily" && March7thDailyEvidence.ProvesComplete(output)
-                    => new(id, RunOutcome.Success, "本次运行日志出现实训达标与奖励领取后的完成通知。"),
+                ("success", 0) when task == "daily" && March7thDailyEvidence.ProvesComplete(output, dailyTemplates ?? March7thDailyTemplates.Default)
+                    => new(id, RunOutcome.Success, March7thDailyEvidence.Describe(output)),
+                // Exit 0 but this run's own quest check found the 500-point image missing.
+                ("success", 0) when task == "daily" && March7thDailyEvidence.ProvesNotComplete(output, dailyTemplates ?? March7thDailyTemplates.Default)
+                    => new(id, RunOutcome.Failed, "上游本次核对每日实训未达 500 分（每日实训未完成）。"),
+                ("success", 0) when task == "daily"
+                    => new(id, RunOutcome.Indeterminate, "退出码为 0，但本次没有新的领奖完成通知：可能今日已领过、领取奖励被关闭或未进入日常任务。"),
                 ("success", 0) => new(id, RunOutcome.Indeterminate, "上游 success 由退出码 0 推导；缺少独立任务完成证据。"),
                 ("failed", _) => new(id, RunOutcome.Failed, "上游运行记录报告失败。"),
                 ("blocked", _) => new(id, RunOutcome.Failed, "上游运行记录报告任务未执行。"),

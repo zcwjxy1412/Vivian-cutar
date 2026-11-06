@@ -59,8 +59,8 @@ public static class EngineCatalog
         [
             new("main", "完整运行", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
             new("daily", "每日实训", Pending, B, M7Cli, "固定版本 CLI 有此入口；实际完成与跨 UAC 清理待实测。", TaskFrequency.Daily,
-                "m7a.exe daily --after-finish None --json", "本次 RunId 日志须有实训达标与领取奖励后的完成通知", [],
-                ["固定版本与安装身份核验", "上游配置可读取", "任务前后完成证据可核对"], ["daily_enable", "daily_tasks", "reward_enable"]),
+                "m7a.exe daily --after-finish None --non-interactive --json", "本次 RunId 日志须有 500 分图像核验后的领奖完成通知", [],
+                ["固定版本与安装身份核验", "上游配置可读取", "领取奖励（reward_enable）须开启，可经本次授权临时开启并自动恢复", "任务前后完成证据可核对"], ["reward_enable", "daily_tasks"]),
             new("power", "清体力", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。", TaskFrequency.Daily),
             new("routine", "日常", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。"),
             new("currencywars", "货币战争", Pending, B, M7Research, "候选任务标识，未在真实发行包上实测。", TaskFrequency.Weekly),
@@ -88,13 +88,13 @@ public static class EngineCatalog
     {
         Parameters =
         [
-            new("daily_enable", "启用每日实训", "完整运行和日常任务中的每日实训开关；单独执行 daily 的作用待实测。", "boolean", "true/false", "true", "日常与完整运行", "无", "每日实训", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:177"),
+            new("daily_enable", "启用每日实训", "完整运行和日常任务中的每日实训开关；单独执行 daily 不受此开关影响（上游 main.py sub_tasks）。", "boolean", "true/false", "true", "日常与完整运行", "无", "每日实训", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:177"),
             new("power_enable", "启用清体力", "完整运行和日常任务中的清体力总开关；单独执行 power 不受影响。", "boolean", "true/false", "true", "日常与完整运行", "无", "清体力、历战余响", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:94"),
-            new("reward_enable", "启用领取奖励", "奖励领取总开关。", "boolean", "true/false", "true", "领取奖励", "无", "每日实训奖励及其他奖励", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:166"),
+            new("reward_enable", "启用领取奖励", "奖励领取总开关；关闭时 daily 无法领取实训奖励，也就无法证明完成（上游 tasks/reward）。", "boolean", "true/false", "true", "领取奖励", "无", "每日实训奖励及其他奖励", "config.yaml", ParameterAccess.VerifiedReadWrite, "v2026.10.31 assets/config/config.example.yaml:166"),
             new("daily_tasks", "每日实训任务明细", "由原软件管理的任务列表；当前只读。", "list", "上游定义", "[]", "每日实训", "上游任务结构", "每日实训", "config.yaml", ParameterAccess.UpstreamManaged, "v2026.10.31 assets/config/config.example.yaml:190"),
             new("power_plan", "体力计划", "由原软件管理的副本计划；当前只读。", "list", "上游定义", "[]", "清体力", "副本类型和次数", "清体力", "config.yaml", ParameterAccess.UpstreamManaged, "v2026.10.31 assets/config/config.example.yaml:95"),
-            new("pause_after_success", "成功后暂停", "daily 实测前须在原软件中关闭，以便程序退出并形成终态。", "boolean", "true/false", "true", "进程退出", "daily 实测需为 false", "真实任务", "config.yaml", ParameterAccess.VerifiedReadOnly, "v2026.10.31 assets/config/config.example.yaml:28"),
-            new("exit_after_failure", "失败后退出", "daily 实测前须在原软件中开启，以免错误时无限等待。", "boolean", "true/false", "false", "进程退出", "daily 实测需为 true", "真实任务", "config.yaml", ParameterAccess.VerifiedReadOnly, "v2026.10.31 assets/config/config.example.yaml:31"),
+            new("pause_after_success", "成功后暂停", "仅影响交互式命令行；VIvian 以 --non-interactive 运行（上游 utils/console.py），此值不影响 VIvian 的任务。", "boolean", "true/false", "true", "命令行窗口", "无", "仅原软件命令行", "config.yaml", ParameterAccess.VerifiedReadOnly, "v2026.10.31 assets/config/config.example.yaml:28"),
+            new("exit_after_failure", "失败后退出", "仅影响交互式命令行；VIvian 以 --non-interactive 运行（上游 utils/console.py），此值不影响 VIvian 的任务。", "boolean", "true/false", "false", "命令行窗口", "无", "仅原软件命令行", "config.yaml", ParameterAccess.VerifiedReadOnly, "v2026.10.31 assets/config/config.example.yaml:31"),
         ]
     };
 

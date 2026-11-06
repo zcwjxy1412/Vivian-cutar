@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $target = 'artifacts/m4-uac-boundary-probe-standard'
 dotnet publish tools/VIvian.UacBoundaryProbe/VIvian.UacBoundaryProbe.csproj -c Release -r win-x64 --self-contained true -o $target

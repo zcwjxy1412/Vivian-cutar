@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $target = 'artifacts/m4d-screen-test-r3'
 if (Test-Path $target) { throw '单次测试目录已存在，请先检查，不自动覆盖。' }

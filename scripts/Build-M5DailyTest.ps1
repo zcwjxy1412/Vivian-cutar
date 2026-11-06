@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $target = 'artifacts/m5-daily-test'
 $name = 'VIvian-M5-DailyTest-win-x64'

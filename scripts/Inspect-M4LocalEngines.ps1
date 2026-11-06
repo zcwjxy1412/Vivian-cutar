@@ -1,4 +1,4 @@
-param([string]$OutputDirectory = 'E:\auto agent game\M4C-batch-check')
+﻿param([string]$OutputDirectory = 'E:\auto agent game\M4C-batch-check')
 $ErrorActionPreference = 'Stop'
 $watch = [Diagnostics.Stopwatch]::StartNew()
 $names = 'BetterGI.exe','BetterGI_v0.66.0.7z','OneDragon-RuntimeLauncher.exe','WithRuntime-Full.zip','March7thAssistant_full-v2026.10.31.zip','m7a.exe'

@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $target = 'artifacts/m4-three-engine-preview'
 $archive = 'artifacts/VIvian-M4-ThreeEngine-Preview-win-x64.zip'

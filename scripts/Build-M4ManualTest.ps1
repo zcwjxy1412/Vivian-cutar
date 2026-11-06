@@ -1,4 +1,4 @@
-# M4-F1: reusable manual real-test build (March7thAssistant screen_test only, each run confirmed by the user).
+﻿# M4-F1: reusable manual real-test build (March7thAssistant screen_test only, each run confirmed by the user).
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $target = 'artifacts/m4f1-manual-test'

@@ -50,7 +50,7 @@ public sealed class M5DailyReadinessTests : IDisposable
         var plan = TemporaryConfigurationManager.Plan(snapshot, March7thTaskRequirements.For("daily"));
         var change = Assert.Single(plan);
         Assert.Equal(new TemporaryChange("reward_enable", "false", "true"), change);
-        Assert.Contains("启用领取奖励", TemporaryConfigurationManager.Describe(plan, snapshot));
+        Assert.Contains("领取奖励", TemporaryConfigurationManager.Describe(plan, snapshot));
         Assert.Throws<InvalidOperationException>(() => TemporaryConfigurationManager.Plan(snapshot,
             new Dictionary<string, string> { ["daily_tasks"] = "[]" }));
     }

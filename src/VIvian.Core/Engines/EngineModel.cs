@@ -70,7 +70,7 @@ public enum ParameterAccess { VerifiedReadWrite, VerifiedReadOnly, UpstreamManag
 public sealed record EngineParameterDefinition(
     string Path, string Title, string Description, string DataType, string AllowedValues,
     string DefaultValue, string Scope, string Dependencies, string TaskImpact,
-    string ConfigSource, ParameterAccess Access, string Source);
+    string ConfigSource, ParameterAccess Access, string Source, string Group = "常规");
 
 public enum PrivilegeRequirement
 {

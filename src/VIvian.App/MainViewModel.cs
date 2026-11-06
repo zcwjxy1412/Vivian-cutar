@@ -8,6 +8,8 @@ using VIvian.Core.Execution;
 using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.Cli;
+using VIvian.Infrastructure.Engines.BetterGi;
+using VIvian.Infrastructure.Engines.OneDragon;
 namespace VIvian.App;
 
 /// <summary>Where VIvian keeps its own files. Nothing outside these folders is written by the application.</summary>
@@ -194,7 +196,12 @@ public sealed class MainViewModel : ObservableObject
         var path = card.InstallPath;
         var evidence = card.Id == GameId.StarRail ? _march7thEvidence : null;
         // Off the UI thread: a network path or hashing a large file must not freeze the window.
-        var report = await Task.Run(() => EngineReadinessInspector.InspectAsync(card.Id, path, evidence, TimeProvider.System));
+        var report = await Task.Run(() => card.Id switch
+        {
+            GameId.Genshin => BetterGiInstallationInspector.InspectAsync(path),
+            GameId.ZenlessZoneZero => OneDragonInstallationInspector.InspectAsync(path),
+            _ => EngineReadinessInspector.InspectAsync(card.Id, path, evidence, TimeProvider.System),
+        });
         card.Show(report);
         if (card.Id == GameId.StarRail) Raise(nameof(CanStartMarch7th));
         Log.Information("Engine readiness {Game}: {Compatibility} ({Error})", card.Id, report.Compatibility, report.PrimaryError);

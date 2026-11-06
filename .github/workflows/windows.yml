@@ -39,6 +39,21 @@ jobs:
             artifacts/VIvian-M4A-preview-win-x64.zip
             artifacts/VIvian-M4A-preview-win-x64.zip.sha256
           if-no-files-found: error
+      - name: Build isolated three-engine integration preview
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-M4ThreeEnginePreview.ps1
+      - name: Upload three-engine integration preview
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M4-ThreeEngine-Preview-win-x64
+          path: |
+            artifacts/VIvian-M4-ThreeEngine-Preview-win-x64.zip
+            artifacts/VIvian-M4-ThreeEngine-Preview-win-x64.zip.sha256
+          if-no-files-found: error
       - name: Build approved one-attempt March7th screen test package
         if: success()
         shell: pwsh

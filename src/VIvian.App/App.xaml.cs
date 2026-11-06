@@ -34,12 +34,16 @@ public partial class App : Application
             var screenTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-ScreenTest.marker"));
             if (RealExecutionPolicy.BuildPermitsRealExecution && !screenTest)
                 throw new InvalidOperationException("单次测试包缺少隔离数据标记，拒绝启动。");
+            var threeEnginePreview = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-ThreeEngine-Preview.marker"));
+            if (threeEnginePreview && RealExecutionPolicy.BuildPermitsRealExecution)
+                throw new InvalidOperationException("三引擎预览包不允许真实执行许可。");
             var preview = e.Args.Contains("--m4-preview")
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    screenTest ? "VIvian-M4A-ScreenTest-R2" : preview ? "VIvian-M4A-Preview" : "VIvian");
+                    screenTest ? "VIvian-M4A-ScreenTest-R2" : threeEnginePreview ? "VIvian-M4-ThreeEngine-Preview"
+                    : preview ? "VIvian-M4A-Preview" : "VIvian");
             Directory.CreateDirectory(root);
             // One instance per data directory, decided before the database or logs are touched.
             _instance = SingleInstanceGuard.Acquire(root);
@@ -204,6 +208,8 @@ public partial class App : Application
         var fixtures = Path.Combine(root, "engine-fixtures");
         var bgi = Directory.CreateDirectory(Path.Combine(fixtures, "BetterGI")).FullName;
         await File.WriteAllTextAsync(Path.Combine(bgi, "BetterGI.exe"), "harmless fixture, never executed");
+        foreach (var folder in VIvian.Infrastructure.Engines.BetterGi.BetterGiContract.RequiredFolders)
+            Directory.CreateDirectory(Path.Combine(bgi, folder));
         var m7a = Directory.CreateDirectory(Path.Combine(fixtures, "March7thAssistant")).FullName;
         await File.WriteAllTextAsync(Path.Combine(m7a, "m7a.exe"), "harmless fixture, never executed");
         Directory.CreateDirectory(Path.Combine(m7a, "assets", "config"));

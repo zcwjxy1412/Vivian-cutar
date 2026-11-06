@@ -212,6 +212,56 @@ public sealed class DiagnosticsExportTests : IDisposable
     }
 
     [Fact]
+    public async Task RealRunDetailsAreExportedRedactedWithVersionAndUpstreamRunId()
+    {
+        var runId = Guid.NewGuid();
+        var at = new DateTimeOffset(2026, 11, 5, 23, 47, 1, TimeSpan.FromHours(-5));
+        var run = new RunRecord(runId, Guid.NewGuid(), GameId.StarRail, "m7a-v2026.10.31-task-1", false, RunPhase.Finished,
+            RunOutcome.Failed, CleanupState.Confirmed, ReasonCodes.ReportedFailure, at, at.AddMinutes(11), null, null);
+        IReadOnlyList<RunEvent> events =
+        [
+            new(runId, at, RunEventKind.Output, @"[m7a] 已启动 screen_test，运行编号 20261105-234701-c953"),
+            new(runId, at.AddMinutes(6), RunEventKind.Output, @"ERROR | 尝试启动游戏时发生错误：账号登录过期 C:\Users\胡桃\AppData password=hunter2"),
+            new(runId, at.AddMinutes(11), RunEventKind.Warning, "[VIvian 判定] 界面测试失败：成功 0 个，失败 1 个，共 39 个界面。"),
+        ];
+        var input = new DiagnosticBundleInput("0.4.0-dev", _dir, [], [run], [], null, true, DateTimeOffset.UtcNow,
+            "abc1234def56", "M4-F1 手动实测版", [new RunDiagnostic(run, events)]);
+        var result = await DiagnosticBundle.CreateAsync(input, Path.Combine(_dir, "对应日志"), new Redactor(@"C:\Users\胡桃", "胡桃", "DESKTOP-X"));
+
+        Assert.True(result.Success, result.Detail);
+        using var zip = ZipFile.OpenRead(result.Path!);
+        string Read(string name) { using var r = new StreamReader(zip.GetEntry(name)!.Open()); return r.ReadToEnd(); }
+        Assert.Contains("abc1234def56", Read("manifest.json"));
+        Assert.Contains("M4-F1 手动实测版", Read("README.txt"));
+        var summary = Read("real-runs.json");
+        Assert.Contains(runId.ToString(), summary);
+        Assert.Contains("20261105-234701-c953", summary);
+        Assert.Contains("\"Failed\"", summary);
+        Assert.Contains("\"Confirmed\"", summary);
+        var log = Read(zip.Entries.Single(e => e.FullName.StartsWith("runs/", StringComparison.Ordinal)).FullName);
+        Assert.Contains("账号登录过期", log);
+        Assert.Contains("[VIvian 判定]", log);
+        foreach (var entry in zip.Entries)
+        {
+            using var reader = new StreamReader(entry.Open());
+            var text = await reader.ReadToEndAsync();
+            Assert.DoesNotContain("胡桃", text);
+            Assert.DoesNotContain("hunter2", text);
+        }
+    }
+
+    [Fact]
+    public async Task ExportIntoAFileInsteadOfAFolderFailsWithoutThrowing()
+    {
+        var blocker = Path.Combine(_dir, "not-a-folder");
+        await File.WriteAllTextAsync(blocker, "x");
+        var input = new DiagnosticBundleInput("x", _dir, [], [], [], null, false, DateTimeOffset.UtcNow);
+        var result = await DiagnosticBundle.CreateAsync(input, blocker, Redactor.ForCurrentUser());
+        Assert.False(result.Success);
+        Assert.Null(result.Path);
+    }
+
+    [Fact]
     public async Task InvalidExportDirectoryIsReported()
     {
         var input = new DiagnosticBundleInput("x", _dir, [], [], [], null, false, DateTimeOffset.UtcNow);

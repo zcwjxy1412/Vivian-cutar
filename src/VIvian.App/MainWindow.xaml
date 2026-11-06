@@ -73,8 +73,12 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 </StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 
-<TabItem Header="星铁实测"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
-<TextBlock Text="March7thAssistant · 单次真实任务" FontSize="24" FontWeight="SemiBold"/>
+<TabItem Header="{Binding RealTestTabHeader}"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+<TextBlock Text="{Binding RealTestTitle}" FontSize="24" FontWeight="SemiBold"/>
+<Border Style="{StaticResource Card}" Margin="0,14,0,0"><StackPanel>
+<TextBlock Text="{Binding ManualTestStateText}" FontSize="18" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="{Binding LastRealResultText}" Foreground="{StaticResource Muted}" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Border>
 <Border Style="{StaticResource Notice}" Margin="0,14,0,12"><StackPanel>
 <TextBlock Text="执行安全闸门" FontWeight="SemiBold" Foreground="#F2CC85"/>
 <TextBlock Text="{Binding March7thExecutionBlock}" Foreground="#E8D9BC" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
@@ -92,7 +96,7 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <ComboBox ItemsSource="{Binding March7thTasks}" SelectedItem="{Binding March7thTask}" DisplayMemberPath="Title" Width="260" HorizontalAlignment="Left" Margin="0,10,0,10" AutomationProperties.Name="星铁真实任务选择"/>
 <CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我了解这会运行真实游戏自动化任务，仅确认本次执行" AutomationProperties.Name="确认本次星铁真实任务"/>
 <WrapPanel Margin="0,12,0,0">
-<Button Content="启动本次星铁任务" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,10,0"/>
+<Button Content="{Binding StartButtonText}" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,10,0"/>
 <Button Content="紧急停止当前任务" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Background="#F08A80"/>
 </WrapPanel>
 <TextBlock Text="{Binding March7thConsentNote}" Foreground="{StaticResource Muted}" Margin="0,10,0,0"/>
@@ -102,7 +106,9 @@ Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth
 <TextBlock Text="{Binding Queue.Current}" Margin="0,8,0,0"/>
 <TextBlock Text="{Binding Queue.Status}" Foreground="{StaticResource Muted}" Margin="0,4,0,8"/>
 <ListBox ItemsSource="{Binding Queue.LogLines}" Height="180" Background="#101A2A" Foreground="#EEF3FB"/>
-<TextBlock Text="执行历史及清理结果详见“调度与监控”。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+<TextBlock Text="执行历史及清理结果详见“调度与监控”。出现问题时：先截图，再点击下面的按钮导出诊断报告。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
+<WrapPanel Margin="0,10,0,0" IsEnabled="{Binding IsIdle}"><Button Content="导出诊断报告" Command="{Binding ExportDiagnosticsCommand}" Margin="0,0,10,0"/></WrapPanel>
+<TextBlock Text="{Binding ExportStatus}" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/>
 </StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 

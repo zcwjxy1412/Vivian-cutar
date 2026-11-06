@@ -75,7 +75,10 @@ public sealed class BetterGiArgumentTests
         Assert.StartsWith("0af68c2", BetterGiContract.PinnedCommit);
         Assert.False(BetterGiContract.LaunchContractVerified);
         Assert.False(BetterGiContract.CompletionSignalsVerified);
+#if !(M4_SCREEN_TEST || M4_MANUAL_TEST)
         Assert.False(RealExecutionPolicy.BuildPermitsRealExecution);
+#endif
+        // Closed in every build, including the M4-F1 manual-test build: only March7th screen_test may run.
         Assert.False(BetterGiAdapter.ExecutionGateOpen);
         Assert.Equal("better-genshin-impact20261105.log", BetterGiContract.LogFileName(new DateOnly(2026, 11, 5)));
     }

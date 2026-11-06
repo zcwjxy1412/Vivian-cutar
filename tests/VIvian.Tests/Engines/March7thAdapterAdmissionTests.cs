@@ -3,7 +3,7 @@ using VIvian.Core.Execution;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Simulation;
 using Xunit;
-#if M4_SCREEN_TEST
+#if M4_SCREEN_TEST || M4_MANUAL_TEST
 using System.Security.Cryptography;
 #endif
 
@@ -11,7 +11,7 @@ namespace VIvian.Tests.Engines;
 
 public class March7thAdapterAdmissionTests
 {
-#if M4_SCREEN_TEST
+#if M4_SCREEN_TEST || M4_MANUAL_TEST
     private sealed class FakeGroup(Guid id, params string[] output) : ISupervisedProcessGroup
     {
         public Guid RunId => id;

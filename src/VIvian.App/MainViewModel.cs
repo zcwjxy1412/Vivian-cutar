@@ -34,7 +34,9 @@ public sealed class MainViewModel : ObservableObject
     private readonly IProcessSupervisor _statusSupervisor;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
-    private string _status = RealExecutionPolicy.BuildPermitsRealExecution
+    private string _status = RealExecutionPolicy.IsReusableManualTest
+        ? "手动实测版：先在“引擎管理”核对星铁助手安装与官方发行包，再到“真实任务测试”逐次确认执行。"
+        : RealExecutionPolicy.BuildPermitsRealExecution
         ? "单次星铁 screen_test 测试包：请先核对官方包与安装路径，再逐项确认本次执行。"
         : "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -43,10 +45,17 @@ public sealed class MainViewModel : ObservableObject
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}）· "
-        + (RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
-    public string ExecutionBanner => RealExecutionPolicy.BuildPermitsRealExecution
+        + (RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
+            : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
+    public string ExecutionBanner => RealExecutionPolicy.IsReusableManualTest
+        ? "手动实测版 · 星铁 screen_test · 每次需本人确认与 UAC · 无定时/无人值守执行"
+        : RealExecutionPolicy.BuildPermitsRealExecution
         ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
+    public string RealTestTabHeader => RealExecutionPolicy.IsReusableManualTest ? "真实任务测试" : "星铁实测";
+    public string RealTestTitle => RealExecutionPolicy.IsReusableManualTest
+        ? "真实任务测试 · 星铁 March7thAssistant screen_test" : "March7thAssistant · 单次真实任务";
+    public string StartButtonText => RealExecutionPolicy.IsReusableManualTest ? "开始本次真实任务测试" : "启动本次星铁任务";
     public ObservableCollection<EngineCard> Engines { get; } =
     [new(GameId.Genshin, "原神", "BetterGI", "01"), new(GameId.StarRail, "崩坏：星穹铁道", "March7thAssistant", "02"), new(GameId.ZenlessZoneZero, "绝区零", "OneDragon", "03")];
     public ObservableCollection<DiagnosticRecord> History { get; } = [];
@@ -94,24 +103,43 @@ public sealed class MainViewModel : ObservableObject
             _confirmedInstallPath = value ? card.InstallPath : null;
             _confirmedArchivePath = value ? ReleaseArchivePath : null;
             _confirmedTask = value ? March7thTask?.Id : null;
-            Raise(nameof(CanStartMarch7th));
+            RaiseAdmission();
         }
     }
     private bool _oneShotConsumed;
     private string OneShotMarker => Path.Combine(_paths.DataDirectory, "screen_test.attempted");
     public string March7thExecutionBlock => !RealExecutionPolicy.BuildPermitsRealExecution
         ? "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。"
+        : RealExecutionPolicy.IsReusableManualTest
+        ? "每次运行都要：核对安装、即时状态检查、上一次运行清理已确认、本人勾选确认。失败不会自动重试。"
         : _oneShotConsumed ? "本包的单次 screen_test 许可已使用；不会自动重试。"
         : "本包仅允许一次 screen_test，需核对固定版本、状态与本次确认；UAC 由你亲自处理。";
     public string March7thStopStatus => RealExecutionPolicy.BuildPermitsRealExecution
         ? "无害 UAC 边界已核对；上游 Worker 的停止结果需以本次实测为准。"
         : "跨权限安全停止：待实机验证；当前不能运行真实任务。";
-    public string March7thConsentNote => RealExecutionPolicy.BuildPermitsRealExecution
+    public string March7thConsentNote => RealExecutionPolicy.IsReusableManualTest
+        ? "开始前请先手动打开星铁并确认账号已登录（登录过期会导致测试失败）。UAC 弹窗由你本人核对 m7a.exe 路径后处理；VIvian 不会自动提权。"
+        : RealExecutionPolicy.BuildPermitsRealExecution
         ? "本包只支持单次 screen_test；实际游戏操作需单独授权。启动前核对路径及任务；UAC 由你亲自操作。"
         : "首次真实任务必须先完成 UAC 与 Worker 实测，并另行取得你的单次游戏操作授权。";
-    public bool CanStartMarch7th => RealExecutionPolicy.AllowsTask(March7thTask?.Id ?? "") && !_oneShotConsumed
-        && March7thConfirmedThisRun && _march7thEvidence is not null && Queue.IsIdle && !Queue.HasUnresolved
-        && Engines.Single(e => e.Id == GameId.StarRail).Report?.Compatibility == CompatibilityClass.IdentityVerified;
+    private ManualTestAdmission Admission
+    {
+        get
+        {
+            var card = Engines.Single(e => e.Id == GameId.StarRail);
+            return ManualTestPolicy.Evaluate(new ManualTestInputs(March7thTask?.Id, March7thConfirmedThisRun,
+                _confirmedInstallPath == card.InstallPath && _confirmedArchivePath == ReleaseArchivePath
+                    && _confirmedTask == March7thTask?.Id,
+                _march7thEvidence is not null, card.Report?.Compatibility == CompatibilityClass.IdentityVerified,
+                Queue.IsIdle, Queue.IsRunning, Queue.HasUnresolved, _oneShotConsumed));
+        }
+    }
+    public bool CanStartMarch7th => Admission.Allowed;
+    /// <summary>Current state in plain Chinese (未通过安装核验 / 清理未确认 / 正在执行 / 可以进行手动实测 …).</summary>
+    public string ManualTestStateText => "当前状态：" + Admission.Text;
+    private string _lastRealResult = "上次结果：本版本尚无真实运行记录。";
+    public string LastRealResultText { get => _lastRealResult; private set => Set(ref _lastRealResult, value); }
+    private void RaiseAdmission() { Raise(nameof(CanStartMarch7th)); Raise(nameof(ManualTestStateText)); }
 
     private string _releaseArchivePath = "";
     /// <summary>A March7thAssistant release archive the user downloaded from the official GitHub release.</summary>
@@ -148,7 +176,13 @@ public sealed class MainViewModel : ObservableObject
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
         _statusSupervisor = statusSupervisor;
-        _oneShotConsumed = File.Exists(OneShotMarker);
+        // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
+        _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
+        Queue.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(QueueViewModel.IsRunning) or nameof(QueueViewModel.IsIdle) or nameof(QueueViewModel.HasUnresolved))
+                RaiseAdmission();
+        };
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         AutoDiscoverCommand = new(() => RunAsync(AutoDiscoverAsync), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeCoreAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
@@ -174,7 +208,7 @@ public sealed class MainViewModel : ObservableObject
         foreach (var value in settings)
         {
             var card = Engines.Single(x => x.Id == value.Game);
-            card.InstallPath = value.InstallPath; card.Revision = value.Revision;
+            card.InstallPath = value.InstallPath; card.Revision = value.Revision; card.SavedInstallPath = value.InstallPath;
         }
         await LoadPreferencesAsync();
         await LoadTasksAsync();
@@ -205,7 +239,7 @@ public sealed class MainViewModel : ObservableObject
             _ => EngineReadinessInspector.InspectAsync(card.Id, path, evidence, TimeProvider.System),
         });
         card.Show(report);
-        if (card.Id == GameId.StarRail) Raise(nameof(CanStartMarch7th));
+        if (card.Id == GameId.StarRail) RaiseAdmission();
         Log.Information("Engine readiness {Game}: {Compatibility} ({Error})", card.Id, report.Compatibility, report.PrimaryError);
     }
 
@@ -213,7 +247,22 @@ public sealed class MainViewModel : ObservableObject
     {
         var recent = await Task.Run(() => _runs.ReadRecentRunsAsync(50));
         foreach (var card in Engines) card.ShowLastRun(recent.FirstOrDefault(r => r.Game == card.Id));
+        var real = recent.FirstOrDefault(r => r.Game == GameId.StarRail && !r.IsSimulation);
+        LastRealResultText = real is null ? "上次结果：本版本尚无真实运行记录。"
+            : $"上次结果（{real.UpdatedAt.ToLocalTime():MM-dd HH:mm}，RunId {real.RunId:D}）：{RealResultLabel(real)}";
     }
+
+    /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>
+    public static string RealResultLabel(RunRecord r) =>
+        r.Cleanup == CleanupState.Unconfirmed ? "清理未确认（结果未知，队列已阻断）"
+        : r.Phase == RunPhase.Blocked && r.Outcome is null ? "安全检查未通过（" + RunPresentation.Reason(r.ReasonCode) + "）"
+        : r.Outcome switch
+        {
+            RunOutcome.Success => "执行完成（已核对完成证据与清理）",
+            RunOutcome.Failed => "执行失败（" + RunPresentation.Reason(r.ReasonCode) + "）",
+            RunOutcome.Cancelled => "已停止",
+            _ => "结果未知（" + RunPresentation.Reason(r.ReasonCode) + "）",
+        };
 
     private async Task VerifyReleaseAsync()
     {
@@ -224,7 +273,7 @@ public sealed class MainViewModel : ObservableObject
         ReleaseStatus = "正在计算 SHA-256（大文件需要一些时间）…";
         var result = await Task.Run(() => March7thReleaseVerifier.VerifyAsync(path));
         if (result.Check == ReleaseCheck.Verified) _march7thEvidence = result.Evidence;
-        Raise(nameof(CanStartMarch7th));
+        RaiseAdmission();
         ReleaseStatus = result.Check switch
         {
             ReleaseCheck.Verified => "已验证：" + result.Detail,
@@ -244,13 +293,35 @@ public sealed class MainViewModel : ObservableObject
             }
             catch (Exception ex) when (ex is SettingsConflictException or ArgumentException) { }
         }
-        await InspectAsync(Engines.Single(e => e.Id == GameId.StarRail));
+        var starRail = Engines.Single(e => e.Id == GameId.StarRail);
+        await InspectAsync(starRail);
+        // M4-F1 defect C: a path the user actually verified is remembered even without pressing "保存路径".
+        if (starRail.Report?.Compatibility == CompatibilityClass.IdentityVerified) await PersistInstallPathAsync(starRail);
+    }
+
+    /// <summary>Stores one engine's path if it differs from the saved value. Never touches the other engines' rows.</summary>
+    private async Task PersistInstallPathAsync(EngineCard card)
+    {
+        var path = card.InstallPath.Trim().Trim('"');
+        if (path == card.SavedInstallPath) return;
+        try
+        {
+            var saved = await Task.Run(() => _settings.SaveSettingAsync(new EngineSetting(card.Id, path, card.Revision)));
+            card.Revision = saved.Revision; card.SavedInstallPath = saved.InstallPath;
+            Log.Information("Install path saved for {Game} (revision {Revision})", card.Id, saved.Revision);
+        }
+        catch (Exception ex) when (ex is SettingsConflictException or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            // Remembering the path is a convenience: the run itself is still decided by the live checks.
+            Log.Warning("Install path not saved for {Game}: {ErrorType}", card.Id, ex.GetType().Name);
+        }
     }
 
     private async Task StartMarch7thAsync()
     {
-        if (!RealExecutionPolicy.AllowsTask(March7thTask?.Id ?? "") || _oneShotConsumed)
-        { Status = March7thExecutionBlock; return; }
+        var admission = Admission;
+        if (!admission.Allowed && admission.State is ManualTestState.NotAvailable or ManualTestState.Consumed)
+        { Status = admission.Text; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
         if (!March7thConfirmedThisRun || _confirmedInstallPath != card.InstallPath
             || _confirmedArchivePath != ReleaseArchivePath || _confirmedTask != March7thTask?.Id)
@@ -260,9 +331,23 @@ public sealed class MainViewModel : ObservableObject
         if (card.Report?.Compatibility != CompatibilityClass.IdentityVerified || Queue.HasUnresolved)
         { Status = "安装身份未核对，或有上次运行尚未确认清理；任务未启动。"; return; }
         if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
+        if (!admission.Allowed) { Status = admission.Text; return; }
         March7thTaskContract.StartArguments(March7thTask.Id); // whitelist, even for a programmatic command call
-        // CreateNew is atomic: a second window or restart cannot silently repeat this approved attempt.
-        try
+        await PersistInstallPathAsync(card);
+        if (RealExecutionPolicy.IsReusableManualTest)
+        {
+            // Reusable build: no package-wide marker, but every confirmed attempt is appended to a local journal
+            // before anything starts. Failing to write it refuses the run (no silent, unrecorded attempts).
+            try
+            {
+                Directory.CreateDirectory(_paths.DataDirectory);
+                await File.AppendAllTextAsync(Path.Combine(_paths.DataDirectory, "manual-test-attempts.log"),
+                    $"{DateTimeOffset.UtcNow:O} 用户确认一次 {March7thTask.Id}（提交 {AppPaths.Commit}）\n");
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { Status = "无法写入本地实测记录，任务未启动。请检查数据目录权限。"; return; }
+        }
+        else try
         {
             await using var marker = new FileStream(OneShotMarker, FileMode.CreateNew, FileAccess.Write, FileShare.None);
             await using var writer = new StreamWriter(marker);
@@ -276,9 +361,15 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             var result = await Queue.RunMarch7thAsync(adapter);
-            Status = result is null ? "已有队列正在运行。" : "星铁本次任务已结束；请在“调度与监控”查看结果与清理状态。";
+            Status = result is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
         }
-        finally { March7thConfirmedThisRun = false; }
+        finally
+        {
+            // Never carried over: the next attempt needs a new, explicit confirmation.
+            March7thConfirmedThisRun = false;
+            try { await RefreshLastRunsAsync(); } catch (Exception ex) { Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
+            RaiseAdmission();
+        }
     }
 
     public void ReportReconciled(int count)
@@ -296,17 +387,23 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task SaveAsync()
     {
-        var snapshot = Engines.Select(x => new EngineSetting(x.Id, x.InstallPath.Trim().Trim('"'), x.Revision)).ToList();
-        await Task.Run(() => _settings.SaveSettingsAsync(snapshot));
+        // Only rows the user changed are written, one by one, so an unchanged engine never gets a stale overwrite.
+        var changed = Engines.Where(x => x.InstallPath.Trim().Trim('"') != x.SavedInstallPath).ToList();
+        foreach (var card in changed)
+        {
+            var saved = await Task.Run(() => _settings.SaveSettingAsync(
+                new EngineSetting(card.Id, card.InstallPath.Trim().Trim('"'), card.Revision)));
+            card.Revision = saved.Revision; card.SavedInstallPath = saved.InstallPath;
+        }
         var reloaded = await Task.Run(() => _settings.LoadSettingsAsync());
         foreach (var value in reloaded)
         {
             var card = Engines.Single(x => x.Id == value.Game);
-            card.InstallPath = value.InstallPath; card.Revision = value.Revision;
+            card.InstallPath = value.InstallPath; card.Revision = value.Revision; card.SavedInstallPath = value.InstallPath;
         }
         await CheckEnginesCoreAsync();
         Status = "路径已保存并完成只读检查；未运行引擎，也未改动上游配置。";
-        Log.Information("Local settings saved for {Count} games", snapshot.Count);
+        Log.Information("Local settings saved for {Count} games", changed.Count);
     }
 
     private async Task AutoDiscoverAsync()
@@ -372,15 +469,36 @@ public sealed class MainViewModel : ObservableObject
         Status = $"设置已保存。已按新的保留期清理 {removed.Count} 个旧日志文件。";
     }
 
+    private static string BuildKind => RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版"
+        : RealExecutionPolicy.BuildPermitsRealExecution ? "M4-D 单次测试包" : "开发版（模拟）";
+
     public async Task ExportDiagnosticsAsync()
+    {
+        try { await ExportDiagnosticsCoreAsync(); }
+        catch (Exception ex)
+        {
+            // A diagnostic export must never take the application down.
+            LastExportPath = null;
+            ExportStatus = "导出诊断报告失败：" + UserFacingError.Describe(ex);
+            Log.Warning("Diagnostic export failed: {ErrorType}", ex.GetType().Name);
+        }
+    }
+
+    private async Task ExportDiagnosticsCoreAsync()
     {
         ExportStatus = "正在生成诊断包…";
         var reports = Engines.Select(e => e.Report).OfType<EngineReadinessReport>().ToList();
         var runs = IncludeRunHistory ? await Task.Run(() => _runs.ReadRecentRunsAsync(200)) : [];
         var checks = await Task.Run(() => _history.ReadRecentAsync(50));
+        var real = new List<RunDiagnostic>();
+        foreach (var run in runs.Where(r => !r.IsSimulation).Take(5))
+            real.Add(new RunDiagnostic(run, await Task.Run(() => _runs.ReadEventsAsync(run.RunId, 2000))));
         var input = new DiagnosticBundleInput(AppPaths.Version, _paths.DataDirectory, reports, runs, checks, _paths.LogDirectory,
-            IncludeRunHistory, DateTimeOffset.UtcNow);
-        var result = await Task.Run(() => DiagnosticBundle.CreateAsync(input, _paths.ExportDirectory, Redactor.ForCurrentUser()));
+            IncludeRunHistory, DateTimeOffset.UtcNow, AppPaths.Commit, BuildKind, real);
+        var destination = FeedbackDirectory.Resolve(_paths.ExportDirectory);
+        var result = await Task.Run(() => DiagnosticBundle.CreateAsync(input, destination, Redactor.ForCurrentUser()));
+        if (!result.Success && destination != _paths.ExportDirectory)
+            result = await Task.Run(() => DiagnosticBundle.CreateAsync(input, _paths.ExportDirectory, Redactor.ForCurrentUser()));
         LastExportPath = result.Path;
         ExportStatus = result.Success ? result.Detail + " 位置：" + result.Path : result.Detail;
         Log.Information("Diagnostic export: {Success}", result.Success);
@@ -448,4 +566,21 @@ public static class UserFacingError
         IOException => "文件读写失败。请检查磁盘空间与数据目录权限后重试。",
         _ => "操作失败。请查看日志或导出诊断包。",
     };
+}
+
+/// <summary>
+/// Where "导出诊断报告" writes: the user's screenshot-feedback folder when it exists (so screenshots and reports sit
+/// together), otherwise VIvian's own export folder. VIVIAN_FEEDBACK_DIR overrides the feedback root.
+/// </summary>
+public static class FeedbackDirectory
+{
+    public const string DefaultRoot = @"E:\auto agent game\截图反馈";
+
+    public static string Resolve(string fallback)
+    {
+        var root = Environment.GetEnvironmentVariable("VIVIAN_FEEDBACK_DIR");
+        if (string.IsNullOrWhiteSpace(root)) root = DefaultRoot;
+        try { return Directory.Exists(root) ? Path.Combine(root, "对应日志") : fallback; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return fallback; }
+    }
 }

@@ -14,7 +14,9 @@ public sealed partial class Redactor
     {
         if (!string.IsNullOrWhiteSpace(userProfile) && userProfile.Length >= 4)
             _literals.Add((userProfile.TrimEnd('\\', '/'), "%USERPROFILE%"));
-        if (!string.IsNullOrWhiteSpace(userName) && userName.Length >= 3) _literals.Add((userName, "<user>"));
+        // Two-character names are common in CJK (e.g. a Chinese account name); ASCII names need three to avoid noise.
+        if (!string.IsNullOrWhiteSpace(userName) && (userName.Length >= 3 || (userName.Length == 2 && userName.Any(c => c > 0x7F))))
+            _literals.Add((userName, "<user>"));
         if (!string.IsNullOrWhiteSpace(machineName) && machineName.Length >= 3) _literals.Add((machineName, "<machine>"));
         foreach (var secret in extraSecrets ?? [])
             if (!string.IsNullOrWhiteSpace(secret) && secret.Length >= 4) _literals.Add((secret, "<secret>"));

@@ -46,7 +46,11 @@ public static partial class LogMaintenance
 public sealed record DiagnosticBundleInput(
     string AppVersion, string DataDirectory, IReadOnlyList<EngineReadinessReport> Engines,
     IReadOnlyList<RunRecord> Runs, IReadOnlyList<DiagnosticRecord> SelfChecks, string? LogDirectory,
-    bool IncludeRunHistory, DateTimeOffset CreatedAt);
+    bool IncludeRunHistory, DateTimeOffset CreatedAt,
+    string? Commit = null, string? BuildKind = null, IReadOnlyList<RunDiagnostic>? RealRuns = null);
+
+/// <summary>One real (non-simulation) run with its recorded events, for the user's error reports.</summary>
+public sealed record RunDiagnostic(RunRecord Run, IReadOnlyList<RunEvent> Events);
 
 public sealed record DiagnosticBundleResult(bool Success, string? Path, IReadOnlyList<string> Entries, string Detail);
 
@@ -54,7 +58,7 @@ public sealed record DiagnosticBundleResult(bool Success, string? Path, IReadOnl
 /// Builds a local, redacted ZIP for troubleshooting. It never contains the database file, upstream configuration
 /// contents, credentials or account data, and it is never uploaded: the user decides whether to share it.
 /// </summary>
-public static class DiagnosticBundle
+public static partial class DiagnosticBundle
 {
     public const int MaxLogFiles = 5;
     public const int MaxLogBytesPerFile = 2 * 1024 * 1024;
@@ -95,6 +99,8 @@ public static class DiagnosticBundle
                 {
                     schema = "vivian.diagnostics/1",
                     appVersion = input.AppVersion,
+                    commit = input.Commit,
+                    buildKind = input.BuildKind,
                     createdAt = input.CreatedAt,
                     os = Environment.OSVersion.VersionString,
                     is64BitOs = Environment.Is64BitOperatingSystem,
@@ -115,6 +121,25 @@ public static class DiagnosticBundle
                         r.RunId, r.QueueId, r.Game, r.RuleVersion, r.IsSimulation, r.Phase, r.Outcome, r.Cleanup, r.ReasonCode,
                         r.CreatedAt, r.UpdatedAt, r.AcknowledgedAt, acknowledgementNote = redactor.Redact(r.AcknowledgementNote),
                     }), Json));
+                if (input.IncludeRunHistory && input.RealRuns is { Count: > 0 } realRuns)
+                {
+                    // Real runs: identifiers, timing, outcome, reason and cleanup state, plus the run's own event log
+                    // (upstream output lines, VIvian's verdict). Everything passes the redactor; nothing is read
+                    // from upstream configuration files.
+                    await AddText("real-runs.json", JsonSerializer.Serialize(realRuns.Select(d => new
+                    {
+                        d.Run.RunId, d.Run.QueueId, d.Run.Game, d.Run.RuleVersion, d.Run.Phase, d.Run.Outcome, d.Run.Cleanup,
+                        d.Run.ReasonCode, reason = RunPresentation.Reason(d.Run.ReasonCode), startedAt = d.Run.CreatedAt,
+                        endedAt = d.Run.UpdatedAt, d.Run.AcknowledgedAt, upstreamRunIds = UpstreamRunIds(d.Events),
+                        events = d.Events.Count,
+                    }), Json));
+                    foreach (var d in realRuns)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var lines = d.Events.Select(e => $"{e.At.ToLocalTime():yyyy-MM-dd HH:mm:ss.fff zzz} [{e.Kind}] {redactor.Redact(e.Message)}");
+                        await AddText($"runs/{d.Run.CreatedAt.UtcDateTime:yyyyMMdd-HHmmss}-{d.Run.RunId:N}.log", string.Join('\n', lines));
+                    }
+                }
                 await AddText("self-checks.json", JsonSerializer.Serialize(input.SelfChecks.Select(d => new
                 { d.Id, d.StartedAt, summary = redactor.Redact(d.Summary) }), Json));
                 foreach (var log in RecentLogs(input.LogDirectory))
@@ -134,6 +159,13 @@ public static class DiagnosticBundle
             return new(false, null, [], $"导出失败（{ex.GetType().Name}）。请确认导出目录可写、磁盘空间足够。");
         }
     }
+
+    private static IReadOnlyList<string> UpstreamRunIds(IReadOnlyList<RunEvent> events) => events
+        .Select(e => UpstreamId().Match(e.Message)).Where(m => m.Success).Select(m => m.Value)
+        .Distinct(StringComparer.Ordinal).Take(5).ToList();
+
+    [GeneratedRegex(@"(?<!\d)\d{8}-\d{6}-[0-9a-f]{4}(?![0-9a-f])", RegexOptions.CultureInvariant)]
+    private static partial Regex UpstreamId();
 
     private static IEnumerable<FileInfo> RecentLogs(string? directory)
     {
@@ -169,13 +201,15 @@ public static class DiagnosticBundle
     }
 
     private static string Readme(DiagnosticBundleInput input) => $"""
-        VIvian 诊断包（{input.AppVersion}，{input.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC）
+        VIvian 诊断包（{input.AppVersion}，提交 {input.Commit ?? "未知"}，{input.BuildKind ?? "开发版"}，{input.CreatedAt:yyyy-MM-dd HH:mm:ss} UTC）
 
         包含：版本与系统信息、三款引擎的只读检查结果、{(input.IncludeRunHistory ? "运行记录（状态与原因代码）、" : "")}自检记录、最近的 VIvian 日志（末尾部分）。
         已脱敏：用户目录、用户名、计算机名、邮箱、口令/令牌样式的字段。
         不包含：数据库文件、任何引擎或游戏的配置内容、账号、密码、截图。
 
         这个文件只保存在本机。是否发送给他人由你决定；发送前可以先打开查看。
-        说明：此开发版不运行真实引擎；“模拟”运行的结果不代表任何游戏的真实日常。
+        {(RealExecutionPolicy.BuildPermitsRealExecution
+            ? "说明：此版本只开放由本人逐次确认的星铁 screen_test；real-runs.json 与 runs/ 中是这些真实运行的记录与日志。"
+            : "说明：此开发版不运行真实引擎；“模拟”运行的结果不代表任何游戏的真实日常。")}
         """;
 }

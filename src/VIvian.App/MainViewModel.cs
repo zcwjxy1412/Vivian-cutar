@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
+using System.Text.Json;
+using System.Windows;
 using Serilog;
 using VIvian.Core;
 using VIvian.Core.Engines;
@@ -22,6 +24,14 @@ public sealed record AppPaths(string DataDirectory)
     public static string Version { get; } = Informational.Split('+')[0];
     /// <summary>Source commit stamped by scripts/Build.ps1, or "本地构建" for an unstamped local build.</summary>
     public static string Commit { get; } = Informational.Split('+') is [_, var sha, ..] && sha.Length >= 7 ? sha[..Math.Min(12, sha.Length)] : "本地构建";
+    public static string BuildTime { get; } = ReadBuildTime();
+    private static string ReadBuildTime()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "BUILD-INFO.txt");
+        if (!File.Exists(path)) return "本地构建时间未记录";
+        return File.ReadLines(path).FirstOrDefault(x => x.StartsWith("构建时间(UTC):", StringComparison.Ordinal))?
+            .Replace("构建时间(UTC):", "", StringComparison.Ordinal).Trim() ?? "本地构建时间未记录";
+    }
 }
 
 public sealed class MainViewModel : ObservableObject
@@ -34,6 +44,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IUnifiedTaskControl _control;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
+    private readonly SemaphoreSlim _sessionWrite = new(1, 1);
     private string _status = RealExecutionPolicy.IsReusableManualTest
         ? "手动实测版：先在“引擎管理”核对星铁助手安装与官方发行包，再到“真实任务测试”逐次确认执行。"
         : RealExecutionPolicy.BuildPermitsRealExecution
@@ -44,7 +55,7 @@ public sealed class MainViewModel : ObservableObject
     public bool IsIdle => !_busy;
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
-    public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}）· "
+    public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
         + (RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训手动实测版（逐次确认）"
             : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
             : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
@@ -54,6 +65,10 @@ public sealed class MainViewModel : ObservableObject
         : RealExecutionPolicy.BuildPermitsRealExecution
         ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
+    public Visibility M5Visibility => RealExecutionPolicy.IsM5DailyTest ? Visibility.Visible : Visibility.Collapsed;
+    public string DiagnosticSessionText => "诊断会话：" + _diagnosticSessionId;
+    private readonly string _diagnosticSessionId = Guid.NewGuid().ToString("N")[..12];
+    private string? _sessionPath;
     public string RealTestTabHeader => RealExecutionPolicy.IsReusableManualTest ? "真实任务测试" : "星铁实测";
     public string RealTestTitle => RealExecutionPolicy.IsM5DailyTest ? "星铁 · 每日实训真实任务"
         : RealExecutionPolicy.IsReusableManualTest
@@ -82,6 +97,7 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand MoveDownCommand { get; }
     public AsyncCommand SavePreferencesCommand { get; }
     public AsyncCommand ExportDiagnosticsCommand { get; }
+    public AsyncCommand SaveFeedbackCommand { get; }
     public AsyncCommand StartMarch7thCommand { get; }
     public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = RealExecutionPolicy.BuildPermitsRealExecution
         ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
@@ -195,7 +211,7 @@ public sealed class MainViewModel : ObservableObject
                 RaiseAdmission();
         };
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
-        AutoDiscoverCommand = new(() => RunAsync(AutoDiscoverAsync), HandleError);
+        AutoDiscoverCommand = new(() => RunAsync(() => AutoDiscoverAsync(persist: true)), HandleError);
         ReloadCommand = new(() => RunAsync(async () => { await InitializeCoreAsync(); Status = "已重新加载保存的配置与记录。"; }), HandleError);
         CheckCommand = new(CheckFoundationAsync, HandleError);
         InspectMarch7thCommand = new(() => RunAsync(() => InspectAsync(Engines.Single(e => e.Id == GameId.StarRail))), HandleError);
@@ -207,13 +223,19 @@ public sealed class MainViewModel : ObservableObject
         MoveDownCommand = new(() => SelectedPlan?.Move(1));
         SavePreferencesCommand = new(() => RunAsync(SavePreferencesAsync), HandleError);
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
+        SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
+        Configuration.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConfigurationViewModel.Status) && _sessionPath is not null)
+                _ = WriteDiagnosticSessionSafelyAsync();
+        };
         SelectedEngine = Engines[0];
     }
 
-    public Task InitializeAsync() => InitializeCoreAsync();
+    public Task InitializeAsync(bool autoPrepare = true) => InitializeCoreAsync(autoPrepare);
 
-    private async Task InitializeCoreAsync()
+    private async Task InitializeCoreAsync(bool autoPrepare = false)
     {
         var settings = await Task.Run(() => _settings.LoadSettingsAsync());
         foreach (var value in settings)
@@ -223,10 +245,26 @@ public sealed class MainViewModel : ObservableObject
         }
         await LoadPreferencesAsync();
         await LoadTasksAsync();
+        if (RealExecutionPolicy.IsM5DailyTest && autoPrepare)
+            SelectedPlan = TaskPlans.FirstOrDefault(p => p.Game == GameId.StarRail) ?? SelectedPlan;
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
         await RefreshLastRunsAsync();
+        if (autoPrepare) await AutoDiscoverAsync(persist: true);
         await CheckEnginesCoreAsync();
+        if (autoPrepare && RealExecutionPolicy.IsM5DailyTest)
+        {
+            var archive = @"E:\auto agent game\March7thAssistant_full-v2026.10.31.zip";
+            if (File.Exists(archive))
+            {
+                ReleaseArchivePath = archive;
+                await VerifyReleaseAsync();
+            }
+            if (!string.IsNullOrWhiteSpace(Engines.Single(e => e.Id == GameId.StarRail).InstallPath))
+                try { await Configuration.ReadAsync(); }
+                catch (Exception ex) { Status = "已发现星铁，但配置读取失败：" + UserFacingError.Describe(ex); }
+        }
+        if (autoPrepare) await StartDiagnosticSessionAsync();
     }
 
     /// <summary>Read-only check of all three engine folders. Never runs an engine or touches its configuration.</summary>
@@ -389,6 +427,7 @@ public sealed class MainViewModel : ObservableObject
             // Never carried over: the next attempt needs a new, explicit confirmation.
             March7thConfirmedThisRun = false;
             try { await RefreshLastRunsAsync(); } catch (Exception ex) { Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
+            await SaveFeedbackAsync();
             RaiseAdmission();
         }
     }
@@ -427,7 +466,7 @@ public sealed class MainViewModel : ObservableObject
         Log.Information("Local settings saved for {Count} games", changed.Count);
     }
 
-    private async Task AutoDiscoverAsync()
+    private async Task AutoDiscoverAsync(bool persist = false)
     {
         var candidates = new Dictionary<GameId, (string Root, string Program)[]>
         {
@@ -440,12 +479,26 @@ public sealed class MainViewModel : ObservableObject
                 ("C:\\Program Files\\OneDragon", "OneDragon-RuntimeLauncher.exe")],
         };
         var count = 0;
-        foreach (var card in Engines.Where(e => string.IsNullOrWhiteSpace(e.InstallPath)))
+        foreach (var card in Engines)
         {
+            var program = card.Id switch
+            {
+                GameId.Genshin => "BetterGI.exe", GameId.StarRail => "m7a.exe", _ => "OneDragon-RuntimeLauncher.exe",
+            };
+            if (!string.IsNullOrWhiteSpace(card.InstallPath) && File.Exists(Path.Combine(card.InstallPath, program))) continue;
             var match = candidates[card.Id].FirstOrDefault(c => File.Exists(Path.Combine(c.Root, c.Program)));
-            if (match.Root is null) continue;
+            if (match.Root is null)
+            {
+                if (!string.IsNullOrWhiteSpace(card.InstallPath))
+                {
+                    card.InstallPath = "";
+                    if (persist) await PersistInstallPathAsync(card);
+                }
+                continue;
+            }
             card.InstallPath = match.Root;
             await InspectAsync(card);
+            if (persist) await PersistInstallPathAsync(card);
             count++;
         }
         Status = count == 0 ? "未发现可自动填入的新安装目录；可以手动选择。"
@@ -504,6 +557,69 @@ public sealed class MainViewModel : ObservableObject
             ExportStatus = "导出诊断报告失败：" + UserFacingError.Describe(ex);
             Log.Warning("Diagnostic export failed: {ErrorType}", ex.GetType().Name);
         }
+    }
+
+    public async Task SaveFeedbackAsync()
+    {
+        await ExportDiagnosticsAsync();
+        await WriteDiagnosticSessionSafelyAsync();
+    }
+
+    private async Task StartDiagnosticSessionAsync()
+    {
+        string root;
+        try
+        {
+            var feedbackRoot = FeedbackDirectory.DefaultRoot;
+            foreach (var name in new[] { "待处理截图", "对应日志", "历史反馈", "测试报告" })
+                Directory.CreateDirectory(Path.Combine(feedbackRoot, name));
+            root = FeedbackDirectory.Resolve(_paths.ExportDirectory);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            root = _paths.ExportDirectory;
+            Directory.CreateDirectory(root);
+            Log.Warning("Feedback folder unavailable; session saved in app data: {ErrorType}", ex.GetType().Name);
+        }
+        _sessionPath = Path.Combine(root, $"会话-{DateTimeOffset.Now:yyyyMMdd-HHmmss}-{_diagnosticSessionId}.json");
+        await WriteDiagnosticSessionSafelyAsync();
+        Log.Information("Diagnostic session {SessionId} started", _diagnosticSessionId);
+    }
+
+    private async Task WriteDiagnosticSessionSafelyAsync()
+    {
+        try { await WriteDiagnosticSessionAsync(); }
+        catch (Exception ex) { Log.Warning("Diagnostic session write failed: {ErrorType}", ex.GetType().Name); }
+    }
+
+    private async Task WriteDiagnosticSessionAsync()
+    {
+        if (_sessionPath is null) return;
+        await _sessionWrite.WaitAsync();
+        try
+        {
+        var redactor = Redactor.ForCurrentUser();
+        var recent = await _runs.ReadRecentRunsAsync(20);
+        var report = new
+        {
+            sessionId = _diagnosticSessionId,
+            version = AppPaths.Version,
+            commit = AppPaths.Commit,
+            buildTime = AppPaths.BuildTime,
+            updatedAt = DateTimeOffset.UtcNow,
+            engines = Engines.Select(e => new { game = e.Id.ToString(), state = e.Compatibility,
+                version = e.Report?.DetectedVersion, reason = redactor.Redact(e.Evidence) }),
+            configuration = redactor.Redact(Configuration.Status),
+            runs = recent.Where(x => !x.IsSimulation).Select(x => new { x.RunId, x.Phase, x.Outcome,
+                x.Cleanup, x.ReasonCode, x.UpdatedAt }),
+            feedbackBundle = LastExportPath is null ? null : redactor.Redact(LastExportPath),
+        };
+        var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+        var temp = _sessionPath + ".tmp";
+        await File.WriteAllTextAsync(temp, redactor.Redact(json));
+        File.Move(temp, _sessionPath, overwrite: true);
+        }
+        finally { _sessionWrite.Release(); }
     }
 
     private async Task ExportDiagnosticsCoreAsync()

@@ -12,6 +12,8 @@
 | [`M3_PREREQUISITES.md`](M3_PREREQUISITES.md) | 接入真实引擎之前必须满足的条件 |
 | [`evidence/EVIDENCE_INDEX.md`](evidence/EVIDENCE_INDEX.md) | M3 证据索引：已固定的上游源码事实与仍为 Pending 的实测项 |
 | [`RUN_ON_WINDOWS.md`](RUN_ON_WINDOWS.md) | 下载和运行 Windows 开发版（模拟引擎） |
+| [`M5_LOCAL_TEST_WORKFLOW.md`](M5_LOCAL_TEST_WORKFLOW.md) | 本机固定 M5 测试版的自动部署、反馈与回滚 |
+| [`M5_DAILY_WINDOWS_TEST.md`](M5_DAILY_WINDOWS_TEST.md) | 星铁 `daily` 的逐次授权与实测步骤 |
 | [`M3_DESKTOP_TEST_HANDOFF.md`](M3_DESKTOP_TEST_HANDOFF.md) | 预桌面阶段结束后交给 Codex 的桌面测试交接 |
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | 故障排查 |
 
@@ -49,7 +51,7 @@
 
 ## 5. 进行中的工作与安全门禁
 
-以 GitHub 上的 PR 和 Issue 列表为准。截至 2026-11-04，main 为 0.3.0-dev（PR #35 合并后）：
+以下表格保留 2026-11-04 的历史状态；当前 M5 分支依赖顺序为 PR #46 → #47 → #48，固定测试版与自动部署工作位于新的独立 PR。合并前须分别审查，不能直接把后续分支合并到 main。
 
 | PR | 内容 | 状态 |
 | --- | --- | --- |

@@ -15,8 +15,26 @@ public sealed class ParameterRow(ConfigurationValue value) : ObservableObject
     public bool Editable => value.Schema.Access == ParameterAccess.VerifiedReadWrite && value.Value is not null;
     public string Original => value.Value ?? "";
     private string _current = value.Value ?? "";
-    public string Current { get => _current; set => Set(ref _current, value); }
+    public string Current
+    {
+        get => _current;
+        set { Set(ref _current, value); Raise(nameof(BoolValue)); Raise(nameof(IsChanged)); }
+    }
     public string State => value.State;
+    public string Group => value.Schema.Group;
+    public string Rule => ParameterRules.Describe(value.Schema);
+    public string Scope => value.Schema.Scope;
+    public string Dependencies => value.Schema.Dependencies;
+    public bool IsBoolean => value.Schema.DataType == "boolean";
+    public bool IsChoice => value.Schema.DataType == "enum";
+    public bool IsTextual => value.Schema.DataType is "integer" or "text";
+    public bool IsReadOnlyDisplay => !IsBoolean && !IsChoice && !IsTextual;
+    public IReadOnlyList<string> Options => ParameterRules.Options(value.Schema);
+    public bool IsChanged => Editable && Current != Original;
+    /// <summary>Two-way switch binding for boolean parameters; writes "true"/"false" into <see cref="Current"/>.</summary>
+    public bool BoolValue { get => Current == "true"; set => Current = value ? "true" : "false"; }
+    /// <summary>What is shown when the field cannot be edited here.</summary>
+    public string DisplayValue => value.Value ?? "—";
 }
 
 public sealed class ConfigurationViewModel : ObservableObject, IDisposable

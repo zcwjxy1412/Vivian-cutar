@@ -65,6 +65,8 @@ public sealed class MainViewModel : ObservableObject
         : RealExecutionPolicy.BuildPermitsRealExecution
         ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
+    /// <summary>Page title of the home page, e.g. "11月6日 星期五".</summary>
+    public string TodayText => DateTime.Now.ToString("M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
     public Visibility M5Visibility => RealExecutionPolicy.IsM5DailyTest ? Visibility.Visible : Visibility.Collapsed;
     public string DiagnosticSessionText => "诊断会话：" + _diagnosticSessionId;
     private readonly string _diagnosticSessionId = Guid.NewGuid().ToString("N")[..12];
@@ -79,7 +81,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<DiagnosticRecord> History { get; } = [];
     public ObservableCollection<TaskPlanViewModel> TaskPlans { get; } = [];
     private TaskPlanViewModel? _selectedPlan;
-    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set { Set(ref _selectedPlan, value); if (value is not null) Configuration?.SelectGame(value.Game); } }
+    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set => Set(ref _selectedPlan, value); }
     public ConfigurationViewModel Configuration { get; }
     private EngineCard? _selectedEngine;
     public EngineCard? SelectedEngine { get => _selectedEngine; set => Set(ref _selectedEngine, value); }

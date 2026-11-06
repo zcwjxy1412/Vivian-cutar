@@ -16,6 +16,9 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public string Engine { get; } = engine;
     public string Glyph { get; } = glyph;
     public EngineProfile Profile => EngineCatalog.For(Id);
+    /// <summary>The game's own colour; used only next to that game.</summary>
+    public string Accent => Id switch { GameId.Genshin => "#63D2C6", GameId.StarRail => "#A99BFF", _ => "#FFD447" };
+    public string Version => $"{Profile.EngineName} {Profile.PinnedVersion}";
     public string PinnedVersion => $"支持基准：{Profile.EngineName} {Profile.PinnedVersion}（证据待桌面验证）";
     public long Revision { get; set; }
     /// <summary>The install path as last loaded from or written to the database (to detect unsaved edits).</summary>

@@ -19,6 +19,8 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     /// <summary>The game's own colour; used only next to that game.</summary>
     public string Accent => Id switch { GameId.Genshin => "#2BA89A", GameId.StarRail => "#7B61FF", _ => "#E0A800" };
     public string Version => $"{Profile.EngineName} {Profile.PinnedVersion}";
+    /// <summary>Short engine label for narrow rows (OneDragon instead of ZenlessZoneZero-OneDragon).</summary>
+    public string ShortVersion => $"{Profile.EngineName.Replace("ZenlessZoneZero-", "")} {Profile.PinnedVersion}";
     public string Tagline => Id switch { GameId.Genshin => "Genshin Impact", GameId.StarRail => "Honkai: Star Rail", _ => "Zenless Zone Zero" };
     /// <summary>Three daily/weekly task names from the versioned catalog, shown as chips.</summary>
     public IReadOnlyList<string> Chips => Profile.Tasks.Where(t => t.Frequency != TaskFrequency.OnDemand)

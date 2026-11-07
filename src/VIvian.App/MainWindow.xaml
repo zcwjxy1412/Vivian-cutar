@@ -82,12 +82,12 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 
 <!-- ============ 首页概览 ============ -->
 <TabItem Header="首页概览" Tag="&#xE80F;"><Grid Margin="0,0,16,0">
-<Grid.ColumnDefinitions><ColumnDefinition Width="270"/><ColumnDefinition Width="*"/><ColumnDefinition Width="292"/></Grid.ColumnDefinitions>
+<Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="*"/><ColumnDefinition Width="292"/></Grid.ColumnDefinitions>
 <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <!-- Character: click to open the assistant -->
 <Button Grid.RowSpan="2" Click="OpenAssistant" Cursor="Hand" ToolTip="{Binding Assistant.Name, StringFormat=点我打开 AI 助手 · {0}}" AutomationProperties.Name="打开 AI 助手" VerticalAlignment="Bottom" Margin="6,0,0,0">
 <Button.Template><ControlTemplate TargetType="Button"><ContentPresenter/></ControlTemplate></Button.Template>
-<ContentPresenter Content="{Binding CharacterArt}" ContentTemplate="{StaticResource Art}" MaxHeight="640"/></Button>
+<ContentPresenter Content="{Binding CharacterArt}" ContentTemplate="{StaticResource Art}" MaxHeight="700" Margin="-10,0,-20,0"/></Button>
 
 <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="4,6,10,10"><StackPanel>
 <!-- 今日概览 -->
@@ -106,7 +106,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="游戏与日常任务" Style="{StaticResource RibbonText}"/></StackPanel></Border>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate>
 <Border Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="14" Margin="0,0,0,10" ClipToBounds="True"><Grid>
-<Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <!-- Banner: user image if supplied, otherwise a game-coloured plate with the title -->
 <Border CornerRadius="13,0,0,13" MinHeight="78">
 <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="{Binding BannerFrom}" Offset="0"/><GradientStop Color="{Binding BannerTo}" Offset="1"/></LinearGradientBrush></Border.Background>
@@ -116,9 +116,9 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding Name}" Foreground="White" FontSize="22" FontWeight="Bold" TextWrapping="NoWrap"/>
 <TextBlock Text="{Binding Tagline}" Foreground="#E6ECFF" FontFamily="{StaticResource Script}" FontStyle="Italic" FontSize="13" TextWrapping="NoWrap"/></StackPanel></Grid></Border>
 <StackPanel Grid.Column="1" Margin="16,10,8,10" VerticalAlignment="Center">
-<StackPanel Orientation="Horizontal"><Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-<TextBlock Text="{Binding Version}" FontWeight="SemiBold" FontSize="13" TextWrapping="NoWrap"/>
-<TextBlock Text="{Binding RunHint, StringFormat=  · {0}}" Style="{StaticResource Small}" TextWrapping="NoWrap"/></StackPanel>
+<DockPanel><Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+<TextBlock DockPanel.Dock="Right" Text="{Binding RunHint}" Style="{StaticResource Small}" FontSize="12" TextWrapping="NoWrap" Margin="8,0,0,0"/>
+<TextBlock Text="{Binding ShortVersion}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Version}"/></DockPanel>
 <ItemsControl ItemsSource="{Binding Chips}" Margin="0,8,0,0"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,2" Margin="0,0,6,4"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">

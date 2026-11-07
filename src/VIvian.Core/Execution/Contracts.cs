@@ -29,6 +29,13 @@ public interface IEngineRun : IAsyncDisposable
     Task<CleanupState> ReconcileAsync(CancellationToken ct);
 }
 
+/// <summary>Optional exact-run pause control. A state is reported only after the engine acknowledges it.</summary>
+public interface IPausableEngineRun
+{
+    bool IsPaused { get; }
+    Task<bool> SetPausedAsync(bool pause, CancellationToken ct);
+}
+
 public sealed record ProcessLaunchSpec(
     string FileName, IReadOnlyList<string> Arguments, string WorkingDirectory,
     IReadOnlyDictionary<string, string>? Environment = null);

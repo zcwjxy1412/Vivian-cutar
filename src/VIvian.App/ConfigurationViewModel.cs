@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using VIvian.Core;
 using VIvian.Core.Engines;
+using VIvian.Infrastructure;
 
 namespace VIvian.App;
 
@@ -43,6 +44,9 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private readonly Func<GameId, string> _installPath;
     private readonly Func<bool> _isRunning;
     private readonly string _auditDirectory;
+    private readonly LocalDatabase _accounts;
+    private readonly Func<GameAccount?> _selectedAccount;
+    private AccountSettingsSnapshot? _accountSettings;
     private ConfigurationSnapshot? _snapshot;
     private FileSystemWatcher? _watcher;
     private System.Windows.Threading.DispatcherTimer? _timer;
@@ -59,9 +63,10 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public int PendingCount => Parameters.Count(p => p.IsChanged);
 
     public ConfigurationViewModel(IConfigurationControl control, Func<GameId, string> installPath,
-        Func<bool> isRunning, string auditDirectory)
+        Func<bool> isRunning, string auditDirectory, LocalDatabase accounts, Func<GameAccount?> selectedAccount)
     {
         _control = control; _installPath = installPath; _isRunning = isRunning; _auditDirectory = auditDirectory;
+        _accounts = accounts; _selectedAccount = selectedAccount;
         ReadCommand = new(ReadAsync, Error);
         SaveCommand = new(() => { TryApplyPending(interactive: true); return Task.CompletedTask; }, Error);
         OpenSettingsCommand = new(OpenSettings);
@@ -79,8 +84,12 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         if (_snapshot is null) await ReadAsync();
         try
         {
+            var version = Path.Combine(path, "assets", "config", "version.txt");
+            if (!File.Exists(version)) { Status = "未找到星铁助手版本文件；请检查安装目录。"; return; }
+            if (File.ReadAllText(version).Trim() != EngineCatalog.March7th.PinnedVersion)
+            { Status = "星铁助手版本与当前适配版本不兼容，请先核对安装版本。"; return; }
             VIvian.Infrastructure.Processes.WindowsProcessSupervisor.OpenUserInterface(path, "March7th Launcher.exe");
-            Status = "已打开星铁助手（如果弹出管理员确认，选“是”）。在那里改的设置一保存，就会自动同步到这里。";
+            Status = "已打开星铁助手主界面；此版本没有已核对的支援设置直达入口，请在原程序中打开详细设置。保存后会同步到这里。";
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         { Status = "你在管理员确认里选了“否”，星铁助手没有打开。"; }
@@ -96,14 +105,43 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         Status = "已切换游戏；点击“重新读取”。";
     }
 
-    public Task ReadAsync()
+    public async Task SelectAccountAsync()
     {
+        _debounce?.Stop();
+        _snapshot = null;
+        _accountSettings = null;
+        Parameters.Clear();
+        if (!string.IsNullOrWhiteSpace(_installPath(GameId.StarRail)))
+            await ReadAsync();
+    }
+
+    public async Task ReadAsync()
+    {
+        var selectedId = _selectedAccount()?.Id;
         var path = _installPath(_game);
-        if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return Task.CompletedTask; }
+        if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return; }
         var snapshot = _control.ReadConfiguration(_game, path);
+        _accountSettings = null;
+        if (_game == GameId.StarRail && _selectedAccount() is { } account)
+        {
+            _accountSettings = await _accounts.LoadAccountSettingsAsync(account.Id);
+            if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
+            {
+                if (_accountSettings.Values.Count == 0)
+                {
+                    var initial = snapshot.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+                        .ToDictionary(v => v.Schema.Path, v => v.Value!);
+                    _accountSettings = await _accounts.SaveAccountSettingsAsync(_accountSettings with { Values = initial });
+                }
+                snapshot = OverlayAccount(snapshot, _accountSettings);
+            }
+        }
+        if (_selectedAccount()?.Id != selectedId) return;
         _snapshot = snapshot;
         Show(snapshot, null);
-        Status = $"已读取 {snapshot.PinnedVersion}；{snapshot.ReadAt.ToLocalTime():HH:mm:ss} 同步。修改会立即写入星铁助手。";
+        Status = _accountSettings is not null && _selectedAccount()?.Id != Guid.Parse("00000000-0000-4000-8000-000000000002")
+            ? "已读取所选账号的独立设置；修改保存到 VIvian，运行前需核对登录身份。"
+            : $"已读取 {snapshot.PinnedVersion}；{snapshot.ReadAt.ToLocalTime():HH:mm:ss} 同步。修改会立即写入星铁助手。";
         _watcher?.Dispose();
         if (File.Exists(snapshot.Path))
         {
@@ -119,8 +157,14 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             _timer.Tick += (_, _) => { Reconcile(); TryApplyPending(interactive: false); };
             _timer.Start();
         }
-        return Task.CompletedTask;
     }
+
+    private static ConfigurationSnapshot OverlayAccount(ConfigurationSnapshot source, AccountSettingsSnapshot settings) => source with
+    {
+        Values = source.Values.Select(v => settings.Values.TryGetValue(v.Schema.Path, out var saved)
+            && v.Schema.Access == ParameterAccess.VerifiedReadWrite && ParameterRules.IsValid(v.Schema, saved)
+                ? v with { Value = saved, State = "账号独立设置" } : v).ToArray()
+    };
 
     /// <summary>Rows for a snapshot; carried-over edits keep their values. Each row auto-saves when edited.</summary>
     private void Show(ConfigurationSnapshot snapshot, IReadOnlyDictionary<string, string>? edits)
@@ -171,6 +215,28 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         _applying = true;
         try
         {
+            if (_accountSettings is not null && _selectedAccount() is { } account
+                && account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
+            {
+                if (_isRunning()) { Status = "任务运行中，账号设置暂不写入。"; return false; }
+                var accountProposal = _control.ProposeChanges(_snapshot, values);
+                var accountRisky = accountProposal.Changes.Where(ParameterRules.RequiresConfirmation).ToList();
+                if (accountRisky.Count > 0)
+                {
+                    if (!interactive) return false;
+                    if (MessageBox.Show("所选设置可能消耗不可退回的资源或分解遗器。确认保存到此账号档案？",
+                            "VIvian · 确认账号设置", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                    { Status = "已取消保存，账号设置保持原值。"; return false; }
+                }
+                var merged = new Dictionary<string, string>(_accountSettings.Values);
+                foreach (var (key, value) in values) merged[key] = value;
+                _accountSettings = Task.Run(() => _accounts.SaveAccountSettingsAsync(_accountSettings with { Values = merged }))
+                    .GetAwaiter().GetResult();
+                _snapshot = OverlayAccount(_snapshot, _accountSettings);
+                Show(_snapshot, null);
+                Status = "已保存所选账号的独立设置；尚未写入原项目。";
+                return true;
+            }
             var proposal = _control.ProposeChanges(_snapshot, values);
             if (proposal.Changes.Count == 0) return true;
             var check = _control.ValidateChanges(proposal, _isRunning());
@@ -241,6 +307,8 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public bool Reconcile()
     {
         if (_snapshot is null || _applying) return true;
+        if (_accountSettings is not null && _selectedAccount()?.Id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
+            return true; // The selected account's stored values must never be replaced by another account's live file.
         ConfigurationSnapshot latest;
         try { latest = _control.ReadConfiguration(_game, _installPath(_game)); }
         catch (Exception ex) { Status = "原软件修改了配置，重新读取失败：" + ex.Message; return false; }

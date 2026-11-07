@@ -53,6 +53,7 @@ public static class RunPresentation
         null => "",
         ReasonCodes.Completed => "有明确的完成证据",
         ReasonCodes.ReportedFailure => "引擎明确报告失败",
+        ReasonCodes.ResolutionCircuitOpen => "游戏分辨率连续获取失败，已停止当前任务；请检查游戏窗口、显示模式和上游日志",
         ReasonCodes.ReportedCancel => "引擎报告已取消",
         ReasonCodes.NoCompletionEvidence => "没有完成证据，不判为成功",
         ReasonCodes.ConflictingEvidence => "证据相互矛盾",

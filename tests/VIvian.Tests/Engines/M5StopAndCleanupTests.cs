@@ -72,6 +72,19 @@ public sealed class M5StopAndCleanupTests : IDisposable
     }
 
     [Fact]
+    public void PauseAndResumeUseOnlyExactRunControlFile()
+    {
+        Record(RunId, "running");
+        var control = March7thUpstreamActivity.TrySendControl(_root, RunId, "pause");
+        Assert.Equal(Path.Combine(_runs, RunId + ".control"), control);
+        Assert.Equal("{\"command\": \"pause\"}", File.ReadAllText(control!));
+        Assert.Equal(control, March7thUpstreamActivity.TrySendControl(_root, RunId, "resume"));
+        Assert.Equal("{\"command\": \"resume\"}", File.ReadAllText(control!));
+        Assert.Null(March7thUpstreamActivity.TrySendControl(_root, "current", "pause"));
+        Assert.Null(March7thUpstreamActivity.TrySendControl(_root, RunId, "launch"));
+    }
+
+    [Fact]
     public void StopIsWrittenOnlyIntoThisInstallationsRunsFolder()
     {
         Record(RunId, "running", controlFile: Path.Combine(Path.GetTempPath(), "elsewhere.control"));

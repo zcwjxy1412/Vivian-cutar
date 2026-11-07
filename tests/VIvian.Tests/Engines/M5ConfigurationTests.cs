@@ -6,6 +6,10 @@ using Xunit;
 
 namespace VIvian.Tests.Engines;
 
+[CollectionDefinition("VersionedConfigurationControl", DisableParallelization = true)]
+public sealed class VersionedConfigurationControlCollection;
+
+[Collection("VersionedConfigurationControl")]
 public sealed class M5ConfigurationTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "vivian-m5-" + Guid.NewGuid().ToString("N"));
@@ -33,6 +37,22 @@ public sealed class M5ConfigurationTests : IDisposable
         Assert.NotEmpty(_service.ListTasks(GameId.ZenlessZoneZero));
         Assert.Equal(ParameterAccess.UpstreamManaged,
             EngineCatalog.OneDragon.Parameters.Single().Access);
+    }
+
+    [Fact]
+    public void SupportTogglePreservesUpstreamCharacterAndFriendDetails()
+    {
+        File.AppendAllText(Config, "borrow_enable: true # support\r\nborrow_character: 丹恒\r\nborrow_friend: 朋友A\r\nborrow_scroll_times: 10\r\n");
+        var originalDetails = "borrow_character: 丹恒\r\nborrow_friend: 朋友A\r\nborrow_scroll_times: 10\r\n";
+        var first = _service.ReadConfiguration(GameId.StarRail, _root);
+        var off = _service.ApplyChanges(_service.ProposeChanges(first,
+            new Dictionary<string, string> { ["borrow_enable"] = "false" }), Path.Combine(_root, "audit"), false);
+        Assert.Contains(originalDetails, File.ReadAllText(Config));
+        Assert.Equal("false", off.Snapshot.Values.Single(v => v.Schema.Path == "borrow_enable").Value);
+        var on = _service.ApplyChanges(_service.ProposeChanges(off.Snapshot,
+            new Dictionary<string, string> { ["borrow_enable"] = "true" }), Path.Combine(_root, "audit"), false);
+        Assert.Contains(originalDetails, File.ReadAllText(Config));
+        Assert.Equal("true", on.Snapshot.Values.Single(v => v.Schema.Path == "borrow_enable").Value);
     }
 
     [Fact]
@@ -96,7 +116,7 @@ public sealed class M5ConfigurationTests : IDisposable
     }
 
     [Fact]
-    public void LockedTargetFallsBackToInPlaceWriteAfterBackup()
+    public void LockedTargetNeverTruncatesOriginal()
     {
         var before = File.ReadAllBytes(Config);
         var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
@@ -104,10 +124,8 @@ public sealed class M5ConfigurationTests : IDisposable
         VersionedConfigurationControl.ReplaceOverride = (_, _) => false; // antivirus holding the file
         try
         {
-            var result = _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false);
-            Assert.Equal("false", result.Snapshot.Values.Single(v => v.Schema.Path == "power_enable").Value);
-            Assert.Equal(before, File.ReadAllBytes(result.BackupPath));
-            Assert.Contains("unknown_future: 42 # untouched\r\n", File.ReadAllText(Config));
+            Assert.Throws<IOException>(() => _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false));
+            Assert.Equal(before, File.ReadAllBytes(Config));
             Assert.Empty(Directory.GetFiles(_root, "*.tmp"));
         }
         finally { VersionedConfigurationControl.ReplaceOverride = null; }

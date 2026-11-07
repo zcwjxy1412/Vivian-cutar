@@ -108,11 +108,13 @@ public partial class App : Application
                     admitReal: adapter =>
                         RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
+                services.AddSingleton<AccountViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
             }).Build();
             await _host.StartAsync();
             await Task.Run(() => database.InitializeAsync());
+            await Task.Run(() => database.ReconcileInterruptedBatchesAsync());
             // Log retention follows the user's preference; only VIvian's own log files are considered.
             var prefs = await Task.Run(() => database.LoadPreferencesAsync());
             var pruned = await Task.Run(() => VIvian.Infrastructure.Diagnostics.LogMaintenance.Prune(

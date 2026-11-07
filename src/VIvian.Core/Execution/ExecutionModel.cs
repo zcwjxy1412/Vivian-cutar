@@ -29,6 +29,7 @@ public static class ReasonCodes
 {
     public const string Completed = "completed";
     public const string ReportedFailure = "reported_failure";
+    public const string ResolutionCircuitOpen = "resolution_circuit_open";
     public const string ReportedCancel = "reported_cancel";
     public const string NoCompletionEvidence = "no_completion_evidence";
     public const string ConflictingEvidence = "conflicting_evidence";

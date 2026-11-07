@@ -87,6 +87,7 @@ public sealed class MainViewModel : ObservableObject
     private TaskPlanViewModel? _selectedPlan;
     public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set => Set(ref _selectedPlan, value); }
     public ConfigurationViewModel Configuration { get; }
+    public AccountViewModel Accounts { get; }
     private EngineCard? _selectedEngine;
     public EngineCard? SelectedEngine { get => _selectedEngine; set => Set(ref _selectedEngine, value); }
 
@@ -105,6 +106,15 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand ExportDiagnosticsCommand { get; }
     public AsyncCommand SaveFeedbackCommand { get; }
     public AsyncCommand StartMarch7thCommand { get; }
+    public AsyncCommand RunAllAccountsCommand { get; }
+    public RelayCommand StopBatchCommand { get; }
+    public RelayCommand SkipAccountCommand { get; }
+    private bool _batchRunning;
+    private bool _stopBatch;
+    private bool _skipAccount;
+    public bool BatchRunning { get => _batchRunning; private set => Set(ref _batchRunning, value); }
+    private string _batchStatus = "尚未运行多账号批次。";
+    public string BatchStatus { get => _batchStatus; private set => Set(ref _batchStatus, value); }
     public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = RealExecutionPolicy.BuildPermitsRealExecution
         ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
         : EngineCatalog.March7th.Tasks;
@@ -258,14 +268,17 @@ public sealed class MainViewModel : ObservableObject
     public QueueViewModel Queue { get; }
 
     public MainViewModel(ISettingsStore settings, IDiagnosticStore history, ITaskPlanStore plans, IPreferenceStore preferences,
-        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor)
+        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor, AccountViewModel accounts)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
+        Accounts = accounts;
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
-            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"));
+            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
+            accounts.Database, () => accounts.SelectedStarRail);
+        accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>
@@ -288,6 +301,9 @@ public sealed class MainViewModel : ObservableObject
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
+        RunAllAccountsCommand = new(() => RunAsync(RunAllAccountsAsync), HandleError);
+        StopBatchCommand = new(() => { _stopBatch = true; Queue.EmergencyStop(); BatchStatus = "正在停止批次…"; });
+        SkipAccountCommand = new(() => { _skipAccount = true; Queue.EmergencyStop(); BatchStatus = "正在跳过当前账号，等待资源清理…"; });
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
         foreach (var card in Engines)
@@ -298,7 +314,7 @@ public sealed class MainViewModel : ObservableObject
         Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
             new VIvian.Infrastructure.Assistant.AssistantTools(_control, game => Engines.Single(e => e.Id == game).InstallPath,
                 () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version, e.Compatibility, e.CanRunForReal)).ToList(),
-                async () => await _runs.ReadRecentRunsAsync(20)),
+                async () => await _runs.ReadRecentRunsAsync(20), accounts.Database, () => accounts.SelectedStarRail?.Id),
             () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
             () => { _ = Configuration.ReadAsync(); });
         Configuration.PropertyChanged += (_, e) =>
@@ -335,6 +351,7 @@ public sealed class MainViewModel : ObservableObject
             SelectedPlan = TaskPlans.FirstOrDefault(p => p.Game == GameId.StarRail) ?? SelectedPlan;
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
+        await Accounts.ReloadAsync();
         await RefreshLastRunsAsync();
         if (autoPrepare) await AutoDiscoverAsync(persist: true);
         await CheckEnginesCoreAsync();
@@ -425,6 +442,8 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     private async Task OneClickAsync()
     {
+        if (Accounts.SelectedStarRail is { Id: var selectedId } && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
+        { Status = "当前选择的是新增账号。其设置尚未加载到上游；为避免用错账号配置，本次没有启动。"; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
         // A previous run whose worker exit could not be confirmed blocks everything until it is verified:
         // first by VIvian itself from March7th's run records, only then by asking the user.
@@ -522,6 +541,8 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task StartMarch7thAsync()
     {
+        if (Accounts.SelectedStarRail is { Id: var selectedId } && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
+        { Status = "当前选择的是新增账号。其设置尚未加载到上游；为避免用错账号配置，本次没有启动。"; return; }
         var admission = Admission;
         if (!admission.Allowed && admission.State is ManualTestState.NotAvailable or ManualTestState.Consumed)
         { Status = admission.Text; return; }
@@ -593,6 +614,123 @@ public sealed class MainViewModel : ObservableObject
             try { await RefreshLastRunsAsync(); } catch (Exception ex) { Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
             await SaveFeedbackAsync();
             RaiseAdmission();
+        }
+    }
+
+    private async Task RunAllAccountsAsync()
+    {
+        if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+        { BatchStatus = "当前有任务运行、清理待确认或临时配置待恢复，批次未启动。"; return; }
+        var card = Engines.Single(e => e.Id == GameId.StarRail);
+        if (!RealExecutionPolicy.IsM5DailyTest || _march7thEvidence is null ||
+            card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
+        { BatchStatus = "请先在“引擎与环境”核对星铁官方发行包与安装身份。"; return; }
+        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
+        { BatchStatus = "当前账号仍有未保存设置；批次未启动。"; return; }
+        var candidates = (await Accounts.Database.LoadAccountsAsync(GameId.StarRail))
+            .Where(a => a.Enabled && a.AutoRun).OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
+        if (candidates.Length == 0) { BatchStatus = "请在账号管理中勾选要运行的星铁账号。"; return; }
+        if (MessageBox.Show($"将串行运行 {candidates.Length} 个星铁账号。每个账号开始前需要你手动登录并核对 UID；每轮任务仍会请求 UAC。确认开始批次？",
+                "VIvian · 多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        { BatchStatus = "已取消批次。"; return; }
+        var batch = await Accounts.Database.BeginBatchAsync(GameId.StarRail);
+        BatchRunning = true; _stopBatch = false; _skipAccount = false;
+        var completed = 0; var failed = 0; var skipped = 0;
+        try
+        {
+            for (var i = 0; i < candidates.Length && !_stopBatch; i++)
+            {
+                var account = candidates[i];
+                batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = account.Id,
+                    Detail = $"{i + 1}/{candidates.Length}：等待手动登录 {account.Name}" };
+                await Accounts.Database.SaveBatchAsync(batch);
+                BatchStatus = batch.Detail;
+                var identity = $"请手动切换并登录星铁账号“{account.Name}”。\n区服：{account.Region}\n预期 UID：{account.Uid ?? "未填写；请先在账号管理中填写 UID"}\n\n请在游戏画面中查看实际 UID，确认与档案完全一致后点“是”。点“否”将跳过此账号。";
+                if (string.IsNullOrWhiteSpace(account.Uid) || MessageBox.Show(identity, "核对实际登录身份",
+                        MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                {
+                    skipped++;
+                    await Accounts.Database.RecordAccountSwitchAsync(i == 0 ? null : candidates[i - 1].Id,
+                        account.Id, "unverified", "未确认游戏画面中的实际 UID。");
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "identity_unverified", "实际登录 UID 未由用户确认，任务未启动。");
+                    continue;
+                }
+                await Accounts.Database.RecordAccountSwitchAsync(i == 0 ? null : candidates[i - 1].Id,
+                    account.Id, "manual_verified", "用户在游戏画面中人工核对 UID；本次运行前仍需再次确认任务。");
+                _skipAccount = false;
+                if (_stopBatch) break;
+                var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id);
+                if (!(await Accounts.Database.LoadAccountTaskPlanAsync(account.Id)).DailyEnabled)
+                {
+                    skipped++;
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
+                        "plan_disabled", "此账号的星铁日常任务计划未启用。");
+                    continue;
+                }
+                if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002") && saved.Values.Count == 0)
+                {
+                    failed++;
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
+                        "configuration_missing", "账号独立设置尚未初始化；请在游戏管理中选择此账号并读取配置。");
+                    continue;
+                }
+                IReadOnlyList<TemporaryChange> accountChanges;
+                try
+                {
+                    var actual = _control.ReadConfiguration(GameId.StarRail, card.InstallPath);
+                    var desired = new Dictionary<string, string>(saved.Values);
+                    foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask)) desired[key] = value;
+                    accountChanges = TemporaryConfigurationManager.Plan(actual, desired);
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "configuration_failed", ex.Message);
+                    continue;
+                }
+                // This confirmation applies to exactly one account and one run. No stored permission is reused.
+                if (MessageBox.Show($"账号“{account.Name}”（UID {account.Uid}）已人工核对。\n本次临时修改 {accountChanges.Count} 项设置：\n" +
+                        (accountChanges.Count == 0 ? "（无需修改）" : string.Join("\n", accountChanges.Select(c => $"· {c.Path}: {c.Original} → {c.Temporary}"))) +
+                        "\n\n确认加载并执行一次日常任务？",
+                        "确认本次真实任务", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                { skipped++; await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "cancelled", "用户取消本次执行。"); continue; }
+                BatchStatus = $"{i + 1}/{candidates.Length}：正在运行 {account.Name}";
+                TaskPlanExecution result;
+                try
+                {
+                    var plan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
+                    result = await _control.ExecuteTaskPlan(plan,
+                        new RealTaskAuthorization(card.InstallPath, _march7thEvidence, () => !_stopBatch && !_skipAccount,
+                            true, AllowTemporaryConfiguration: true, AccountSettings: saved.Values));
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "failed", ex.Message);
+                    BatchStatus = $"{account.Name} 未启动或执行异常：{ex.Message}";
+                    if (_control.HasPendingConfigurationRestore || Queue.HasUnresolved) { _stopBatch = true; break; }
+                    continue;
+                }
+                var run = result.Queue?.Runs.LastOrDefault();
+                var success = run?.Outcome == RunOutcome.Success && run.Cleanup == CleanupState.Confirmed
+                    && result.Restore?.State != RestoreState.Blocked;
+                var label = _skipAccount ? "skipped" : success ? "success" : "failed";
+                if (_skipAccount) skipped++; else if (success) completed++; else failed++;
+                await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, run?.RunId, label,
+                    result.Restore?.Detail ?? RunPresentation.Reason(run?.ReasonCode));
+                if (result.Restore?.State == RestoreState.Blocked || Queue.HasUnresolved)
+                { _stopBatch = true; BatchStatus = "临时配置未恢复或资源清理未确认，批次已停止。"; break; }
+            }
+            batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = null,
+                State = _stopBatch ? "stopped" : "finished",
+                Detail = $"完成 {completed}，失败 {failed}，跳过 {skipped}。" };
+            await Accounts.Database.SaveBatchAsync(batch);
+            BatchStatus = "批次结束：" + batch.Detail;
+        }
+        finally
+        {
+            BatchRunning = false;
+            await Accounts.ReloadAsync();
         }
     }
 

@@ -17,9 +17,11 @@ public sealed class AccountStoreTests
             await db.InitializeAsync();
             var legacy = (await db.LoadAccountsAsync(GameId.StarRail)).Single();
             Assert.Equal("原有账号", legacy.Name);
-            var other = await db.AddAccountAsync(GameId.StarRail, "第二个账号", "国服", "123456789");
+            var separateInstall = Path.Combine(Path.GetDirectoryName(path)!, "m7a-second");
+            var other = await db.AddAccountAsync(GameId.StarRail, "第二个账号", "国服", "123456789", separateInstall);
             Assert.NotEqual(legacy.Id, other.Id);
             Assert.Equal(1, other.Order);
+            Assert.Equal(separateInstall, other.InstallPath);
             var settings = await db.LoadAccountSettingsAsync(other.Id);
             await db.SaveAccountSettingsAsync(settings with
             { Values = new Dictionary<string, string> { ["borrow_enable"] = "false" } });
@@ -42,6 +44,32 @@ public sealed class AccountStoreTests
             using var cmd = c.CreateCommand();
             cmd.CommandText = "PRAGMA foreign_key_check;";
             Assert.Null(await cmd.ExecuteScalarAsync());
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var file in Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + "*")) File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task VersionFourUpgradeAddsIsolatedInstallPathWithBackup()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "vivian-v4-" + Guid.NewGuid().ToString("N") + ".db");
+        try
+        {
+            var db = new LocalDatabase(path);
+            await db.InitializeAsync();
+            await using (var c = new SqliteConnection("Data Source=" + path + ";Pooling=False"))
+            {
+                await c.OpenAsync();
+                using var cmd = c.CreateCommand();
+                cmd.CommandText = "ALTER TABLE game_accounts DROP COLUMN install_path; PRAGMA user_version=4;";
+                await cmd.ExecuteNonQueryAsync();
+            }
+            await db.InitializeAsync();
+            Assert.True(File.Exists(path + ".pre-v5.bak"));
+            Assert.Equal("", (await db.LoadAccountsAsync(GameId.StarRail)).Single().InstallPath);
         }
         finally
         {

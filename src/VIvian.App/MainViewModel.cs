@@ -275,7 +275,9 @@ public sealed class MainViewModel : ObservableObject
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
-            game => Engines.Single(e => e.Id == game).InstallPath,
+            game => game == GameId.StarRail && accounts.SelectedStarRail is { Id: var selectedId } selected
+                && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002")
+                    ? selected.InstallPath : Engines.Single(e => e.Id == game).InstallPath,
             () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
             accounts.Database, () => accounts.SelectedStarRail);
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
@@ -627,8 +629,9 @@ public sealed class MainViewModel : ObservableObject
         { BatchStatus = "请先在“引擎与环境”核对星铁官方发行包与安装身份。"; return; }
         if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
         { BatchStatus = "当前账号仍有未保存设置；批次未启动。"; return; }
-        var candidates = (await Accounts.Database.LoadAccountsAsync(GameId.StarRail))
-            .Where(a => a.Enabled && a.AutoRun).OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
+        var allAccounts = await Accounts.Database.LoadAccountsAsync(GameId.StarRail);
+        var candidates = allAccounts.Where(a => a.Enabled && a.AutoRun)
+            .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
         if (candidates.Length == 0) { BatchStatus = "请在账号管理中勾选要运行的星铁账号。"; return; }
         if (MessageBox.Show($"将串行运行 {candidates.Length} 个星铁账号。每个账号开始前需要你手动登录并核对 UID；每轮任务仍会请求 UAC。确认开始批次？",
                 "VIvian · 多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
@@ -641,6 +644,27 @@ public sealed class MainViewModel : ObservableObject
             for (var i = 0; i < candidates.Length && !_stopBatch; i++)
             {
                 var account = candidates[i];
+                var accountPath = account.Id == Guid.Parse("00000000-0000-4000-8000-000000000002")
+                    ? card.InstallPath : account.InstallPath;
+                if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002") &&
+                    (string.IsNullOrWhiteSpace(accountPath) ||
+                     string.Equals(Path.GetFullPath(accountPath), Path.GetFullPath(card.InstallPath), StringComparison.OrdinalIgnoreCase) ||
+                     allAccounts.Where(a => a.Id != account.Id).Any(a => a.InstallPath.Length > 0 &&
+                         string.Equals(Path.GetFullPath(a.InstallPath), Path.GetFullPath(accountPath), StringComparison.OrdinalIgnoreCase))))
+                {
+                    failed++;
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
+                        "configuration_not_isolated", "新增账号须绑定与其他账号不同的 March7thAssistant 安装目录。");
+                    continue;
+                }
+                var inspected = await March7thReadOnlyInspector.InspectAsync(accountPath, _march7thEvidence);
+                if (inspected.Compatibility != March7thCompatibility.Verified)
+                {
+                    failed++;
+                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
+                        "install_not_verified", inspected.Detail);
+                    continue;
+                }
                 batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = account.Id,
                     Detail = $"{i + 1}/{candidates.Length}：等待手动登录 {account.Name}" };
                 await Accounts.Database.SaveBatchAsync(batch);
@@ -677,7 +701,7 @@ public sealed class MainViewModel : ObservableObject
                 IReadOnlyList<TemporaryChange> accountChanges;
                 try
                 {
-                    var actual = _control.ReadConfiguration(GameId.StarRail, card.InstallPath);
+                    var actual = _control.ReadConfiguration(GameId.StarRail, accountPath);
                     var desired = new Dictionary<string, string>(saved.Values);
                     foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask)) desired[key] = value;
                     accountChanges = TemporaryConfigurationManager.Plan(actual, desired);
@@ -700,7 +724,7 @@ public sealed class MainViewModel : ObservableObject
                 {
                     var plan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
                     result = await _control.ExecuteTaskPlan(plan,
-                        new RealTaskAuthorization(card.InstallPath, _march7thEvidence, () => !_stopBatch && !_skipAccount,
+                        new RealTaskAuthorization(accountPath, _march7thEvidence, () => !_stopBatch && !_skipAccount,
                             true, AllowTemporaryConfiguration: true, AccountSettings: saved.Values));
                 }
                 catch (Exception ex)

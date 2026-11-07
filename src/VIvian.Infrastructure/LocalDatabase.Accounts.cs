@@ -5,7 +5,7 @@ using VIvian.Core.Engines;
 
 namespace VIvian.Infrastructure;
 
-public sealed record GameAccount(Guid Id, GameId Game, string Name, string Region, string? Uid,
+public sealed record GameAccount(Guid Id, GameId Game, string Name, string Region, string? Uid, string InstallPath,
     bool Enabled, bool AutoRun, int Order, string LoginState, string VerificationState,
     DateTimeOffset? LastRunAt, string? LastResult, long Revision);
 public sealed record AccountSettingsSnapshot(Guid AccountId, IReadOnlyDictionary<string, string> Values, long Revision);
@@ -21,7 +21,7 @@ public sealed partial class LocalDatabase
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT account_id,game,display_name,region,uid,enabled,auto_run,sort_order,login_state,verification_state,last_run_at,last_result,revision FROM game_accounts WHERE ($game IS NULL OR game=$game) ORDER BY game,sort_order,account_id;";
+        cmd.CommandText = "SELECT account_id,game,display_name,region,uid,install_path,enabled,auto_run,sort_order,login_state,verification_state,last_run_at,last_result,revision FROM game_accounts WHERE ($game IS NULL OR game=$game) ORDER BY game,sort_order,account_id;";
         cmd.Parameters.AddWithValue("$game", game is null ? DBNull.Value : (object)(int)game);
         var result = new List<GameAccount>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -31,10 +31,10 @@ public sealed partial class LocalDatabase
             // Stable IDs from the legacy migration are not GUIDs; map them deterministically without using names.
             var id = Guid.TryParse(idText, out var parsed) ? parsed : LegacyId((GameId)reader.GetInt32(1));
             result.Add(new(id, (GameId)reader.GetInt32(1), reader.GetString(2), reader.GetString(3),
-                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetInt32(5) != 0, reader.GetInt32(6) != 0,
-                reader.GetInt32(7), reader.GetString(8), reader.GetString(9),
-                reader.IsDBNull(10) ? null : DateTimeOffset.Parse(reader.GetString(10)),
-                reader.IsDBNull(11) ? null : reader.GetString(11), reader.GetInt64(12)));
+                reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetInt32(6) != 0, reader.GetInt32(7) != 0,
+                reader.GetInt32(8), reader.GetString(9), reader.GetString(10),
+                reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),
+                reader.IsDBNull(12) ? null : reader.GetString(12), reader.GetInt64(13)));
         }
         return result;
     }
@@ -50,20 +50,23 @@ public sealed partial class LocalDatabase
         : id == LegacyId(GameId.StarRail) ? "legacy-star-rail"
         : id == LegacyId(GameId.ZenlessZoneZero) ? "legacy-zenless" : id.ToString("D");
 
-    public async Task<GameAccount> AddAccountAsync(GameId game, string name, string region, string? uid, CancellationToken ct = default)
+    public async Task<GameAccount> AddAccountAsync(GameId game, string name, string region, string? uid,
+        string installPath = "", CancellationToken ct = default)
     {
         ValidateAccount(name, region, uid);
+        ValidateInstallPath(installPath);
         var id = Guid.NewGuid();
         await using var c = await OpenAsync(ct);
         using var tx = c.BeginTransaction();
         using var cmd = c.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "INSERT INTO game_accounts(account_id,game,display_name,region,uid,sort_order) VALUES($id,$game,$name,$region,$uid,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM game_accounts WHERE game=$game)); INSERT INTO account_settings(account_id) VALUES($id); INSERT INTO account_task_plans(account_id,plan_json) VALUES($id,$plan);";
+        cmd.CommandText = "INSERT INTO game_accounts(account_id,game,display_name,region,uid,install_path,sort_order) VALUES($id,$game,$name,$region,$uid,$path,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM game_accounts WHERE game=$game)); INSERT INTO account_settings(account_id) VALUES($id); INSERT INTO account_task_plans(account_id,plan_json) VALUES($id,$plan);";
         cmd.Parameters.AddWithValue("$id", DatabaseId(id));
         cmd.Parameters.AddWithValue("$game", (int)game);
         cmd.Parameters.AddWithValue("$name", name.Trim());
         cmd.Parameters.AddWithValue("$region", region.Trim());
         cmd.Parameters.AddWithValue("$uid", uid is null ? DBNull.Value : (object)uid.Trim());
+        cmd.Parameters.AddWithValue("$path", installPath.Trim());
         cmd.Parameters.AddWithValue("$plan", game == GameId.StarRail ? "[{\"Id\":\"routine\",\"Enabled\":true}]" : "[]");
         await cmd.ExecuteNonQueryAsync(ct);
         tx.Commit();
@@ -73,14 +76,16 @@ public sealed partial class LocalDatabase
     public async Task<GameAccount> SaveAccountAsync(GameAccount account, CancellationToken ct = default)
     {
         ValidateAccount(account.Name, account.Region, account.Uid);
+        ValidateInstallPath(account.InstallPath);
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE game_accounts SET display_name=$name,region=$region,uid=$uid,enabled=$enabled,auto_run=$auto,sort_order=$order,revision=revision+1 WHERE account_id=$id AND game=$game AND revision=$revision;";
+        cmd.CommandText = "UPDATE game_accounts SET display_name=$name,region=$region,uid=$uid,install_path=$path,enabled=$enabled,auto_run=$auto,sort_order=$order,revision=revision+1 WHERE account_id=$id AND game=$game AND revision=$revision;";
         cmd.Parameters.AddWithValue("$id", DatabaseId(account.Id));
         cmd.Parameters.AddWithValue("$game", (int)account.Game);
         cmd.Parameters.AddWithValue("$name", account.Name.Trim());
         cmd.Parameters.AddWithValue("$region", account.Region.Trim());
         cmd.Parameters.AddWithValue("$uid", account.Uid is null ? DBNull.Value : (object)account.Uid.Trim());
+        cmd.Parameters.AddWithValue("$path", account.InstallPath.Trim());
         cmd.Parameters.AddWithValue("$enabled", account.Enabled ? 1 : 0);
         cmd.Parameters.AddWithValue("$auto", account.AutoRun ? 1 : 0);
         cmd.Parameters.AddWithValue("$order", account.Order);
@@ -95,15 +100,17 @@ public sealed partial class LocalDatabase
         if (account.Id != plan.AccountId || account.Game != GameId.StarRail)
             throw new ArgumentException("账号与任务计划不匹配。");
         ValidateAccount(account.Name, account.Region, account.Uid);
+        ValidateInstallPath(account.InstallPath);
         await using var c = await OpenAsync(ct);
         using var tx = c.BeginTransaction();
         using (var profile = c.CreateCommand())
         {
             profile.Transaction = tx;
-            profile.CommandText = "UPDATE game_accounts SET display_name=$name,region=$region,uid=$uid,enabled=$enabled,auto_run=$auto,revision=revision+1 WHERE account_id=$id AND game=1 AND revision=$revision;";
+            profile.CommandText = "UPDATE game_accounts SET display_name=$name,region=$region,uid=$uid,install_path=$path,enabled=$enabled,auto_run=$auto,revision=revision+1 WHERE account_id=$id AND game=1 AND revision=$revision;";
             profile.Parameters.AddWithValue("$name", account.Name.Trim());
             profile.Parameters.AddWithValue("$region", account.Region.Trim());
             profile.Parameters.AddWithValue("$uid", account.Uid is null ? DBNull.Value : (object)account.Uid.Trim());
+            profile.Parameters.AddWithValue("$path", account.InstallPath.Trim());
             profile.Parameters.AddWithValue("$enabled", account.Enabled ? 1 : 0);
             profile.Parameters.AddWithValue("$auto", account.AutoRun ? 1 : 0);
             profile.Parameters.AddWithValue("$id", DatabaseId(account.Id));
@@ -317,5 +324,11 @@ public sealed partial class LocalDatabase
     {
         if (string.IsNullOrWhiteSpace(name) || name.Trim().Length > 80) throw new ArgumentException("账号名称须为 1–80 个字符。");
         if (region.Length > 80 || uid?.Length > 40) throw new ArgumentException("区服或 UID 太长。");
+    }
+
+    private static void ValidateInstallPath(string path)
+    {
+        if (path.Length > 512 || path.Contains('\0') || (path.Length > 0 && !Path.IsPathFullyQualified(path.Trim())))
+            throw new ArgumentException("账号专属安装目录须为有效的绝对路径。");
     }
 }

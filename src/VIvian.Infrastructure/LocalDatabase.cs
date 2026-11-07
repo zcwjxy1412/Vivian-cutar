@@ -30,7 +30,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 5;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -108,6 +108,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         PRAGMA user_version=4;
         """;
 
+    private const string SchemaV5 = """
+        ALTER TABLE game_accounts ADD COLUMN install_path TEXT NOT NULL DEFAULT '';
+        PRAGMA user_version=5;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -122,7 +127,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         {
             versionCommand.CommandText = "PRAGMA user_version;";
             var oldVersion = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(ct));
-            var backupPath = _databasePath + ".pre-m5.1.bak";
+            var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak" : ".pre-m5.1.bak");
             if (oldVersion is > 0 and < CurrentSchemaVersion && !File.Exists(backupPath))
             {
                 await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -160,6 +165,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 3)
         {
             command.CommandText = SchemaV4;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 4)
+        {
+            command.CommandText = SchemaV5;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

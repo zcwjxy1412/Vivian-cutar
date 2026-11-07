@@ -284,6 +284,9 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="账号档案" Style="{StaticResource H2}"/><TextBlock Text="名称" Style="{StaticResource Small}"/><TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
 <TextBlock Text="区服" Style="{StaticResource Small}"/><TextBox Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
 <TextBlock Text="游戏 UID（可留空）" Style="{StaticResource Small}"/><TextBox Text="{Binding Uid, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
+<TextBlock Text="账号专属 March7thAssistant 安装目录（原有账号留空）" Style="{StaticResource Small}"/>
+<TextBox Text="{Binding EngineInstallPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
+<TextBlock Text="新增星铁账号须使用独立安装目录，保留各自的好友、队伍和原项目详细设置。" Style="{StaticResource Small}" Margin="0,0,0,10"/>
 <CheckBox Content="启用账号" IsChecked="{Binding Enabled}" Margin="0,0,0,8"/>
 <CheckBox Content="列入运行全部账号" IsChecked="{Binding AutoRun}" Margin="0,0,0,12"/>
 <CheckBox Content="账号任务计划：执行星铁日常" IsChecked="{Binding DailyTaskEnabled}" IsEnabled="{Binding CanEditDailyPlan}" Margin="0,0,0,12"/>

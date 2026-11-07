@@ -111,8 +111,8 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         _snapshot = null;
         _accountSettings = null;
         Parameters.Clear();
-        if (!string.IsNullOrWhiteSpace(_installPath(GameId.StarRail)))
-            await ReadAsync();
+        if (!string.IsNullOrWhiteSpace(_installPath(GameId.StarRail))) await ReadAsync();
+        else Status = "请先为新增账号设置专属 March7thAssistant 安装目录。";
     }
 
     public async Task ReadAsync()

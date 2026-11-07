@@ -54,6 +54,7 @@ public sealed class AccountViewModel : ObservableObject
             if (Game.Id == GameId.StarRail && value is not null) SelectedStarRail = value;
             if (value is null) return;
             Name = value.Name; Region = value.Region; Uid = value.Uid ?? "";
+            EngineInstallPath = value.InstallPath;
             Enabled = value.Enabled; AutoRun = value.AutoRun;
             _ = LoadSelectedPlanAsync(value.Id);
         }
@@ -64,6 +65,8 @@ public sealed class AccountViewModel : ObservableObject
     public string Region { get => _region; set => Set(ref _region, value); }
     private string _uid = "";
     public string Uid { get => _uid; set => Set(ref _uid, value); }
+    private string _engineInstallPath = "";
+    public string EngineInstallPath { get => _engineInstallPath; set => Set(ref _engineInstallPath, value); }
     private bool _enabled = true;
     public bool Enabled { get => _enabled; set => Set(ref _enabled, value); }
     private bool _autoRun;
@@ -103,7 +106,8 @@ public sealed class AccountViewModel : ObservableObject
     {
         var name = Name.Trim();
         if (name.Length == 0) { Status = "请先输入账号名称。"; return; }
-        var added = await _database.AddAccountAsync(Game.Id, name, Region, string.IsNullOrWhiteSpace(Uid) ? null : Uid);
+        var added = await _database.AddAccountAsync(Game.Id, name, Region, string.IsNullOrWhiteSpace(Uid) ? null : Uid,
+            EngineInstallPath);
         await ReloadAsync();
         Selected = Accounts.Single(a => a.Id == added.Id);
         await LoadSelectedPlanAsync(added.Id);
@@ -114,7 +118,8 @@ public sealed class AccountViewModel : ObservableObject
     {
         if (Selected is null) { Status = "请先选择账号档案。"; return; }
         var desired = Selected with
-        { Name = Name, Region = Region, Uid = string.IsNullOrWhiteSpace(Uid) ? null : Uid, Enabled = Enabled, AutoRun = AutoRun };
+        { Name = Name, Region = Region, Uid = string.IsNullOrWhiteSpace(Uid) ? null : Uid,
+            InstallPath = EngineInstallPath, Enabled = Enabled, AutoRun = AutoRun };
         GameAccount updated;
         if (CanEditDailyPlan && _selectedPlan is { } plan && plan.AccountId == desired.Id)
         {

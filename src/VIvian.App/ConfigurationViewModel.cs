@@ -125,6 +125,9 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public async Task ReadAsync()
     {
         var selectedId = _selectedAccount()?.Id;
+        if (selectedId is not null && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002")
+            && (_isRunning() || _control is IUnifiedTaskControl { HasPendingConfigurationRestore: true }))
+        { Status = "此账号正在运行或临时配置尚未恢复；结束后再读取。"; return; }
         var path = _installPath(_game);
         if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return; }
         var snapshot = _control.ReadConfiguration(_game, path);
@@ -178,7 +181,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     {
         if (_selectedAccount() is not { } account || account.Id == Guid.Parse("00000000-0000-4000-8000-000000000002"))
         { await ReadAsync(); return; }
-        if (_isRunning() || PendingCount > 0)
+        if (_isRunning() || _control is IUnifiedTaskControl { HasPendingConfigurationRestore: true } || PendingCount > 0)
         { Status = "任务运行中或仍有未保存修改；暂不导入原项目设置。"; return; }
         if (MessageBox.Show("从所选账号的 March7thAssistant 导入已登记参数并覆盖该账号在 VIvian 中保存的这些值？",
                 "导入账号设置", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
@@ -335,6 +338,8 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         if (_snapshot is null || _applying) return true;
         if (_accountSettings is not null && _selectedAccount()?.Id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
         {
+            if (_isRunning() || _control is IUnifiedTaskControl { HasPendingConfigurationRestore: true })
+                return true; // Temporary per-run values must never be imported as persistent account settings.
             try
             {
                 var upstream = _control.ReadConfiguration(_game, _installPath(_game));

@@ -47,6 +47,11 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "UuaBUHgmtc9h6CMxaQqFDDJxkS5JVy7XEB+DbtCvD68GFcVM9/AccuNwFpARx8nwCnvjaxzoOBjG3gPz32P1Eg=="
+      },
       "vivian.core": {
         "type": "Project"
       },
@@ -54,6 +59,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.14, )",
+          "System.Security.Cryptography.ProtectedData": "[10.0.14, )",
           "VIvian.Core": "[1.0.0, )"
         }
       }

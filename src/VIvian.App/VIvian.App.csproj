@@ -11,5 +11,6 @@
 <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
 <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />
 <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
+<PackageReference Include="XamlAnimatedGif" Version="2.3.2" />
 </ItemGroup>
 </Project>

@@ -34,6 +34,8 @@ public sealed record AppPaths(string DataDirectory)
     }
 }
 
+public sealed record RecentRunRow(string Game, string When, string Result, bool Succeeded, string Duration);
+
 public sealed class MainViewModel : ObservableObject
 {
     private readonly ISettingsStore _settings;
@@ -266,7 +268,7 @@ public sealed class MainViewModel : ObservableObject
         Queue.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(QueueViewModel.IsRunning) or nameof(QueueViewModel.IsIdle) or nameof(QueueViewModel.HasUnresolved))
-                RaiseAdmission();
+            { RaiseAdmission(); RaiseHome(); }
         };
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         AutoDiscoverCommand = new(() => RunAsync(() => AutoDiscoverAsync(persist: true)), HandleError);
@@ -284,8 +286,21 @@ public sealed class MainViewModel : ObservableObject
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
+        OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
+        foreach (var card in Engines)
+        {
+            card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
+            card.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(EngineCard.IncludeInOneClick) or nameof(EngineCard.Compatibility)) RaiseHome(); };
+        }
+        Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
+            new VIvian.Infrastructure.Assistant.AssistantTools(_control, game => Engines.Single(e => e.Id == game).InstallPath,
+                () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version, e.Compatibility, e.CanRunForReal)).ToList(),
+                async () => await _runs.ReadRecentRunsAsync(20)),
+            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
+            () => { _ = Configuration.ReadAsync(); });
         Configuration.PropertyChanged += (_, e) =>
         {
+            if (e.PropertyName == nameof(ConfigurationViewModel.PendingCount)) RaiseHome();
             if (e.PropertyName == nameof(ConfigurationViewModel.Status))
             {
                 RefreshTemporaryConfigurationNeeds();
@@ -361,8 +376,61 @@ public sealed class MainViewModel : ObservableObject
         var recent = await Task.Run(() => _runs.ReadRecentRunsAsync(50));
         foreach (var card in Engines) card.ShowLastRun(recent.FirstOrDefault(r => r.Game == card.Id));
         var real = recent.FirstOrDefault(r => r.Game == GameId.StarRail && !r.IsSimulation);
+        RecentRuns.Clear();
+        foreach (var r in recent.Where(r => !r.IsSimulation).Take(4))
+            RecentRuns.Add(new RecentRunRow(Engines.Single(e => e.Id == r.Game).Name, r.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm"),
+                RealResultLabel(r), r.Outcome == RunOutcome.Success && r.Cleanup != CleanupState.Unconfirmed,
+                Duration(r.UpdatedAt - r.CreatedAt)));
+        var finished = recent.Where(r => !r.IsSimulation && r.Outcome == RunOutcome.Success).Take(5).ToList();
+        EstimateText = finished.Count == 0 ? "—" : "≈ " + Math.Max(1, (int)Math.Round(finished.Average(r => (r.UpdatedAt - r.CreatedAt).TotalMinutes))) + " 分钟";
+        RaiseHome();
         LastRealResultText = real is null ? "上次结果：本版本尚无真实运行记录。"
             : $"上次结果（{real.UpdatedAt.ToLocalTime():MM-dd HH:mm}，RunId {real.RunId:D}）：{RealResultLabel(real)}";
+    }
+
+    private static string Duration(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}时{t.Minutes:D2}分" : $"{t.Minutes}分{t.Seconds:D2}秒";
+
+    // ---- Home page (overview). Every figure comes from real state; nothing is decorative data. ----
+    public ThemeAssets Theme { get; } = new();
+    public ArtSlot CharacterArt => new(Theme.Character);
+    public ArtSlot AssistantArt => new(Theme.Assistant);
+    public AssistantViewModel Assistant { get; }
+    public ObservableCollection<RecentRunRow> RecentRuns { get; } = [];
+    private string _estimate = "—";
+    public string EstimateText { get => _estimate; private set => Set(ref _estimate, value); }
+    public string RunnableText => $"{Engines.Count(e => e.CanRunForReal)} / {Engines.Count}";
+    public string SelectedGamesText => Engines.Count(e => e.IncludeInOneClick).ToString();
+    public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
+    public string RunStateText => Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
+    public string ConfigSyncText => Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
+    private void RaiseHome()
+    {
+        foreach (var name in new[] { nameof(RunnableText), nameof(SelectedGamesText), nameof(InstalledText), nameof(RunStateText), nameof(ConfigSyncText) })
+            Raise(name);
+    }
+    public AsyncCommand OneClickCommand { get; }
+
+    /// <summary>
+    /// The big button: runs every selected game that can run for real (today: Star Rail "日常"). The dialog is the
+    /// per-run consent, and lists any temporary setting change; nothing starts without "是".
+    /// </summary>
+    private async Task OneClickAsync()
+    {
+        var card = Engines.Single(e => e.Id == GameId.StarRail);
+        if (!card.IncludeInOneClick || !card.CanRunForReal)
+        { Status = "没有选中可以真实执行的游戏。目前只有星铁的“日常”可以运行。"; return; }
+        IReadOnlyList<TemporaryChange> changes = [];
+        try { changes = _control.RequiredTemporaryChanges(card.InstallPath, RealExecutionPolicy.M5RealTask); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException) { Status = "读取星铁配置失败，未启动：" + ex.Message; return; }
+        var snapshot = changes.Count > 0 ? _control.ReadConfiguration(GameId.StarRail, card.InstallPath) : null;
+        var text = "将运行：崩坏：星穹铁道 · 日常（清体力 + 每日实训 + 领奖）\n会操作真实游戏和账号；需要管理员权限时由你在 UAC 中决定。" +
+            (snapshot is null ? "" : "\n\n本次需要临时修改：" + TemporaryConfigurationManager.Describe(changes, snapshot) + "，结束后自动恢复。");
+        if (MessageBox.Show(text, "VIvian · 一键日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        { Status = "已取消，没有启动任何任务。"; return; }
+        March7thConfirmedThisRun = true;
+        AllowTemporaryConfigurationThisRun = changes.Count > 0;
+        if (!CanStartMarch7th) { Status = "暂时不能启动：" + Admission.Text; March7thConfirmedThisRun = false; return; }
+        await StartMarch7thAsync();
     }
 
     /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>

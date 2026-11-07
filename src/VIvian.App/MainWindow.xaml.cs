@@ -44,6 +44,40 @@ public partial class MainWindow : Window
         if (dialog.ShowDialog(this) == true) card.InstallPath = dialog.FolderName;
     }
 
+    private AssistantWindow? _assistant;
+
+    /// <summary>Clicking the character opens the floating assistant (one window, kept between clicks).</summary>
+    private void OpenAssistant(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        if (_assistant is null)
+        {
+            _assistant = new AssistantWindow(vm.Assistant) { Owner = this };
+            _assistant.Closed += (_, _) => _assistant = null;
+            _assistant.Left = Left + Math.Max(0, ActualWidth - _assistant.Width - 40);
+            _assistant.Top = Top + 90;
+        }
+        _assistant.Show();
+        _assistant.Activate();
+    }
+
+    private void OpenGameSettings(object sender, RoutedEventArgs e)
+    {
+        Navigation.SelectedIndex = 1;
+        GameTabs.SelectedIndex = (sender as FrameworkElement)?.Tag switch
+        {
+            VIvian.Core.GameId.StarRail => 0, VIvian.Core.GameId.Genshin => 1, _ => 2,
+        };
+    }
+
+    /// <summary>Creates the assets folder and copies its path (VIvian starts no external processes outside the supervisor).</summary>
+    private void CopyThemeFolder(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        try { System.IO.Directory.CreateDirectory(vm.Theme.Folder); Clipboard.SetText(vm.Theme.Folder); vm.ReportCopied(vm.Theme.Folder); }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
+    }
+
     private void CopyExportsPath(object sender, RoutedEventArgs e) => CopyFolder("exports");
     private void CopyLogsPath(object sender, RoutedEventArgs e) => CopyFolder("logs");
 

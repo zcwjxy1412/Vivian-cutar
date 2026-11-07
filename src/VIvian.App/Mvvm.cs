@@ -23,3 +23,9 @@ public sealed class AsyncCommand(Func<Task> execute, Action<Exception> onError) 
         finally { _running = false; CanExecuteChanged?.Invoke(this, EventArgs.Empty); }
     }
 }
+public sealed class RelayCommand<T>(Action<T?> execute) : ICommand
+{
+    public event EventHandler? CanExecuteChanged { add { } remove { } }
+    public bool CanExecute(object? parameter) => true;
+    public void Execute(object? parameter) => execute(parameter is T t ? t : default);
+}

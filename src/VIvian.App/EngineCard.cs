@@ -17,8 +17,24 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public string Glyph { get; } = glyph;
     public EngineProfile Profile => EngineCatalog.For(Id);
     /// <summary>The game's own colour; used only next to that game.</summary>
-    public string Accent => Id switch { GameId.Genshin => "#74E3D4", GameId.StarRail => "#B9A6FF", _ => "#FFD95A" };
+    public string Accent => Id switch { GameId.Genshin => "#2BA89A", GameId.StarRail => "#7B61FF", _ => "#E0A800" };
     public string Version => $"{Profile.EngineName} {Profile.PinnedVersion}";
+    public string Tagline => Id switch { GameId.Genshin => "Genshin Impact", GameId.StarRail => "Honkai: Star Rail", _ => "Zenless Zone Zero" };
+    /// <summary>Three daily/weekly task names from the versioned catalog, shown as chips.</summary>
+    public IReadOnlyList<string> Chips => Profile.Tasks.Where(t => t.Frequency != TaskFrequency.OnDemand)
+        .Select(t => t.Title.Split('（')[0]).Distinct().Take(3).ToList();
+    /// <summary>True only when this build may run the engine for real and its installation is verified.</summary>
+    public bool CanRunForReal => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified;
+    public string RunHint => CanRunForReal ? "可以执行" : Id == GameId.StarRail ? "待安装核验" : "接入中";
+    private bool _include = id == GameId.StarRail;
+    /// <summary>Part of the one-click run. Only games that can run for real can be included.</summary>
+    public bool IncludeInOneClick { get => _include && CanRunForReal; set => Set(ref _include, value); }
+    public bool CanToggle => CanRunForReal;
+    /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
+    public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
+    public string BannerTo => Id switch { GameId.Genshin => "#2B4C9A", GameId.StarRail => "#2A2F7A", _ => "#3A2A10" };
+    private ArtSlot _banner = new(null);
+    public ArtSlot Banner { get => _banner; set => Set(ref _banner, value); }
     public string PinnedVersion => $"支持基准：{Profile.EngineName} {Profile.PinnedVersion}（证据待桌面验证）";
     public long Revision { get; set; }
     /// <summary>The install path as last loaded from or written to the database (to detect unsaved edits).</summary>
@@ -71,6 +87,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public void Show(EngineReadinessReport report)
     {
         Report = report;
+        foreach (var name in new[] { nameof(CanRunForReal), nameof(IncludeInOneClick), nameof(CanToggle), nameof(RunHint) }) Raise(name);
         var (state, brush) = report.Compatibility switch
         {
             CompatibilityClass.NotConfigured => ("未设置路径", StateColors.Neutral),
@@ -126,8 +143,8 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
 
 public static class StateColors
 {
-    public const string Verified = "#86DFA6";
-    public const string Warning = "#F2C97E";
-    public const string Error = "#FF9F94";
-    public const string Neutral = "#C3B8E3";
+    public const string Verified = "#17693B";
+    public const string Warning = "#8A5A00";
+    public const string Error = "#B3261E";
+    public const string Neutral = "#47528A";
 }

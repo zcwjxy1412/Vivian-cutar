@@ -24,7 +24,7 @@
 <LinearGradientBrush x:Key="Dream" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFB3D9" Offset="0"/><GradientStop Color="#C7B4FF" Offset="1"/></LinearGradientBrush>
 <FontFamily x:Key="Round">YouYuan, Microsoft YaHei UI</FontFamily>
 <!-- YouYuan has no kana; Japanese text uses the Japanese UI font that ships with Windows. -->
-<FontFamily x:Key="Kana">Yu Gothic UI, Meiryo UI, Microsoft YaHei UI</FontFamily>
+<FontFamily x:Key="JapaneseFont">Yu Gothic UI, Meiryo UI, Microsoft YaHei UI</FontFamily>
 <BooleanToVisibilityConverter x:Key="Visible"/>
 
 <!-- No implicit TextBlock style here: Application-level implicit TextBlock styles reach inside control templates.

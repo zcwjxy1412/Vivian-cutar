@@ -17,6 +17,7 @@ public partial class App : Application
 {
     private IHost? _host;
     private SingleInstanceGuard? _instance;
+    private WindowActivation? _activation;
     private bool _smoke;
     private bool _startupCheck;
     protected override async void OnStartup(StartupEventArgs e)
@@ -66,6 +67,12 @@ public partial class App : Application
             _instance = SingleInstanceGuard.Acquire(root);
             if (!_instance.IsOwner)
             {
+                // A second launch brings the open window to the front instead of only saying it is open.
+                if (!_smoke && _instance.Result != InstanceLockResult.AccessDenied && WindowActivation.SignalExisting(root))
+                {
+                    Shutdown(2);
+                    return;
+                }
                 if (!_smoke)
                     MessageBox.Show(_instance.Result == InstanceLockResult.AccessDenied
                         ? "检测到另一个 VIvian 实例（可能以其他用户或管理员身份运行），无法确认它的状态。为避免冲突，本窗口不会启动。"
@@ -159,6 +166,7 @@ public partial class App : Application
                 };
             }
             window.Show();
+            if (!_smoke) _activation = WindowActivation.Listen(root, window);
             // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
             Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
                 RealExecutionPolicy.IsM5DailyTest
@@ -336,6 +344,7 @@ public partial class App : Application
     {
         _host?.Dispose();
         Log.CloseAndFlush();
+        _activation?.Dispose();
         _instance?.Dispose();
         base.OnExit(e);
     }

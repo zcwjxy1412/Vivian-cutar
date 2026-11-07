@@ -1,24 +1,28 @@
 <Application x:Class="VIvian.App.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" ShutdownMode="OnMainWindowClose">
 <Application.Resources>
-<!-- Palette: ink-indigo night, one hue per game. Every text/background pair below is >= 5.7:1 (WCAG AA is 4.5:1). -->
-<SolidColorBrush x:Key="Ink" Color="#121420"/>
-<SolidColorBrush x:Key="Rail" Color="#0E1019"/>
-<SolidColorBrush x:Key="Surface" Color="#1C1F30"/>
-<SolidColorBrush x:Key="Raised" Color="#272B40"/>
-<SolidColorBrush x:Key="Line" Color="#353A52"/>
-<SolidColorBrush x:Key="Text" Color="#EEECF7"/>
-<SolidColorBrush x:Key="Muted" Color="#A7ACC4"/>
-<SolidColorBrush x:Key="StarRail" Color="#A99BFF"/>
-<SolidColorBrush x:Key="Genshin" Color="#63D2C6"/>
-<SolidColorBrush x:Key="Zenless" Color="#FFD447"/>
-<SolidColorBrush x:Key="Ok" Color="#7FD49B"/>
-<SolidColorBrush x:Key="Warn" Color="#E5BF76"/>
-<SolidColorBrush x:Key="Danger" Color="#F09A8E"/>
+<!-- Palette: anime twilight sky, sakura accent, one pastel hue per game. Text pairs checked >= 5.9:1 (WCAG AA 4.5:1). -->
+<SolidColorBrush x:Key="Ink" Color="#1B1533"/>
+<SolidColorBrush x:Key="Rail" Color="#E6161029"/>
+<SolidColorBrush x:Key="Surface" Color="#F22A2148"/>
+<SolidColorBrush x:Key="Raised" Color="#382C60"/>
+<SolidColorBrush x:Key="Line" Color="#4A3D78"/>
+<SolidColorBrush x:Key="Text" Color="#F6F2FF"/>
+<SolidColorBrush x:Key="Muted" Color="#C3B8E3"/>
+<SolidColorBrush x:Key="Sakura" Color="#FF9ECF"/>
+<SolidColorBrush x:Key="StarRail" Color="#B9A6FF"/>
+<SolidColorBrush x:Key="Genshin" Color="#74E3D4"/>
+<SolidColorBrush x:Key="Zenless" Color="#FFD95A"/>
+<SolidColorBrush x:Key="Ok" Color="#86DFA6"/>
+<SolidColorBrush x:Key="Warn" Color="#F2C97E"/>
+<SolidColorBrush x:Key="Danger" Color="#FF9F94"/>
 <SolidColorBrush x:Key="WarnBack" Color="#3A2E18"/>
 <SolidColorBrush x:Key="WarnText" Color="#F2D9A6"/>
 <SolidColorBrush x:Key="DangerBack" Color="#45201F"/>
 <SolidColorBrush x:Key="DangerText" Color="#FFD8D3"/>
-<SolidColorBrush x:Key="OnAccent" Color="#1A1633"/>
+<SolidColorBrush x:Key="OnAccent" Color="#2B1640"/>
+<SolidColorBrush x:Key="Bubble" Color="#F7F1FF"/>
+<LinearGradientBrush x:Key="Dream" StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#FFB3D9" Offset="0"/><GradientStop Color="#C7B4FF" Offset="1"/></LinearGradientBrush>
+<FontFamily x:Key="Round">YouYuan, Microsoft YaHei UI</FontFamily>
 <BooleanToVisibilityConverter x:Key="Visible"/>
 
 <!-- No implicit TextBlock style here: Application-level implicit TextBlock styles reach inside control templates.
@@ -31,30 +35,30 @@
 <Setter Property="Padding" Value="16,9"/><Setter Property="Margin" Value="0,0,10,0"/><Setter Property="Cursor" Value="Hand"/>
 <Setter Property="FontSize" Value="14"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-<Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+<Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="18" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/></Border>
 <ControlTemplate.Triggers>
-<Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Muted}"/></Trigger>
+<Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Sakura}"/></Trigger>
 <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Text}"/><Setter TargetName="Chrome" Property="BorderThickness" Value="2"/></Trigger>
 <Trigger Property="IsPressed" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.85"/></Trigger>
 <!-- Disabled controls are exempt from WCAG contrast; dimmed so the reason text beside them carries the message. -->
 <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.4"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
 </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
 <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-<Setter Property="Background" Value="{StaticResource StarRail}"/><Setter Property="Foreground" Value="{StaticResource OnAccent}"/>
-<Setter Property="BorderBrush" Value="{StaticResource StarRail}"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Padding" Value="22,11"/></Style>
+<Setter Property="Background" Value="{StaticResource Dream}"/><Setter Property="Foreground" Value="{StaticResource OnAccent}"/>
+<Setter Property="BorderBrush" Value="#FFE3F1"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Padding" Value="24,11"/></Style>
 <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
-<Setter Property="Background" Value="{StaticResource Danger}"/><Setter Property="Foreground" Value="#2A1210"/><Setter Property="BorderBrush" Value="{StaticResource Danger}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+<Setter Property="Background" Value="{StaticResource Danger}"/><Setter Property="Foreground" Value="{StaticResource OnAccent}"/><Setter Property="BorderBrush" Value="{StaticResource Danger}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
 
 <Style TargetType="TextBox">
 <Setter Property="Padding" Value="10,7"/><Setter Property="Background" Value="{StaticResource Ink}"/><Setter Property="Foreground" Value="{StaticResource Text}"/>
 <Setter Property="CaretBrush" Value="{StaticResource Text}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/>
-<Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="SelectionBrush" Value="{StaticResource StarRail}"/>
+<Setter Property="VerticalContentAlignment" Value="Center"/><Setter Property="SelectionBrush" Value="{StaticResource Sakura}"/>
 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TextBox">
 <Border x:Name="Box" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
 <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False" VerticalAlignment="Center"/></Border>
 <ControlTemplate.Triggers>
-<Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource StarRail}"/></Trigger>
+<Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Sakura}"/></Trigger>
 <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Box" Property="Opacity" Value="0.5"/></Trigger>
 </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
 
@@ -67,7 +71,7 @@
 <Path x:Name="Tick" Data="M 3.5,9 L 7,12.5 L 14,5" Stroke="{StaticResource OnAccent}" StrokeThickness="2" Visibility="Collapsed"/></Border>
 <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/></Grid>
 <ControlTemplate.Triggers>
-<Trigger Property="IsChecked" Value="True"><Setter TargetName="Box" Property="Background" Value="{StaticResource StarRail}"/><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource StarRail}"/><Setter TargetName="Tick" Property="Visibility" Value="Visible"/></Trigger>
+<Trigger Property="IsChecked" Value="True"><Setter TargetName="Box" Property="Background" Value="{StaticResource Sakura}"/><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Sakura}"/><Setter TargetName="Tick" Property="Visibility" Value="Visible"/></Trigger>
 <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Box" Property="BorderBrush" Value="{StaticResource Text}"/></Trigger>
 <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger>
 </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
@@ -79,7 +83,7 @@
 <Border x:Name="Track" Width="40" Height="22" CornerRadius="11" Background="{StaticResource Line}" BorderBrush="{StaticResource Line}" BorderThickness="1">
 <Ellipse x:Name="Knob" Width="16" Height="16" Fill="{StaticResource Muted}" HorizontalAlignment="Left" Margin="2,0,0,0"/></Border>
 <ControlTemplate.Triggers>
-<Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{StaticResource StarRail}"/><Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource StarRail}"/>
+<Trigger Property="IsChecked" Value="True"><Setter TargetName="Track" Property="Background" Value="{StaticResource Dream}"/><Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Sakura}"/>
 <Setter TargetName="Knob" Property="HorizontalAlignment" Value="Right"/><Setter TargetName="Knob" Property="Margin" Value="0,0,2,0"/><Setter TargetName="Knob" Property="Fill" Value="{StaticResource OnAccent}"/></Trigger>
 <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Track" Property="BorderBrush" Value="{StaticResource Text}"/></Trigger>
 <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Track" Property="Opacity" Value="0.4"/></Trigger>
@@ -105,7 +109,7 @@
 <Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="Padding" Value="10,7"/>
 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ComboBoxItem">
 <Border x:Name="Row" Background="{StaticResource Raised}" Padding="{TemplateBinding Padding}"><ContentPresenter/></Border>
-<ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="#3A3560"/></Trigger></ControlTemplate.Triggers>
+<ControlTemplate.Triggers><Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Row" Property="Background" Value="#4A3A78"/></Trigger></ControlTemplate.Triggers>
 </ControlTemplate></Setter.Value></Setter></Style>
 
 <!-- Slim scroll bars that do not light up the dark pages. -->

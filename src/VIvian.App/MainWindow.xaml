@@ -3,11 +3,13 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <Window.Resources>
 <!-- Window-level implicit styles stop at template boundaries, so controls keep their own text colours. -->
 <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
-<Style x:Key="H1" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="30"/><Setter Property="FontWeight" Value="Light"/><Setter Property="LineHeight" Value="38"/></Style>
-<Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="18"/><Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,6"/></Style>
+<Style x:Key="H1" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="32"/><Setter Property="FontFamily" Value="{StaticResource Round}"/><Setter Property="LineHeight" Value="40"/></Style>
+<!-- Small Japanese subtitle next to a page title. -->
+<Style x:Key="Kana" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Sakura}"/><Setter Property="FontSize" Value="15"/><Setter Property="FontFamily" Value="{StaticResource Round}"/><Setter Property="Margin" Value="16,0,0,5"/><Setter Property="VerticalAlignment" Value="Bottom"/></Style>
+<Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="19"/><Setter Property="FontFamily" Value="{StaticResource Round}"/><Setter Property="Margin" Value="0,0,0,6"/></Style>
 <Style x:Key="Lead" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Margin" Value="0,6,0,22"/><Setter Property="MaxWidth" Value="760"/><Setter Property="HorizontalAlignment" Value="Left"/></Style>
 <Style x:Key="Small" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="LineHeight" Value="20"/></Style>
-<Style x:Key="Panel" TargetType="Border"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="22"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
+<Style x:Key="Panel" TargetType="Border"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="20,4,20,4"/><Setter Property="Padding" Value="22"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
 <Style x:Key="Notice" TargetType="Border"><Setter Property="Background" Value="{StaticResource WarnBack}"/><Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="16,12"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
 <Style x:Key="Page" TargetType="ScrollViewer"><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="Padding" Value="40,34,40,24"/></Style>
 <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{StaticResource StarRail}"/></Style>
@@ -16,45 +18,81 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <Style TargetType="TabItem">
 <Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/><Setter Property="Cursor" Value="Hand"/><Setter Property="Tag" Value="Transparent"/>
 <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
-<Border x:Name="Row" Background="Transparent" CornerRadius="8" Padding="14,10" Margin="12,1,12,1">
+<Border x:Name="Row" Background="Transparent" CornerRadius="16,4,16,4" Padding="14,10" Margin="12,2,12,2">
 <StackPanel Orientation="Horizontal">
+<Border x:Name="Marker" Width="3" Height="16" CornerRadius="2" Background="Transparent" Margin="-8,0,9,0"/>
 <Ellipse Width="8" Height="8" Margin="0,0,12,0" VerticalAlignment="Center" Fill="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"/>
 <TextBlock x:Name="Label" Text="{TemplateBinding Header}" Foreground="{StaticResource Muted}" FontSize="14"/></StackPanel></Border>
 <ControlTemplate.Triggers>
 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Label" Property="Foreground" Value="{StaticResource Text}"/></Trigger>
-<Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="{StaticResource Raised}"/><Setter TargetName="Label" Property="Foreground" Value="{StaticResource Text}"/><Setter TargetName="Label" Property="FontWeight" Value="SemiBold"/></Trigger>
+<Trigger Property="IsSelected" Value="True"><Setter TargetName="Marker" Property="Background" Value="{StaticResource Sakura}"/><Setter TargetName="Row" Property="Background" Value="{StaticResource Raised}"/><Setter TargetName="Label" Property="Foreground" Value="{StaticResource Text}"/><Setter TargetName="Label" Property="FontWeight" Value="SemiBold"/></Trigger>
 <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource Muted}"/><Setter TargetName="Row" Property="BorderThickness" Value="1"/></Trigger>
 </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
 </Window.Resources>
 
-<TabControl x:Name="Navigation" TabStripPlacement="Left" Background="{StaticResource Ink}" BorderThickness="0" Padding="0">
+<Grid>
+<!-- Twilight sky: gradient, tiled starfield and two soft glows. Purely decorative; panels keep solid colours. -->
+<Rectangle IsHitTestVisible="False"><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0.3,1"><GradientStop Color="#1B1533" Offset="0"/><GradientStop Color="#2A1E45" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+<Rectangle IsHitTestVisible="False" Opacity="0.75"><Rectangle.Fill><DrawingBrush TileMode="Tile" Viewport="0,0,280,280" ViewportUnits="Absolute" Viewbox="0,0,280,280" ViewboxUnits="Absolute"><DrawingBrush.Drawing><DrawingGroup>
+<GeometryDrawing Brush="#00000000" Geometry="M 0,0 H 280 V 280 H 0 Z"/>
+<GeometryDrawing Brush="#CCFFFFFF" Geometry="M 22,34 m -1.2,0 a 1.2,1.2 0 1 0 2.4,0 a 1.2,1.2 0 1 0 -2.4,0"/>
+<GeometryDrawing Brush="#88FFFFFF" Geometry="M 96,12 m -0.8,0 a 0.8,0.8 0 1 0 1.6,0 a 0.8,0.8 0 1 0 -1.6,0"/>
+<GeometryDrawing Brush="#AAFFFFFF" Geometry="M 168,58 m -1,0 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0"/>
+<GeometryDrawing Brush="#77FFFFFF" Geometry="M 240,22 m -0.8,0 a 0.8,0.8 0 1 0 1.6,0 a 0.8,0.8 0 1 0 -1.6,0"/>
+<GeometryDrawing Brush="#99FFFFFF" Geometry="M 58,120 m -0.9,0 a 0.9,0.9 0 1 0 1.8,0 a 0.9,0.9 0 1 0 -1.8,0"/>
+<GeometryDrawing Brush="#CCFFFFFF" Geometry="M 204,140 m -1.3,0 a 1.3,1.3 0 1 0 2.6,0 a 1.3,1.3 0 1 0 -2.6,0"/>
+<GeometryDrawing Brush="#77FFFFFF" Geometry="M 132,176 m -0.8,0 a 0.8,0.8 0 1 0 1.6,0 a 0.8,0.8 0 1 0 -1.6,0"/>
+<GeometryDrawing Brush="#AAFFFFFF" Geometry="M 30,232 m -1,0 a 1,1 0 1 0 2,0 a 1,1 0 1 0 -2,0"/>
+<GeometryDrawing Brush="#88FFFFFF" Geometry="M 256,250 m -0.9,0 a 0.9,0.9 0 1 0 1.8,0 a 0.9,0.9 0 1 0 -1.8,0"/>
+<GeometryDrawing Brush="#AAFF9ECF" Geometry="M 110,82 L 111.5,87 L 116.5,88.5 L 111.5,90 L 110,95 L 108.5,90 L 103.5,88.5 L 108.5,87 Z"/>
+<GeometryDrawing Brush="#AAC7B4FF" Geometry="M 226,208 L 227.2,212 L 231.2,213.2 L 227.2,214.4 L 226,218.4 L 224.8,214.4 L 220.8,213.2 L 224.8,212 Z"/>
+</DrawingGroup></DrawingBrush.Drawing></DrawingBrush></Rectangle.Fill></Rectangle>
+<Ellipse IsHitTestVisible="False" Width="760" Height="560" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-260,-240,0"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="#40FF9ECF" Offset="0"/><GradientStop Color="#00FF9ECF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+<Ellipse IsHitTestVisible="False" Width="700" Height="520" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="80,0,0,-280"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="#38B9A6FF" Offset="0"/><GradientStop Color="#00B9A6FF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+<TabControl x:Name="Navigation" TabStripPlacement="Left" Background="Transparent" BorderThickness="0" Padding="0">
 <TabControl.Template><ControlTemplate TargetType="TabControl">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="232"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 <Border Background="{StaticResource Rail}"><DockPanel>
-<StackPanel DockPanel.Dock="Top" Margin="26,30,20,26"><TextBlock Text="VIvian" FontSize="26" FontWeight="Light" Foreground="{StaticResource Text}"/><TextBlock Text="三款游戏，一处出发" Foreground="{StaticResource Muted}" FontSize="13" Margin="0,4,0,0"/></StackPanel>
+<StackPanel DockPanel.Dock="Top" Margin="22,26,18,22" Orientation="Horizontal">
+<local:Mascot Width="54" Height="50" Margin="0,0,10,0"/>
+<StackPanel VerticalAlignment="Center"><TextBlock Text="VIvian" FontSize="26" FontFamily="{StaticResource Round}" Foreground="{StaticResource Text}"/>
+<TextBlock Text="三款游戏，一处出发" Foreground="{StaticResource Sakura}" FontSize="12" Margin="0,2,0,0"/></StackPanel></StackPanel>
 <Border DockPanel.Dock="Bottom" Margin="20,12,20,22" Padding="12,10" CornerRadius="8" Background="{StaticResource WarnBack}">
 <TextBlock Text="{Binding ExecutionBanner}" Foreground="{StaticResource WarnText}" FontSize="12" LineHeight="18" TextWrapping="Wrap"/></Border>
 <TabPanel IsItemsHost="True" Background="{StaticResource Rail}" KeyboardNavigation.TabIndex="1"/></DockPanel></Border>
 <Grid Grid.Column="1"><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <ContentPresenter ContentSource="SelectedContent"/>
-<Border Grid.Row="1" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="40,10">
-<TextBlock Text="{Binding Status}" Foreground="{StaticResource Muted}" FontSize="13" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/></Border></Grid></Grid>
+<Grid Grid.Row="1" Margin="40,14,40,16">
+<Border Background="#F2201936" BorderBrush="{StaticResource Sakura}" BorderThickness="1.5" CornerRadius="18,4,18,4" Padding="20,18,20,12" Margin="0,12,0,0">
+<DockPanel><local:Mascot DockPanel.Dock="Left" Width="34" Height="32" Margin="0,0,14,0" VerticalAlignment="Top"/>
+<TextBlock Text="▼" DockPanel.Dock="Right" Foreground="{StaticResource Sakura}" FontSize="10" VerticalAlignment="Bottom" Margin="12,0,0,0"/>
+<TextBlock Text="{Binding Status}" Foreground="{StaticResource Text}" FontSize="14" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/></DockPanel></Border>
+<Border Background="{StaticResource Sakura}" CornerRadius="10" Padding="14,3" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="22,0,0,0">
+<TextBlock Text="小星" Foreground="{StaticResource OnAccent}" FontFamily="{StaticResource Round}" FontSize="14"/></Border></Grid></Grid></Grid>
 </ControlTemplate></TabControl.Template>
 
 <!-- ============ 今日 ============ -->
 <TabItem Header="今日"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="1040" HorizontalAlignment="Left">
-<TextBlock Text="{Binding TodayText}" Style="{StaticResource H1}"/>
-<TextBlock Text="三款游戏的今日行程。星铁已经可以真实执行；原神和绝区零正在接入，暂时只显示安装状态。" Style="{StaticResource Lead}"/>
+<Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<local:Mascot Width="132" Height="124" VerticalAlignment="Bottom"/>
+<Grid Grid.Column="1" Margin="6,0,0,10" VerticalAlignment="Center" MaxWidth="700" HorizontalAlignment="Left">
+<Path Data="M 0,40 L 18,30 L 18,50 Z" Fill="{StaticResource Bubble}" HorizontalAlignment="Left" VerticalAlignment="Top"/>
+<Border Background="{StaticResource Bubble}" CornerRadius="22,22,22,6" Padding="24,16,26,18" Margin="17,0,0,0"><StackPanel>
+<StackPanel Orientation="Horizontal"><TextBlock Text="おかえり～" Foreground="{StaticResource OnAccent}" FontFamily="{StaticResource Round}" FontSize="22"/>
+<TextBlock Text="{Binding TodayText}" Foreground="#5A4482" FontFamily="{StaticResource Round}" FontSize="15" VerticalAlignment="Bottom" Margin="14,0,0,3"/></StackPanel>
+<TextBlock Text="今天的三段旅程我已经整理好了。星铁可以一键完成日常；原神和绝区零还在接入中，我先帮你看着安装状态。" Foreground="{StaticResource OnAccent}" Margin="0,8,0,0"/>
+</StackPanel></Border></Grid></Grid>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate>
-<Border Background="{StaticResource Surface}" CornerRadius="10" Margin="0,0,0,10"><Grid>
-<Grid.ColumnDefinitions><ColumnDefinition Width="5"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<Border CornerRadius="10,0,0,10" Background="{Binding Accent}"/>
+<Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="20,4,20,4" Margin="0,0,0,12" ClipToBounds="True"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="6"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="64"/></Grid.ColumnDefinitions>
+<Border CornerRadius="20,0,0,4" Background="{Binding Accent}"/>
+<Rectangle Grid.Column="3" Opacity="0.35" IsHitTestVisible="False"><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="9,9" MappingMode="Absolute" SpreadMethod="Repeat"><GradientStop Color="{Binding Accent}" Offset="0"/><GradientStop Color="{Binding Accent}" Offset="0.45"/><GradientStop Color="Transparent" Offset="0.45"/><GradientStop Color="Transparent" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
 <StackPanel Grid.Column="1" Margin="22,16,12,16">
-<TextBlock Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Name}" FontSize="20" FontFamily="{StaticResource Round}"/>
 <TextBlock Text="{Binding Version}" Style="{StaticResource Small}" Margin="0,2,0,6"/>
 <TextBlock Text="{Binding Execution}" Style="{StaticResource Small}"/>
 <TextBlock Text="{Binding LastRun}" Style="{StaticResource Small}"/></StackPanel>
-<TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold" Margin="12,18,22,0" MaxWidth="240" AutomationProperties.Name="引擎状态"/>
+<TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold" Margin="12,18,12,0" MaxWidth="240" AutomationProperties.Name="引擎状态"/>
 </Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 <Border Style="{StaticResource Panel}" Margin="0,10,0,14" Visibility="{Binding M5Visibility}"><StackPanel>
 <TextBlock Text="开始星铁日常" Style="{StaticResource H2}"/>
@@ -78,7 +116,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <TabItem Header="崩坏：星穹铁道" Tag="{StaticResource StarRail}"><Grid Margin="40,34,24,0">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions>
-<StackPanel Grid.ColumnSpan="2"><TextBlock Text="崩坏：星穹铁道" Style="{StaticResource H1}"/>
+<StackPanel Grid.ColumnSpan="2"><StackPanel Orientation="Horizontal"><TextBlock Text="崩坏：星穹铁道" Style="{StaticResource H1}"/><TextBlock Text="スターレイル" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="{Binding Engines[1].Version, StringFormat=由 {0} 执行。VIvian 读取并修改它的真实配置，原软件里的修改也会自动同步回来。}" Style="{StaticResource Lead}"/></StackPanel>
 
 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,0,16,0" Padding="0,0,0,20"><StackPanel>
@@ -128,7 +166,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <ScrollViewer.Resources><CollectionViewSource x:Key="Grouped" Source="{Binding Parameters}"><CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions></CollectionViewSource></ScrollViewer.Resources>
 <ItemsControl ItemsSource="{Binding Source={StaticResource Grouped}}">
 <ItemsControl.GroupStyle><GroupStyle><GroupStyle.HeaderTemplate><DataTemplate>
-<TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource StarRail}" Margin="0,18,0,6"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ItemsControl.GroupStyle>
+<TextBlock Text="{Binding Name, StringFormat=✦ {0}}" FontSize="16" FontFamily="{StaticResource Round}" Foreground="{StaticResource Sakura}" Margin="0,20,0,6"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ItemsControl.GroupStyle>
 <ItemsControl.ItemTemplate><DataTemplate>
 <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,10,0,12"><Grid>
 <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions>
@@ -146,7 +184,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 
 <!-- ============ 原神 ============ -->
 <TabItem Header="原神" Tag="{StaticResource Genshin}"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[0]}">
-<TextBlock Text="原神" Style="{StaticResource H1}"/>
+<StackPanel Orientation="Horizontal"><TextBlock Text="原神" Style="{StaticResource H1}"/><TextBlock Text="げんしん" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="{Binding Version, StringFormat=由 {0} 执行。正在接入：目前只读取安装状态，不会运行它。}" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
@@ -161,7 +199,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 
 <!-- ============ 绝区零 ============ -->
 <TabItem Header="绝区零" Tag="{StaticResource Zenless}"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
-<TextBlock Text="绝区零" Style="{StaticResource H1}"/>
+<StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="{Binding Version, StringFormat=由 {0} 执行。正在接入：目前只读取安装状态，不会运行它。}" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
@@ -177,7 +215,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <!-- ============ 运行记录 ============ -->
 <TabItem Header="运行记录"><Grid Margin="40,34,40,20" DataContext="{Binding Queue}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<StackPanel><TextBlock Text="运行记录" Style="{StaticResource H1}"/>
+<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="运行记录" Style="{StaticResource H1}"/><TextBlock Text="きろく" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，VIvian 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>
 <Border Grid.Row="1" Background="{StaticResource DangerBack}" CornerRadius="10" Padding="16,12" Margin="0,0,0,14">
 <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
@@ -212,7 +250,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <!-- ============ 任务计划 ============ -->
 <TabItem Header="任务计划"><Grid Margin="40,34,40,20">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<StackPanel><TextBlock Text="任务计划" Style="{StaticResource H1}"/>
+<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="任务计划" Style="{StaticResource H1}"/><TextBlock Text="けいかく" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="按游戏勾选要做的任务并排好顺序。计划只记录你的选择；标为“候选”的任务还没核对，不会被执行。" Style="{StaticResource Lead}"/></StackPanel>
 <ComboBox Grid.Row="1" ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" Width="320" HorizontalAlignment="Left" Margin="0,0,0,12" AutomationProperties.Name="选择游戏"/>
 <Grid Grid.Row="2" DataContext="{Binding SelectedPlan}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -232,7 +270,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 
 <!-- ============ AI 助手 ============ -->
 <TabItem Header="AI 助手"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="820" HorizontalAlignment="Left">
-<TextBlock Text="AI 助手" Style="{StaticResource H1}"/>
+<StackPanel Orientation="Horizontal"><TextBlock Text="AI 助手" Style="{StaticResource H1}"/><TextBlock Text="アシスタント" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="以后你可以直接告诉 VIvian 想做什么，比如“星铁先清体力再领奖，每周一打历战余响”。这一功能正在开发，目前还不能对话。" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="一次请求会经过这四步" Style="{StaticResource H2}"/>
@@ -248,7 +286,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 
 <!-- ============ 引擎与安装 ============ -->
 <TabItem Header="引擎与安装"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding IsIdle}" MaxWidth="980" HorizontalAlignment="Left">
-<TextBlock Text="引擎与安装" Style="{StaticResource H1}"/>
+<StackPanel Orientation="Horizontal"><TextBlock Text="引擎与安装" Style="{StaticResource H1}"/><TextBlock Text="エンジン" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="VIvian 启动时会自动找到三款引擎并核对固定版本。只有自动发现失败时才需要手动填写目录。检查全程只读，不会运行任何程序。" Style="{StaticResource Lead}"/>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Panel}"><StackPanel>
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -282,7 +320,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 
 <!-- ============ 设置 ============ -->
 <TabItem Header="设置与诊断"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding IsIdle}" MaxWidth="900" HorizontalAlignment="Left">
-<TextBlock Text="设置与诊断" Style="{StaticResource H1}"/>
+<StackPanel Orientation="Horizontal"><TextBlock Text="设置与诊断" Style="{StaticResource H1}"/><TextBlock Text="せってい" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="{Binding VersionText}" Style="{StaticResource Lead}" Margin="0,6,0,2"/>
 <TextBlock Text="{Binding DataDirectoryText}" Style="{StaticResource Small}" Margin="0,0,0,20"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
@@ -307,4 +345,4 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <TextBlock Text="以普通用户权限运行，不会静默提权；引擎只从官方 GitHub Release 获取；不要把引擎放在符号链接或目录联接后面。OneDragon 官方要求安装路径只含英文字母、数字、下划线和连字符。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 <TextBlock Text="本程序与游戏官方无关，不收集游戏密码，不自动上传诊断信息。游戏自动化存在账号处罚风险，VIvian 不承诺零风险，也不会绕过反作弊。" Foreground="{StaticResource Warn}" FontSize="13" Margin="0,8,0,0"/></StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
-</TabControl></Window>
+</TabControl></Grid></Window>

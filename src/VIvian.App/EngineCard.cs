@@ -17,7 +17,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public string Glyph { get; } = glyph;
     public EngineProfile Profile => EngineCatalog.For(Id);
     /// <summary>The game's own colour; used only next to that game.</summary>
-    public string Accent => Id switch { GameId.Genshin => "#63D2C6", GameId.StarRail => "#A99BFF", _ => "#FFD447" };
+    public string Accent => Id switch { GameId.Genshin => "#74E3D4", GameId.StarRail => "#B9A6FF", _ => "#FFD95A" };
     public string Version => $"{Profile.EngineName} {Profile.PinnedVersion}";
     public string PinnedVersion => $"支持基准：{Profile.EngineName} {Profile.PinnedVersion}（证据待桌面验证）";
     public long Revision { get; set; }
@@ -126,8 +126,8 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
 
 public static class StateColors
 {
-    public const string Verified = "#7FD49B";
-    public const string Warning = "#E5BF76";
-    public const string Error = "#F09A8E";
-    public const string Neutral = "#A9B6CB";
+    public const string Verified = "#86DFA6";
+    public const string Warning = "#F2C97E";
+    public const string Error = "#FF9F94";
+    public const string Neutral = "#C3B8E3";
 }

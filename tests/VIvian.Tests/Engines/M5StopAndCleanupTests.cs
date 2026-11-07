@@ -146,6 +146,60 @@ public sealed class M5StopAndCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task PauseAndResumeWaitForWorkerAcknowledgement()
+    {
+        var group = new Group();
+        var run = new March7thRun(Guid.NewGuid(), group, new CountingSupervisor(),
+            Path.Combine(_root, "m7a.exe"), _root, "routine");
+        Record(RunId, "running"); Active(RunId);
+        March7thUpstreamActivity.Observe = _ => (true, Created);
+        var control = Path.Combine(_runs, RunId + ".control");
+        var worker = Task.Run(async () =>
+        {
+            var last = "";
+            for (var i = 0; i < 200; i++)
+            {
+                var command = File.Exists(control) ? File.ReadAllText(control) : "";
+                if (command != last && command.Contains("pause"))
+                { File.WriteAllText(control + ".state", "{\"state\":\"paused\"}"); last = command; }
+                else if (command != last && command.Contains("resume"))
+                { File.WriteAllText(control + ".state", "{\"state\":\"running\"}"); return; }
+                await Task.Delay(20);
+            }
+        });
+        Assert.True(await run.SetPausedAsync(true, CancellationToken.None));
+        Assert.True(run.IsPaused);
+        Assert.True(await run.SetPausedAsync(false, CancellationToken.None));
+        Assert.False(run.IsPaused);
+        await worker;
+        group.Exit();
+        await run.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ResolutionErrorsTripOnlyThisRunsStopControl()
+    {
+        var group = new Group();
+        var run = new March7thRun(Guid.NewGuid(), group, new CountingSupervisor(),
+            Path.Combine(_root, "m7a.exe"), _root, "routine", circuitOptions: new(2, TimeSpan.FromSeconds(30)));
+        Record(RunId, "running"); Active(RunId);
+        March7thUpstreamActivity.Observe = _ => (true, Created);
+        var log = Path.Combine(_runs, RunId + ".log");
+        File.WriteAllText(log, "游戏分辨率获取失败\n游戏分辨率获取失败\n");
+        var control = Path.Combine(_runs, RunId + ".control");
+        var stopped = false;
+        for (var i = 0; i < 100; i++)
+        {
+            if (File.Exists(control) && File.ReadAllText(control).Contains("stop")) { stopped = true; break; }
+            await Task.Delay(50);
+        }
+        Assert.True(stopped);
+        Assert.False(File.Exists(Path.Combine(Path.GetTempPath(), RunId + ".control")));
+        group.Exit();
+        await run.DisposeAsync();
+    }
+
+    [Fact]
     public async Task WorkerStillAliveKeepsCleanupUnconfirmed()
     {
         March7thRun.WorkerExitWait = TimeSpan.FromMilliseconds(300);

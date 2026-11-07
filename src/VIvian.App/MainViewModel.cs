@@ -5,8 +5,11 @@ using System.Text.Json;
 using System.Windows;
 using Serilog;
 using VIvian.Core;
+using VIvian.Core.Accounts;
 using VIvian.Core.Engines;
 using VIvian.Core.Execution;
+using VIvian.Infrastructure;
+using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.Cli;
@@ -36,6 +39,13 @@ public sealed record AppPaths(string DataDirectory)
 
 public sealed record RecentRunRow(string Game, string When, string Result, bool Succeeded, string Duration);
 
+/// <summary>Late-bound game path: the engine card is discovered after the DI graph is built.</summary>
+public sealed class GamePathProvider
+{
+    public Func<string>? Resolve { get; set; }
+    public string Get() => Resolve?.Invoke() ?? "";
+}
+
 public sealed class MainViewModel : ObservableObject
 {
     private readonly ISettingsStore _settings;
@@ -44,6 +54,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IPreferenceStore _preferences;
     private readonly IRunHistory _runs;
     private readonly IUnifiedTaskControl _control;
+    private readonly MultiAccountOrchestrator _orchestrator;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
     private readonly SemaphoreSlim _sessionWrite = new(1, 1);
@@ -106,12 +117,11 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand ExportDiagnosticsCommand { get; }
     public AsyncCommand SaveFeedbackCommand { get; }
     public AsyncCommand StartMarch7thCommand { get; }
-    public AsyncCommand RunAllAccountsCommand { get; }
+    public AsyncCommand RunSelectedAccountsCommand { get; }
     public RelayCommand StopBatchCommand { get; }
-    public RelayCommand SkipAccountCommand { get; }
+    
     private bool _batchRunning;
     private bool _stopBatch;
-    private bool _skipAccount;
     public bool BatchRunning { get => _batchRunning; private set => Set(ref _batchRunning, value); }
     private string _batchStatus = "尚未运行多账号批次。";
     public string BatchStatus { get => _batchStatus; private set => Set(ref _batchStatus, value); }
@@ -268,16 +278,17 @@ public sealed class MainViewModel : ObservableObject
     public QueueViewModel Queue { get; }
 
     public MainViewModel(ISettingsStore settings, IDiagnosticStore history, ITaskPlanStore plans, IPreferenceStore preferences,
-        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor, AccountViewModel accounts)
+        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor,
+        AccountViewModel accounts, MultiAccountOrchestrator orchestrator, GamePathProvider gamePath)
     {
+        _orchestrator = orchestrator;
+        gamePath.Resolve = () => March7thGamePath.Read(Engines.Single(e => e.Id == GameId.StarRail).InstallPath);
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
         Accounts = accounts;
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
-            game => game == GameId.StarRail && accounts.SelectedStarRail is { Id: var selectedId } selected
-                && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002")
-                    ? selected.InstallPath : Engines.Single(e => e.Id == game).InstallPath,
+            game => Engines.Single(e => e.Id == game).InstallPath,
             () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
             accounts.Database, () => accounts.SelectedStarRail);
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
@@ -303,9 +314,8 @@ public sealed class MainViewModel : ObservableObject
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
-        RunAllAccountsCommand = new(() => RunAsync(RunAllAccountsAsync), HandleError);
-        StopBatchCommand = new(() => { _stopBatch = true; Queue.EmergencyStop(); BatchStatus = "正在停止批次…"; });
-        SkipAccountCommand = new(() => { _skipAccount = true; Queue.EmergencyStop(); BatchStatus = "正在跳过当前账号，等待资源清理…"; });
+        RunSelectedAccountsCommand = new(() => RunAsync(RunSelectedAccountsAsync), HandleError);
+        StopBatchCommand = new(() => { _stopBatch = true; _batchCts?.Cancel(); Queue.EmergencyStop(); BatchStatus = "正在停止批次并等待清理…"; });
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
         foreach (var card in Engines)
@@ -619,143 +629,92 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private async Task RunAllAccountsAsync()
+    private CancellationTokenSource? _batchCts;
+    private AccountConfigurationMode _batchMode = AccountConfigurationMode.Unified;
+
+    private async Task RunSelectedAccountsAsync()
     {
         if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
         { BatchStatus = "当前有任务运行、清理待确认或临时配置待恢复，批次未启动。"; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
-        if (!RealExecutionPolicy.IsM5DailyTest || _march7thEvidence is null ||
+        var evidence = _march7thEvidence;
+        if (!RealExecutionPolicy.IsM5DailyTest || evidence is null ||
             card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
         { BatchStatus = "请先在“引擎与环境”核对星铁官方发行包与安装身份。"; return; }
         if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
-        { BatchStatus = "当前账号仍有未保存设置；批次未启动。"; return; }
-        var allAccounts = await Accounts.Database.LoadAccountsAsync(GameId.StarRail);
-        var candidates = allAccounts.Where(a => a.Enabled && a.AutoRun)
-            .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
-        if (candidates.Length == 0) { BatchStatus = "请在账号管理中勾选要运行的星铁账号。"; return; }
-        if (MessageBox.Show($"将串行运行 {candidates.Length} 个星铁账号。每个账号开始前需要你手动登录并核对 UID；每轮任务仍会请求 UAC。确认开始批次？",
-                "VIvian · 多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        { BatchStatus = "当前仍有未保存设置；批次未启动。"; return; }
+        var selected = Accounts.SelectedRows;
+        if (selected.Count == 0)
+        { BatchStatus = "请勾选已绑定登录界面的星铁账号。"; return; }
+        var mode = Accounts.ConfigurationMode;
+        _batchMode = mode;
+        if (mode == AccountConfigurationMode.Unified)
+        {
+            var first = await Accounts.Database.LoadAccountSettingsAsync(selected[0].Id);
+            if (first.Values.Count == 0)
+            { BatchStatus = "第一个账号没有已保存的配置快照，无法作为统一配置。"; return; }
+        }
+        var modeText = mode == AccountConfigurationMode.Unified ? "统一配置（继承第一个账号）" : "各账号独立配置";
+        if (MessageBox.Show(
+                $"将串行运行 {selected.Count} 个星铁账号：\n" + string.Join("\n", selected.Select((r, i) => $"{i + 1}. {r.Name}（{r.MaskedPhone}）")) +
+                $"\n\n模式：{modeText}\n切换账号时会自动操作登录界面，首次需要一次管理员授权（UAC）。\n不会读取或复制登录令牌。确认开始？",
+                "VIvian · 星铁多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
         { BatchStatus = "已取消批次。"; return; }
-        var batch = await Accounts.Database.BeginBatchAsync(GameId.StarRail);
-        BatchRunning = true; _stopBatch = false; _skipAccount = false;
-        var completed = 0; var failed = 0; var skipped = 0;
+
+        BatchRunning = true; _stopBatch = false; _batchCts = new CancellationTokenSource();
         try
         {
-            for (var i = 0; i < candidates.Length && !_stopBatch; i++)
-            {
-                var account = candidates[i];
-                var accountPath = account.Id == Guid.Parse("00000000-0000-4000-8000-000000000002")
-                    ? card.InstallPath : account.InstallPath;
-                if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002") &&
-                    (string.IsNullOrWhiteSpace(accountPath) ||
-                     string.Equals(Path.GetFullPath(accountPath), Path.GetFullPath(card.InstallPath), StringComparison.OrdinalIgnoreCase) ||
-                     allAccounts.Where(a => a.Id != account.Id).Any(a => a.InstallPath.Length > 0 &&
-                         string.Equals(Path.GetFullPath(a.InstallPath), Path.GetFullPath(accountPath), StringComparison.OrdinalIgnoreCase))))
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "configuration_not_isolated", "新增账号须绑定与其他账号不同的 March7thAssistant 安装目录。");
-                    continue;
-                }
-                var inspected = await March7thReadOnlyInspector.InspectAsync(accountPath, _march7thEvidence);
-                if (inspected.Compatibility != March7thCompatibility.Verified)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "install_not_verified", inspected.Detail);
-                    continue;
-                }
-                batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = account.Id,
-                    Detail = $"{i + 1}/{candidates.Length}：等待手动登录 {account.Name}" };
-                await Accounts.Database.SaveBatchAsync(batch);
-                BatchStatus = batch.Detail;
-                var identity = $"请手动切换并登录星铁账号“{account.Name}”。\n区服：{account.Region}\n预期 UID：{account.Uid ?? "未填写；请先在账号管理中填写 UID"}\n\n请在游戏画面中查看实际 UID，确认与档案完全一致后点“是”。点“否”将跳过此账号。";
-                if (string.IsNullOrWhiteSpace(account.Uid) || MessageBox.Show(identity, "核对实际登录身份",
-                        MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-                {
-                    skipped++;
-                    await Accounts.Database.RecordAccountSwitchAsync(i == 0 ? null : candidates[i - 1].Id,
-                        account.Id, "unverified", "未确认游戏画面中的实际 UID。");
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "identity_unverified", "实际登录 UID 未由用户确认，任务未启动。");
-                    continue;
-                }
-                await Accounts.Database.RecordAccountSwitchAsync(i == 0 ? null : candidates[i - 1].Id,
-                    account.Id, "manual_verified", "用户在游戏画面中人工核对 UID；本次运行前仍需再次确认任务。");
-                _skipAccount = false;
-                if (_stopBatch) break;
-                var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id);
-                if (!(await Accounts.Database.LoadAccountTaskPlanAsync(account.Id)).DailyEnabled)
-                {
-                    skipped++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "plan_disabled", "此账号的星铁日常任务计划未启用。");
-                    continue;
-                }
-                if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002") && saved.Values.Count == 0)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "configuration_missing", "账号独立设置尚未初始化；请在游戏管理中选择此账号并读取配置。");
-                    continue;
-                }
-                IReadOnlyList<TemporaryChange> accountChanges;
-                try
-                {
-                    var actual = _control.ReadConfiguration(GameId.StarRail, accountPath);
-                    var desired = new Dictionary<string, string>(saved.Values);
-                    foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask)) desired[key] = value;
-                    accountChanges = TemporaryConfigurationManager.Plan(actual, desired);
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "configuration_failed", ex.Message);
-                    continue;
-                }
-                // This confirmation applies to exactly one account and one run. No stored permission is reused.
-                if (MessageBox.Show($"账号“{account.Name}”（UID {account.Uid}）已人工核对。\n本次临时修改 {accountChanges.Count} 项设置：\n" +
-                        (accountChanges.Count == 0 ? "（无需修改）" : string.Join("\n", accountChanges.Select(c => $"· {c.Path}: {c.Original} → {c.Temporary}"))) +
-                        "\n\n确认加载并执行一次日常任务？",
-                        "确认本次真实任务", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-                { skipped++; await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "cancelled", "用户取消本次执行。"); continue; }
-                BatchStatus = $"{i + 1}/{candidates.Length}：正在运行 {account.Name}";
-                TaskPlanExecution result;
-                try
-                {
-                    var plan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
-                    result = await _control.ExecuteTaskPlan(plan,
-                        new RealTaskAuthorization(accountPath, _march7thEvidence, () => !_stopBatch && !_skipAccount,
-                            true, AllowTemporaryConfiguration: true, AccountSettings: saved.Values));
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "failed", ex.Message);
-                    BatchStatus = $"{account.Name} 未启动或执行异常：{ex.Message}";
-                    if (_control.HasPendingConfigurationRestore || Queue.HasUnresolved) { _stopBatch = true; break; }
-                    continue;
-                }
-                var run = result.Queue?.Runs.LastOrDefault();
-                var success = run?.Outcome == RunOutcome.Success && run.Cleanup == CleanupState.Confirmed
-                    && result.Restore?.State != RestoreState.Blocked;
-                var label = _skipAccount ? "skipped" : success ? "success" : "failed";
-                if (_skipAccount) skipped++; else if (success) completed++; else failed++;
-                await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, run?.RunId, label,
-                    result.Restore?.Detail ?? RunPresentation.Reason(run?.ReasonCode));
-                if (result.Restore?.State == RestoreState.Blocked || Queue.HasUnresolved)
-                { _stopBatch = true; BatchStatus = "临时配置未恢复或资源清理未确认，批次已停止。"; break; }
-            }
-            batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = null,
-                State = _stopBatch ? "stopped" : "finished",
-                Detail = $"完成 {completed}，失败 {failed}，跳过 {skipped}。" };
-            await Accounts.Database.SaveBatchAsync(batch);
-            BatchStatus = "批次结束：" + batch.Detail;
+            var accounts = selected.Select(r => r.Account).ToArray();
+            var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, mode,
+                async (account, ct) => (await Accounts.Database.LoadAccountSettingsAsync(account.Id, ct)).Values,
+                RunAccountTasksAsync,
+                progress => Application.Current.Dispatcher.Invoke(() => BatchStatus =
+                    $"{progress.AccountName} · {BatchProgressText.Describe(progress.State)} · {progress.Detail}"),
+                _batchCts.Token);
+            BatchStatus = (outcome.Completed ? "批次完成：" : "批次已停止：") + outcome.Detail;
         }
+        catch (OperationCanceledException) { BatchStatus = "批次已由用户停止。"; }
+        catch (Exception ex) { BatchStatus = "批次失败：" + ex.Message; }
         finally
         {
             BatchRunning = false;
+            _batchCts.Dispose(); _batchCts = null;
             await Accounts.ReloadAsync();
         }
+    }
+
+    private async Task<BatchTaskResult> RunAccountTasksAsync(GameAccount account,
+        IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken)
+    {
+        var card = Engines.Single(e => e.Id == GameId.StarRail);
+        var evidence = _march7thEvidence;
+        if (evidence is null) return new(null, false, true, true, "星铁安装身份尚未核对。");
+        if (_stopBatch) return new(null, false, true, true, "用户已停止批次。");
+        if (_batchMode == AccountConfigurationMode.Independent)
+        {
+            var plan = await Accounts.Database.LoadAccountTaskPlanAsync(account.Id, cancellationToken);
+            if (!plan.DailyEnabled) return new(null, false, true, true, "此账号的星铁日常任务计划未启用。");
+        }
+        try
+        {
+            var actual = _control.ReadConfiguration(GameId.StarRail, card.InstallPath);
+            var desired = new Dictionary<string, string>(settings);
+            foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask))
+                desired[key] = value;
+            _ = TemporaryConfigurationManager.Plan(actual, desired);
+            var taskPlan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
+            var result = await _control.ExecuteTaskPlan(taskPlan,
+                new RealTaskAuthorization(card.InstallPath, evidence, () => !_stopBatch,
+                    true, AllowTemporaryConfiguration: true, AccountSettings: settings));
+            var run = result.Queue?.Runs.LastOrDefault();
+            var cleaned = run?.Cleanup == CleanupState.Confirmed;
+            var restored = result.Restore?.State != RestoreState.Blocked;
+            var success = run?.Outcome == RunOutcome.Success && cleaned && restored;
+            var detail = result.Restore?.Detail ?? RunPresentation.Reason(run?.ReasonCode) ?? "任务未返回结果。";
+            return new(run?.RunId, success, cleaned, restored, detail);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { return new(null, false, true, true, ex.Message); }
     }
 
     public void ReportReconciled(int count)

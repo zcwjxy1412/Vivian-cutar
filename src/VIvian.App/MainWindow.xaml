@@ -255,56 +255,48 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <!-- ============ 账号管理 ============ -->
 <TabItem Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}"><StackPanel DataContext="{Binding Accounts}" MaxWidth="1050" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="账号管理" Style="{StaticResource H1}"/><TextBlock Text="アカウント" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="每个账号有独立档案。当前登录身份尚未由游戏核实，运行前必须逐一确认。" Style="{StaticResource Lead}"/>
-<Border Style="{StaticResource Panel}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"><StackPanel>
-<TextBlock Text="星铁多账号日常" Style="{StaticResource H2}"/>
-<TextBlock Text="按执行顺序逐个运行。每个账号开始前需手动登录，并在游戏里核对实际 UID。" Style="{StaticResource Small}"/>
-<WrapPanel Margin="0,12,0,0"><Button Style="{StaticResource Primary}" Content="运行全部账号" Command="{Binding RunAllAccountsCommand}" Margin="0,0,8,0"/>
-<Button Content="跳过当前账号" Command="{Binding SkipAccountCommand}" IsEnabled="{Binding BatchRunning}" Margin="0,0,8,0"/>
-<Button Style="{StaticResource DangerButton}" Content="停止批次" Command="{Binding StopBatchCommand}" IsEnabled="{Binding BatchRunning}"/></WrapPanel>
-<TextBlock Text="{Binding BatchStatus}" Style="{StaticResource Small}" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="打开星铁登录界面后扫描，VIvian 会按脱敏手机号建立档案；运行时自动选择并登录，不需要填写 UID，也不需要为每个账号安装一份助手。" Style="{StaticResource Lead}"/>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="扫描登录账号" Style="{StaticResource H2}"/>
+<TextBlock Text="本地 OCR 只读取当前屏幕上的文字，截图不会上传。首次自动切换账号时会请求一次管理员授权。" Style="{StaticResource Small}"/>
+<WrapPanel Margin="0,12,0,0"><Button Style="{StaticResource Primary}" Content="扫描登录账号" Command="{Binding ScanCommand}" Margin="0,0,8,8"/>
+<Button Content="导入登录截图" Command="{Binding ImportCommand}" Margin="0,0,8,8"/><Button Content="刷新" Command="{Binding ReloadCommand}" Margin="0,0,8,8"/></WrapPanel>
+<TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="选择游戏" Style="{StaticResource H2}"/><ComboBox ItemsSource="{Binding Games}" SelectedItem="{Binding Game}" DisplayMemberPath="Name" Width="250" HorizontalAlignment="Left"/>
-<TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,12,0,0" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="已识别账号" Style="{StaticResource H2}"/>
+<TextBlock Text="勾选要运行的账号。默认使用第一个选中账号的任务配置；每个账号的游戏体力与任务结果仍独立检测和保存。" Style="{StaticResource Small}"/>
+<ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" MinHeight="260" BorderThickness="0" Background="Transparent" Margin="0,10,0,0">
+<ListBox.ItemTemplate><DataTemplate><Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,2,10,0" AutomationProperties.Name="{Binding Name, StringFormat=选择 {0}}"/>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
+<TextBlock Text="{Binding LoginStatus}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding BindingDetail}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding LastResult, StringFormat=上次结果：{0}}" Style="{StaticResource Small}"/></StackPanel>
+<TextBlock Grid.Column="2" Text="{Binding Verification}" Style="{StaticResource Small}" Foreground="{StaticResource Warn}" VerticalAlignment="Top"/></Grid></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
+<WrapPanel Margin="0,8,0,0"><Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
+<Button Content="保存备注" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
+<TextBlock Text="备注只改 VIvian 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 </StackPanel></Border>
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="360"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<Border Style="{StaticResource Panel}" Margin="0,0,12,14"><DockPanel>
-<TextBlock DockPanel.Dock="Top" Text="账号列表" Style="{StaticResource H2}"/>
-<WrapPanel DockPanel.Dock="Bottom" Margin="0,12,0,0"><Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/><Button Content="刷新" Command="{Binding ReloadCommand}"/></WrapPanel>
-<ListBox ItemsSource="{Binding Accounts}" SelectedItem="{Binding Selected}" MinHeight="260" BorderThickness="0" Background="Transparent">
-<ListBox.ItemTemplate><DataTemplate><Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12" Margin="0,0,0,8"><StackPanel>
-<TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
-<TextBlock Text="{Binding Region, StringFormat=区服：{0}}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding Uid, StringFormat=UID：{0}}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding VerificationState, StringFormat=身份状态：{0}}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding LastResult, StringFormat=上次结果：{0}}" Style="{StaticResource Small}"/>
-</StackPanel></Border></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel></Border>
-<Border Grid.Column="1" Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="账号档案" Style="{StaticResource H2}"/><TextBlock Text="名称" Style="{StaticResource Small}"/><TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
-<TextBlock Text="区服" Style="{StaticResource Small}"/><TextBox Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
-<TextBlock Text="游戏 UID（可留空）" Style="{StaticResource Small}"/><TextBox Text="{Binding Uid, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
-<TextBlock Text="账号专属 March7thAssistant 安装目录（原有账号留空）" Style="{StaticResource Small}"/>
-<TextBox Text="{Binding EngineInstallPath, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,10"/>
-<TextBlock Text="新增星铁账号须使用独立安装目录，保留各自的好友、队伍和原项目详细设置。" Style="{StaticResource Small}" Margin="0,0,0,10"/>
-<CheckBox Content="启用账号" IsChecked="{Binding Enabled}" Margin="0,0,0,8"/>
-<CheckBox Content="列入运行全部账号" IsChecked="{Binding AutoRun}" Margin="0,0,0,12"/>
-<CheckBox Content="账号任务计划：执行星铁日常" IsChecked="{Binding DailyTaskEnabled}" IsEnabled="{Binding CanEditDailyPlan}" Margin="0,0,0,12"/>
-<WrapPanel><Button Style="{StaticResource Primary}" Content="添加新账号" Command="{Binding AddCommand}" Margin="0,0,8,8"/>
-<Button Content="保存所选账号" Command="{Binding SaveCommand}" Margin="0,0,8,8"/>
-<Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}" Margin="0,0,8,8"/></WrapPanel>
-<TextBlock Text="删除只影响 VIvian 档案，不会清除游戏客户端的账号或凭据。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-</StackPanel></Border></Grid>
-<Border Style="{StaticResource Panel}"><StackPanel><TextBlock Text="最近批次" Style="{StaticResource H2}"/>
+<Border Style="{StaticResource Panel}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"><StackPanel>
+<TextBlock Text="运行选中账号" Style="{StaticResource H2}"/>
+<TextBlock Text="账号切换顺序与列表一致。每次切换都会等上一个账号的任务、进程和临时配置全部清理完成。" Style="{StaticResource Small}"/>
+<StackPanel Orientation="Horizontal" Margin="0,10,0,0"><RadioButton GroupName="AccountConfigMode" Content="统一配置（继承第一个账号）" IsChecked="{Binding Accounts.IsUnified, Mode=TwoWay}" Margin="0,0,20,0"/>
+<RadioButton GroupName="AccountConfigMode" Content="各账号独立配置" IsChecked="{Binding Accounts.IsIndependent, Mode=TwoWay}"/></StackPanel>
+<WrapPanel Margin="0,14,0,0"><Button Style="{StaticResource Primary}" Content="运行选中账号" Command="{Binding RunSelectedAccountsCommand}" Margin="0,0,8,0"/>
+<Button Style="{StaticResource DangerButton}" Content="停止全部任务" Command="{Binding StopBatchCommand}" IsEnabled="{Binding BatchRunning}"/></WrapPanel>
+<TextBlock Text="{Binding BatchStatus}" Style="{StaticResource Small}" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Panel}" DataContext="{Binding Accounts}"><StackPanel><TextBlock Text="最近批次" Style="{StaticResource H2}"/>
 <ListBox ItemsSource="{Binding RecentBatches}" SelectedItem="{Binding SelectedBatch}" BorderThickness="0" Background="Transparent"><ListBox.ItemTemplate><DataTemplate>
 <StackPanel Orientation="Horizontal" Margin="0,4,0,4"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:MM-dd HH:mm}}" Width="110"/>
-<TextBlock Text="{Binding State}" Width="100"/><TextBlock Text="{Binding Detail}"/></StackPanel>
+<TextBlock Text="{Binding Mode}" Width="90"/><TextBlock Text="{Binding State}" Width="100"/><TextBlock Text="{Binding Detail}"/></StackPanel>
 </DataTemplate></ListBox.ItemTemplate></ListBox>
 <TextBlock Text="所选批次的逐账号结果" Style="{StaticResource H2}" Margin="0,12,0,4"/>
 <ItemsControl ItemsSource="{Binding BatchResults}"><ItemsControl.ItemTemplate><DataTemplate>
 <StackPanel Margin="0,4,0,8"><TextBlock Text="{Binding AccountName}" FontWeight="Bold"/>
-<TextBlock Text="{Binding Result}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Small}"/>
-</StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+<TextBlock Text="{Binding Result}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Small}"/></StackPanel>
+</DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 
 <!-- ============ 日常任务 ============ -->

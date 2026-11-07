@@ -30,7 +30,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -113,6 +113,22 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         PRAGMA user_version=5;
         """;
 
+    private const string SchemaV6 = """
+        CREATE TABLE account_login_profiles(
+            account_id TEXT PRIMARY KEY REFERENCES game_accounts(account_id) ON DELETE CASCADE,
+            masked_phone TEXT NOT NULL, normalized_phone TEXT NOT NULL,
+            row_order INTEGER NOT NULL DEFAULT 0 CHECK(row_order>=0),
+            confidence REAL NOT NULL DEFAULT 0,
+            observed_uid TEXT NULL, last_scan_at TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
+        CREATE INDEX ix_account_login_phone ON account_login_profiles(normalized_phone);
+        CREATE TABLE account_scan_sessions(
+            id TEXT PRIMARY KEY, game INTEGER NOT NULL CHECK(game BETWEEN 0 AND 2),
+            source TEXT NOT NULL, window_width INTEGER NOT NULL, window_height INTEGER NOT NULL,
+            account_count INTEGER NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
+        ALTER TABLE batch_execution_records ADD COLUMN mode TEXT NOT NULL DEFAULT 'unified';
+        PRAGMA user_version=6;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -127,7 +143,8 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         {
             versionCommand.CommandText = "PRAGMA user_version;";
             var oldVersion = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(ct));
-            var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak" : ".pre-m5.1.bak");
+            var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak"
+                : oldVersion == 5 ? ".pre-v6.bak" : ".pre-m5.1.bak");
             if (oldVersion is > 0 and < CurrentSchemaVersion && !File.Exists(backupPath))
             {
                 await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -170,6 +187,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 4)
         {
             command.CommandText = SchemaV5;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 5)
+        {
+            command.CommandText = SchemaV6;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

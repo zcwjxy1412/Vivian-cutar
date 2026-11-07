@@ -10,6 +10,7 @@ using VIvian.Infrastructure;
 using VIvian.Infrastructure.Simulation;
 using VIvian.Infrastructure.Processes;
 using VIvian.Infrastructure.Diagnostics;
+using VIvian.Infrastructure.Accounts;
 
 namespace VIvian.App;
 
@@ -23,6 +24,18 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} OnStartup args={string.Join('|', e.Args)}\n"); } catch { }
+        // The elevated input host is a hidden second instance of this same executable. It must be handled before
+        // single-instance, database, logging or any window exists, and it owns no user data.
+        var hostIndex = Array.IndexOf(e.Args, InputHostProtocol.Argument);
+        if (hostIndex >= 0)
+        {
+            var pipeName = hostIndex + 1 < e.Args.Length ? e.Args[hostIndex + 1] : string.Empty;
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} entering host pipe={pipeName}\n"); } catch { }
+            var exitCode = InputHostServer.Run(pipeName);
+            Shutdown(exitCode);
+            return;
+        }
         _smoke = e.Args.Contains("--smoke-test");
         _startupCheck = e.Args.Contains("--startup-check");
         DispatcherUnhandledException += (_, args) =>
@@ -108,6 +121,15 @@ public partial class App : Application
                     admitReal: adapter =>
                         RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
+                services.AddSingleton<LoginScreenReader>();
+                services.AddSingleton<AccountRecognitionService>();
+                services.AddSingleton<IInputHost, ElevatedInputHost>();
+                services.AddSingleton<IGameSessionVerifier, StarRailSessionVerifier>();
+                services.AddSingleton<GamePathProvider>();
+                services.AddSingleton<ILoginSwitchDriver>(sp => new StarRailLoginDriver(
+                    sp.GetRequiredService<LoginScreenReader>(), sp.GetRequiredService<IGameSessionVerifier>(),
+                    sp.GetRequiredService<IInputHost>(), sp.GetRequiredService<GamePathProvider>().Get));
+                services.AddSingleton<MultiAccountOrchestrator>();
                 services.AddSingleton<AccountViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();

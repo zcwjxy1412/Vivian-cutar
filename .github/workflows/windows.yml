@@ -60,6 +60,23 @@ jobs:
             artifacts/m5-daily-test/BUILD-INFO.txt
           if-no-files-found: error
           retention-days: 30
+      - name: Build M5.1 multi-account test package
+        if: success()
+        shell: pwsh
+        env:
+          VIVIAN_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: ./scripts/Build-M5_1Test.ps1
+      - name: Upload M5.1 multi-account test package
+        if: success()
+        uses: actions/upload-artifact@v6
+        with:
+          name: VIvian-M5.1-DailyTest-win-x64
+          path: |
+            artifacts/VIvian-M5.1-DailyTest-win-x64.zip
+            artifacts/VIvian-M5.1-DailyTest-win-x64.zip.sha256
+            artifacts/m5-1-daily-test-ci/BUILD-INFO.txt
+          if-no-files-found: error
+          retention-days: 30
       - name: Preserve build evidence and portable preview
         if: always()
         uses: actions/upload-artifact@v6

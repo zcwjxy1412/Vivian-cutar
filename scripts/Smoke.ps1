@@ -6,7 +6,7 @@ New-Item -ItemType Directory $root | Out-Null
 $previous = $env:VIVIAN_SMOKE_DATA
 try {
     $env:VIVIAN_SMOKE_DATA = $root
-    $process = Start-Process -FilePath $ExePath -ArgumentList '--smoke-test' -PassThru
+    $process = Start-Process -FilePath $ExePath -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(30000)) {
         # Only the exact process created by this test is stopped.
         $process.Kill()

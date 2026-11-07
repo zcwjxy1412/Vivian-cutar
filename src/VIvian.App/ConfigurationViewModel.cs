@@ -48,6 +48,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private readonly Func<GameAccount?> _selectedAccount;
     private AccountSettingsSnapshot? _accountSettings;
     private ConfigurationSnapshot? _snapshot;
+    private ConfigurationSnapshot? _upstreamSnapshot;
     private FileSystemWatcher? _watcher;
     private System.Windows.Threading.DispatcherTimer? _timer;
     private System.Windows.Threading.DispatcherTimer? _debounce;
@@ -57,6 +58,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public string Status { get => _status; private set => Set(ref _status, value); }
     public ObservableCollection<ParameterRow> Parameters { get; } = [];
     public AsyncCommand ReadCommand { get; }
+    public AsyncCommand ImportUpstreamCommand { get; }
     public AsyncCommand SaveCommand { get; }
     public RelayCommand OpenSettingsCommand { get; }
     /// <summary>Edits not yet written to the upstream file (queued while a task runs, or invalid values).</summary>
@@ -68,6 +70,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         _control = control; _installPath = installPath; _isRunning = isRunning; _auditDirectory = auditDirectory;
         _accounts = accounts; _selectedAccount = selectedAccount;
         ReadCommand = new(ReadAsync, Error);
+        ImportUpstreamCommand = new(ImportUpstreamAsync, Error);
         SaveCommand = new(() => { TryApplyPending(interactive: true); return Task.CompletedTask; }, Error);
         OpenSettingsCommand = new(OpenSettings);
         OpenUpstreamCommand = new(OpenUpstreamAsync, Error);
@@ -102,6 +105,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         _game = game;
         _watcher?.Dispose(); _watcher = null;
         _snapshot = null; Parameters.Clear();
+        _upstreamSnapshot = null;
         Status = "已切换游戏；点击“重新读取”。";
     }
 
@@ -109,10 +113,13 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     {
         _debounce?.Stop();
         _snapshot = null;
+        _upstreamSnapshot = null;
         _accountSettings = null;
         Parameters.Clear();
         if (!string.IsNullOrWhiteSpace(_installPath(GameId.StarRail))) await ReadAsync();
-        else Status = "请先为新增账号设置专属 March7thAssistant 安装目录。";
+        else Status = _selectedAccount()?.Id == Guid.Parse("00000000-0000-4000-8000-000000000002")
+            ? "请先在“引擎与环境”填写原有账号的星铁助手安装目录。"
+            : "请先为新增账号设置专属 March7thAssistant 安装目录。";
     }
 
     public async Task ReadAsync()
@@ -121,6 +128,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         var path = _installPath(_game);
         if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return; }
         var snapshot = _control.ReadConfiguration(_game, path);
+        _upstreamSnapshot = snapshot;
         _accountSettings = null;
         if (_game == GameId.StarRail && _selectedAccount() is { } account)
         {
@@ -165,6 +173,24 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             && v.Schema.Access == ParameterAccess.VerifiedReadWrite && ParameterRules.IsValid(v.Schema, saved)
                 ? v with { Value = saved, State = "账号独立设置" } : v).ToArray()
     };
+
+    private async Task ImportUpstreamAsync()
+    {
+        if (_selectedAccount() is not { } account || account.Id == Guid.Parse("00000000-0000-4000-8000-000000000002"))
+        { await ReadAsync(); return; }
+        if (_isRunning() || PendingCount > 0)
+        { Status = "任务运行中或仍有未保存修改；暂不导入原项目设置。"; return; }
+        if (MessageBox.Show("从所选账号的 March7thAssistant 导入已登记参数并覆盖该账号在 VIvian 中保存的这些值？",
+                "导入账号设置", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        var upstream = _control.ReadConfiguration(GameId.StarRail, _installPath(GameId.StarRail));
+        var current = await _accounts.LoadAccountSettingsAsync(account.Id);
+        var merged = new Dictionary<string, string>(current.Values);
+        foreach (var value in upstream.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null))
+            merged[value.Schema.Path] = value.Value!;
+        await _accounts.SaveAccountSettingsAsync(current with { Values = merged });
+        await ReadAsync();
+        Status = "已从所选账号原项目导入已登记参数；高级设置仍留在该账号专属安装目录。";
+    }
 
     /// <summary>Rows for a snapshot; carried-over edits keep their values. Each row auto-saves when edited.</summary>
     private void Show(ConfigurationSnapshot snapshot, IReadOnlyDictionary<string, string>? edits)
@@ -308,7 +334,32 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     {
         if (_snapshot is null || _applying) return true;
         if (_accountSettings is not null && _selectedAccount()?.Id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
-            return true; // The selected account's stored values must never be replaced by another account's live file.
+        {
+            try
+            {
+                var upstream = _control.ReadConfiguration(_game, _installPath(_game));
+                if (_upstreamSnapshot?.Revision == upstream.Revision) return true;
+                var externalChanged = upstream.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null
+                    && _upstreamSnapshot?.Values.SingleOrDefault(old => old.Schema.Path == v.Schema.Path)?.Value != v.Value).ToArray();
+                var pending = Parameters.Where(p => p.IsChanged).ToDictionary(p => p.Path, p => p.Current);
+                if (externalChanged.Any(v => pending.ContainsKey(v.Schema.Path)))
+                { Status = "原项目也修改了正在编辑的账号参数；请先保存或取消本地修改，再重新读取。"; return true; }
+                if (externalChanged.Length > 0)
+                {
+                    var merged = new Dictionary<string, string>(_accountSettings.Values);
+                    foreach (var value in externalChanged) merged[value.Schema.Path] = value.Value!;
+                    _accountSettings = Task.Run(() => _accounts.SaveAccountSettingsAsync(_accountSettings with { Values = merged }))
+                        .GetAwaiter().GetResult();
+                }
+                _upstreamSnapshot = upstream;
+                _snapshot = OverlayAccount(upstream, _accountSettings);
+                Show(_snapshot, pending);
+                Status = externalChanged.Length > 0 ? $"已从所选账号的原项目同步 {externalChanged.Length} 项设置。" : "已读取所选账号原项目的最新状态。";
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or SettingsConflictException)
+            { Status = "所选账号原项目同步失败：" + ex.Message; return false; }
+        }
         ConfigurationSnapshot latest;
         try { latest = _control.ReadConfiguration(_game, _installPath(_game)); }
         catch (Exception ex) { Status = "原软件修改了配置，重新读取失败：" + ex.Message; return false; }

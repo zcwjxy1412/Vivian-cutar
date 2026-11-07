@@ -152,12 +152,12 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Button Command="{Binding OneClickCommand}" HorizontalAlignment="Center" Margin="0,8,0,14" Cursor="Hand" AutomationProperties.Name="一键日常">
 <Button.Template><ControlTemplate TargetType="Button"><Grid Width="176" Height="176">
 <Ellipse Stroke="{StaticResource Gold}" StrokeThickness="3" Fill="#DDE6FF"/>
-<Ellipse x:Name="Core" Margin="12" Fill="{StaticResource Dream}" Stroke="#FFFFFF" StrokeThickness="2"/>
+<Border x:Name="Core" Margin="12" CornerRadius="76" Background="{StaticResource Dream}" BorderBrush="White" BorderThickness="2"/>
 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
 <Path Data="M 0,0 L 26,15 L 0,30 Z" Fill="White" HorizontalAlignment="Center" Margin="6,0,0,6"/>
 <TextBlock Text="一键日常" Foreground="White" FontSize="22" FontWeight="Bold"/></StackPanel></Grid>
 <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
-<Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Margin" Value="15"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
+<Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
 <UniformGrid Columns="3">
 <Button Content="计划运行" IsEnabled="False" ToolTip="定时执行将在手动运行稳定后开放" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
 <Button Content="暂停" IsEnabled="False" ToolTip="暂停尚未接入" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
@@ -318,7 +318,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <DockPanel Margin="0,0,10,0"><TextBlock DockPanel.Dock="Top" Text="历史" Style="{StaticResource H2}"/>
 <ListView ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate>
 <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="4,8,4,10"><StackPanel>
-<TextBlock Text="{Binding When}" Foreground="{StaticResource StarRail}" FontSize="13"/><TextBlock Text="{Binding Summary}" Margin="0,2,0,0"/>
+<TextBlock Text="{Binding When}" Foreground="{StaticResource Sakura}" FontSize="13"/><TextBlock Text="{Binding Summary}" Margin="0,2,0,0"/>
 <TextBlock Text="{Binding RunId, StringFormat=RunId {0:D}}" Style="{StaticResource Small}" FontSize="12"/></StackPanel></Border>
 </DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
 <DockPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock DockPanel.Dock="Top" Text="日志" Style="{StaticResource H2}"/>
@@ -355,7 +355,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Expander><Expander.Header><TextBlock Text="检查详情" Foreground="{StaticResource Muted}"/></Expander.Header><ItemsControl ItemsSource="{Binding Checks}" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate>
 <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 <TextBlock Text="{Binding State}" Foreground="{Binding Brush}" FontWeight="SemiBold"/>
-<StackPanel Grid.Column="1"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Message}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Action}" Foreground="{StaticResource StarRail}" FontSize="13"/></StackPanel>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Message}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Action}" Foreground="{StaticResource Sakura}" FontSize="13"/></StackPanel>
 </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
 <Expander><Expander.Header><TextBlock Text="能力与证据" Foreground="{StaticResource Muted}"/></Expander.Header><ItemsControl ItemsSource="{Binding Capabilities}" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate>
 <Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -411,7 +411,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <TextBlock Text="基础自检记录" Style="{StaticResource H2}"/><Button Grid.Column="1" Content="刷新" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" Margin="0"/></Grid>
 <TextBlock Text="这里不是游戏任务历史。时间为 UTC。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
-<ListView ItemsSource="{Binding History}" MaxHeight="240" Background="{StaticResource Surface}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="0,6"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="{StaticResource StarRail}" FontSize="13"/><TextBlock Text="{Binding Summary}" Style="{StaticResource Small}"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+<ListView ItemsSource="{Binding History}" MaxHeight="240" Background="{StaticResource Surface}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="0,6"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="{StaticResource Sakura}" FontSize="13"/><TextBlock Text="{Binding Summary}" Style="{StaticResource Small}"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="关于" Style="{StaticResource H2}"/>

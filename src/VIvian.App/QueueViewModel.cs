@@ -170,7 +170,7 @@ public sealed class QueueViewModel : ObservableObject
         Serilog.Log.Information("Emergency stop requested from UI");
     }
 
-    private async Task AcknowledgeAllAsync()
+    public async Task AcknowledgeAllAsync()
     {
         // Goes through the scheduler: it refuses while an abandoned adapter call is still running, and only releases
         // its in-session barrier after the acknowledgement has been stored.

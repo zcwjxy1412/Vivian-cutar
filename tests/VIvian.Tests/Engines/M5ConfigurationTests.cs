@@ -80,19 +80,37 @@ public sealed class M5ConfigurationTests : IDisposable
         var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["power_enable"] = "false" });
         Assert.True(_service.ValidateChanges(proposal, false).Valid);
         var runs = Directory.CreateDirectory(Path.Combine(_root, "logs", "runs")).FullName;
-        using var self = System.Diagnostics.Process.GetCurrentProcess();
-        var created = new DateTimeOffset(self.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0;
-        File.WriteAllText(Path.Combine(runs, "active.json"),
-            $"{{\"run_id\": \"20261107-010203-abcd\", \"pid\": {self.Id}, \"pid_create_time\": {created.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
+        // An unreadable lock is treated as a running task: queued, not written.
+        File.WriteAllText(Path.Combine(runs, "active.json"), "{ not json");
         var blocked = _service.ValidateChanges(proposal, false);
         Assert.False(blocked.Valid);
-        Assert.True(blocked.Deferred); // queued and written after the task, not rejected as invalid
+        Assert.True(blocked.Deferred);
         Assert.True(_service.ValidateChanges(proposal, true).Deferred);
-        Assert.Contains("20261107-010203-abcd", blocked.Reason);
-        // A stale lock from a process that started at another time (PID reuse) does not block.
-        File.WriteAllText(Path.Combine(runs, "active.json"),
-            $"{{\"run_id\": \"old\", \"pid\": {self.Id}, \"pid_create_time\": 1000}}");
+        // A lock whose PID now belongs to another program (here: the test host) is stale and does not block.
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        File.WriteAllText(Path.Combine(runs, "active.json"), $"{{\"run_id\": \"old\", \"pid\": {self.Id}, \"pid_create_time\": 1000}}");
         Assert.True(_service.ValidateChanges(proposal, false).Valid);
+        Assert.True(March7thRunLock.IsUpstreamProcessName("March7th Assistant"));
+        Assert.True(March7thRunLock.IsUpstreamProcessName("m7a"));
+        Assert.False(March7thRunLock.IsUpstreamProcessName("svchost"));
+    }
+
+    [Fact]
+    public void LockedTargetFallsBackToInPlaceWriteAfterBackup()
+    {
+        var before = File.ReadAllBytes(Config);
+        var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
+        var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["power_enable"] = "false" });
+        VersionedConfigurationControl.ReplaceOverride = (_, _) => false; // antivirus holding the file
+        try
+        {
+            var result = _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false);
+            Assert.Equal("false", result.Snapshot.Values.Single(v => v.Schema.Path == "power_enable").Value);
+            Assert.Equal(before, File.ReadAllBytes(result.BackupPath));
+            Assert.Contains("unknown_future: 42 # untouched\r\n", File.ReadAllText(Config));
+            Assert.Empty(Directory.GetFiles(_root, "*.tmp"));
+        }
+        finally { VersionedConfigurationControl.ReplaceOverride = null; }
     }
 
     [Fact]

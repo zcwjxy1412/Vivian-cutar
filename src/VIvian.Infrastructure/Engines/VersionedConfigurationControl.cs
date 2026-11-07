@@ -149,7 +149,10 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
                     throw new IOException("配置在保存的瞬间被原软件修改；没有写入，请再点一次保存。");
                 var lastCheck = ValidateChanges(proposal, engineRunning);
                 if (!lastCheck.Valid) throw new IOException(lastCheck.Reason);
-                File.Replace(temporary, path, backup);
+                // Backup is a plain copy: the audit folder is usually on another drive (%LOCALAPPDATA% vs E:),
+                // and Windows ReplaceFile cannot move the old file across volumes ("无法删除要被替换的文件").
+                File.Copy(path, backup, overwrite: false);
+                WriteVerified(temporary, path, Utf8.GetBytes(updated));
                 var reread = ReadConfiguration(GameId.StarRail, Path.GetDirectoryName(path)!);
                 if (proposal.Changes.Any(c => reread.Values.Single(v => v.Schema.Path == c.Path).Value != c.NewValue))
                     throw new IOException("写入后读取的参数与预期不符；备份已保留。");
@@ -159,6 +162,32 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         finally { WriteGate.Release(); }
+    }
+
+    /// <summary>Test hook: simulates a target that cannot be replaced (antivirus or indexer holding it).</summary>
+    internal static Func<string, string, bool>? ReplaceOverride { get; set; }
+
+    /// <summary>
+    /// Puts the new bytes at <paramref name="path"/>: atomic move of the same-directory temp file, retried briefly
+    /// because Windows antivirus/indexers hold files for a moment; if that keeps failing, overwrite in place (the
+    /// verified backup already exists) — the same fallback the pinned upstream uses (config.py save_config).
+    /// </summary>
+    private static void WriteVerified(string temporary, string path, byte[] bytes)
+    {
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            try
+            {
+                if (ReplaceOverride is { } replace) { if (replace(temporary, path)) return; throw new IOException("simulated lock"); }
+                File.Move(temporary, path, overwrite: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(120); }
+        }
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+        stream.SetLength(0);
+        stream.Write(bytes);
+        stream.Flush(flushToDisk: true);
     }
 
     /// <summary>

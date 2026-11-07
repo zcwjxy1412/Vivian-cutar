@@ -301,6 +301,11 @@ public sealed class MainViewModel : ObservableObject
         Configuration.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ConfigurationViewModel.PendingCount)) RaiseHome();
+            // Results of writing settings are shown in the tip bar too, wherever the user is.
+            if (e.PropertyName == nameof(ConfigurationViewModel.Status) && Configuration.Status is { } cs &&
+                (cs.StartsWith("已写入", StringComparison.Ordinal) || cs.StartsWith("没有写入", StringComparison.Ordinal)
+                 || cs.Contains("项修改已排队", StringComparison.Ordinal) || cs.StartsWith("原软件也改了", StringComparison.Ordinal)))
+                Status = cs;
             if (e.PropertyName == nameof(ConfigurationViewModel.Status))
             {
                 RefreshTemporaryConfigurationNeeds();
@@ -417,6 +422,16 @@ public sealed class MainViewModel : ObservableObject
     private async Task OneClickAsync()
     {
         var card = Engines.Single(e => e.Id == GameId.StarRail);
+        // A previous run whose worker exit could not be confirmed blocks everything until the user confirms.
+        if (Queue.HasUnresolved)
+        {
+            if (MessageBox.Show("上一次运行结束时，VIvian 没能确认星铁助手的工作进程已经退出（例如游戏窗口被关掉、任务被中途停止），所以暂停了新任务，防止两个自动化同时操作游戏。\n\n" +
+                    "请确认：星铁助手窗口、它的命令行窗口和游戏都已关闭（不确定可在任务管理器里查看是否还有 March7th Assistant）。\n\n已经确认全部关闭了吗？",
+                    "VIvian · 上次运行未确认清理", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            { Status = "上次运行的清理还没确认，任务未启动。确认全部关闭后再点“一键日常”。"; return; }
+            await Queue.AcknowledgeAllAsync();
+            if (Queue.HasUnresolved) { Status = Queue.Status; return; }
+        }
         if (!card.IncludeInOneClick || !card.CanRunForReal)
         { Status = "没有选中可以真实执行的游戏。目前只有星铁的“日常”可以运行。"; return; }
         IReadOnlyList<TemporaryChange> changes = [];

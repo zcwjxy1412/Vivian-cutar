@@ -35,12 +35,19 @@ public static class March7thRunLock
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return "未知"; }
     }
 
+    internal static bool IsUpstreamProcessName(string name) =>
+        name.Equals("March7th Assistant", StringComparison.OrdinalIgnoreCase) || name.Equals("m7a", StringComparison.OrdinalIgnoreCase)
+        || name.StartsWith("python", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsAlive(int pid, double? createdEpochSeconds)
     {
         try
         {
             using var process = Process.GetProcessById(pid);
             if (process.HasExited) return false;
+            // The lock holder is the upstream worker or launcher. A reused PID that belongs to anything else
+            // means the lock is stale (e.g. the worker was killed and never released it).
+            if (!IsUpstreamProcessName(process.ProcessName)) return false;
             if (createdEpochSeconds is null) return true;
             try
             {

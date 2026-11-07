@@ -80,7 +80,7 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
 
     public ConfigurationValidation ValidateChanges(ConfigurationProposal proposal, bool engineRunning)
     {
-        if (engineRunning) return new(false, "上游程序或 VIvian 任务正在运行，禁止写入。");
+        if (engineRunning) return new(false, "VIvian 正在运行任务；修改会在任务结束后自动写入。", Deferred: true);
         if (proposal.Base.Game != GameId.StarRail || proposal.Base.PinnedVersion != EngineCatalog.March7th.PinnedVersion)
             return new(false, "该引擎版本不支持配置写入。");
         if (proposal.Changes.Count == 0) return new(false, "没有需要保存的变化。");
@@ -100,9 +100,9 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
         // external changes (module/config/config.py set_value; app/main_window.py _on_config_file_changed).
         // A running task is different: it already loaded its settings, so a change would not apply to it.
         if (FakeEngineAdapter.ForeignProcessIds(Path.Combine(root, "m7a.exe")).Count > 0)
-            return new(false, "星铁助手的命令行任务正在运行；任务结束后再保存。");
+            return new(false, "星铁助手的命令行任务正在运行；修改会在任务结束后自动写入。", Deferred: true);
         if (March7thRunLock.ActiveRunId(root) is { } runId)
-            return new(false, $"星铁助手正在执行任务（运行编号 {runId}）；任务结束后再保存。原软件窗口开着不影响保存。");
+            return new(false, $"星铁助手正在执行任务（运行编号 {runId}）；修改会在任务结束后自动写入。原软件窗口开着不影响写入。", Deferred: true);
         var warnings = ParameterRules.Warnings(proposal);
         return new(true, "可以保存；写入前仍会核对文件版本和运行状态。" +
             (warnings.Count > 0 ? " 提示：" + string.Join("；", warnings) + "。" : ""));

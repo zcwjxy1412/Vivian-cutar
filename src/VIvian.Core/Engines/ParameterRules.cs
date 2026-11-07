@@ -69,6 +69,10 @@ public static class ParameterRules
         proposal.Changes.FirstOrDefault(c => c.Path == path)?.NewValue
         ?? proposal.Base.Values.FirstOrDefault(v => v.Schema.Path == path)?.Value;
 
+    /// <summary>Changes that spend resources or destroy items; always confirmed by the user even with auto-save.</summary>
+    public static bool RequiresConfirmation(ConfigurationChange change) =>
+        change.NewValue == "true" && change.Path is "use_fuel" or "use_reserved_trailblaze_power" or "break_down_level_four_relicset";
+
     /// <summary>Contradictions that would make the saved configuration fail at run time. They block saving.</summary>
     public static IReadOnlyList<string> Conflicts(ConfigurationProposal proposal)
     {

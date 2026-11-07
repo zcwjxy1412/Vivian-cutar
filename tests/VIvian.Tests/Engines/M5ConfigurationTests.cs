@@ -86,6 +86,8 @@ public sealed class M5ConfigurationTests : IDisposable
             $"{{\"run_id\": \"20261107-010203-abcd\", \"pid\": {self.Id}, \"pid_create_time\": {created.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
         var blocked = _service.ValidateChanges(proposal, false);
         Assert.False(blocked.Valid);
+        Assert.True(blocked.Deferred); // queued and written after the task, not rejected as invalid
+        Assert.True(_service.ValidateChanges(proposal, true).Deferred);
         Assert.Contains("20261107-010203-abcd", blocked.Reason);
         // A stale lock from a process that started at another time (PID reuse) does not block.
         File.WriteAllText(Path.Combine(runs, "active.json"),
@@ -131,5 +133,16 @@ public sealed class M5ConfigurationTests : IDisposable
             "daily", 0, id);
         Assert.True(March7thDailyEvidence.ProvesComplete("开始日常任务\n当前累计分数：500/500\n每日实训已完成\n" + final), complete.Detail);
         Assert.Equal(VIvian.Core.Execution.RunOutcome.Success, complete.Outcome);
+    }
+
+    [Fact]
+    public void InvalidValuesAreNotDeferredAndResourceSpendingNeedsConfirmation()
+    {
+        var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
+        var bad = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["reward_enable"] = "maybe" });
+        Assert.False(_service.ValidateChanges(bad, false).Deferred);
+        Assert.True(ParameterRules.RequiresConfirmation(new ConfigurationChange("use_fuel", "false", "true")));
+        Assert.False(ParameterRules.RequiresConfirmation(new ConfigurationChange("use_fuel", "true", "false")));
+        Assert.False(ParameterRules.RequiresConfirmation(new ConfigurationChange("instance_type", "拟造花萼（金）", "饰品提取")));
     }
 }

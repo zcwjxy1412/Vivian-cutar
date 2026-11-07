@@ -5,7 +5,8 @@ public sealed record ConfigurationSnapshot(GameId Game, string PinnedVersion, st
     IReadOnlyList<ConfigurationValue> Values, DateTimeOffset ReadAt);
 public sealed record ConfigurationChange(string Path, string OldValue, string NewValue);
 public sealed record ConfigurationProposal(ConfigurationSnapshot Base, IReadOnlyList<ConfigurationChange> Changes);
-public sealed record ConfigurationValidation(bool Valid, string Reason);
+/// <param name="Deferred">Not invalid, just not writable right now (a task is running); retry when it ends.</param>
+public sealed record ConfigurationValidation(bool Valid, string Reason, bool Deferred = false);
 public sealed record ConfigurationApplyResult(ConfigurationSnapshot Snapshot, string BackupPath, string AuditPath);
 
 /// <summary>Shared, typed configuration boundary for the WPF client and future controlled tools.</summary>

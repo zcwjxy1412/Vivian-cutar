@@ -46,37 +46,43 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private ConfigurationSnapshot? _snapshot;
     private FileSystemWatcher? _watcher;
     private System.Windows.Threading.DispatcherTimer? _timer;
+    private System.Windows.Threading.DispatcherTimer? _debounce;
+    private bool _applying;
     private GameId _game = GameId.StarRail;
-    private string _status = "选择游戏后读取配置。";
+    private string _status = "正在读取星铁助手的配置…";
     public string Status { get => _status; private set => Set(ref _status, value); }
     public ObservableCollection<ParameterRow> Parameters { get; } = [];
     public AsyncCommand ReadCommand { get; }
     public AsyncCommand SaveCommand { get; }
     public RelayCommand OpenSettingsCommand { get; }
+    /// <summary>Edits not yet written to the upstream file (queued while a task runs, or invalid values).</summary>
+    public int PendingCount => Parameters.Count(p => p.IsChanged);
+
     public ConfigurationViewModel(IConfigurationControl control, Func<GameId, string> installPath,
         Func<bool> isRunning, string auditDirectory)
     {
         _control = control; _installPath = installPath; _isRunning = isRunning; _auditDirectory = auditDirectory;
         ReadCommand = new(ReadAsync, Error);
-        SaveCommand = new(SaveAsync, Error);
+        SaveCommand = new(() => { TryApplyPending(interactive: true); return Task.CompletedTask; }, Error);
         OpenSettingsCommand = new(OpenSettings);
     }
+
     public void SelectGame(GameId game)
     {
         _game = game;
         _watcher?.Dispose(); _watcher = null;
         _snapshot = null; Parameters.Clear();
-        Status = "已切换游戏；点击“读取上游配置”。";
+        Status = "已切换游戏；点击“重新读取”。";
     }
+
     public Task ReadAsync()
     {
         var path = _installPath(_game);
-        if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎管理”填写安装目录。"; return Task.CompletedTask; }
+        if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return Task.CompletedTask; }
         var snapshot = _control.ReadConfiguration(_game, path);
         _snapshot = snapshot;
-        Parameters.Clear();
-        foreach (var value in snapshot.Values) Parameters.Add(new(value));
-        Status = $"已读取 {snapshot.PinnedVersion}；{snapshot.ReadAt.ToLocalTime():HH:mm:ss} 同步。";
+        Show(snapshot, null);
+        Status = $"已读取 {snapshot.PinnedVersion}；{snapshot.ReadAt.ToLocalTime():HH:mm:ss} 同步。修改会立即写入星铁助手。";
         _watcher?.Dispose();
         if (File.Exists(snapshot.Path))
         {
@@ -88,23 +94,109 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         if (_timer is null && Application.Current is not null)
         {
             _timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
-            _timer.Tick += (_, _) => Reconcile();
+            _timer.Tick += (_, _) => { Reconcile(); TryApplyPending(interactive: false); };
             _timer.Start();
         }
         return Task.CompletedTask;
     }
+
+    /// <summary>Rows for a snapshot; carried-over edits keep their values. Each row auto-saves when edited.</summary>
+    private void Show(ConfigurationSnapshot snapshot, IReadOnlyDictionary<string, string>? edits)
+    {
+        foreach (var old in Parameters) old.PropertyChanged -= OnRowChanged;
+        Parameters.Clear();
+        foreach (var value in snapshot.Values)
+        {
+            var row = new ParameterRow(value);
+            if (edits is not null && edits.TryGetValue(row.Path, out var current)) row.Current = current;
+            row.PropertyChanged += OnRowChanged;
+            Parameters.Add(row);
+        }
+        Raise(nameof(PendingCount));
+    }
+
+    private void OnRowChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(ParameterRow.Current) || _applying) return;
+        Raise(nameof(PendingCount));
+        // Switches and choices save at once; typed text waits until the user pauses.
+        var delay = sender is ParameterRow { IsTextual: true } ? TimeSpan.FromMilliseconds(900) : TimeSpan.FromMilliseconds(150);
+        if (Application.Current is null) { TryApplyPending(interactive: true); return; }
+        _debounce ??= new System.Windows.Threading.DispatcherTimer();
+        _debounce.Stop();
+        _debounce.Interval = delay;
+        _debounce.Tick -= OnDebounce;
+        _debounce.Tick += OnDebounce;
+        _debounce.Start();
+    }
+
+    private void OnDebounce(object? sender, EventArgs e)
+    {
+        _debounce?.Stop();
+        TryApplyPending(interactive: true);
+    }
+
+    /// <summary>
+    /// Writes every pending edit to the upstream file (validated, backed up, read back). Edits that cannot be
+    /// written now because a task is running stay queued and are retried every few seconds.
+    /// Returns true when nothing is left pending.
+    /// </summary>
+    public bool TryApplyPending(bool interactive)
+    {
+        if (_snapshot is null || _applying) return PendingCount == 0;
+        var values = Parameters.Where(p => p.IsChanged).ToDictionary(p => p.Path, p => p.Current);
+        if (values.Count == 0) return true;
+        _applying = true;
+        try
+        {
+            var proposal = _control.ProposeChanges(_snapshot, values);
+            if (proposal.Changes.Count == 0) return true;
+            var check = _control.ValidateChanges(proposal, _isRunning());
+            if (!check.Valid)
+            {
+                Status = check.Deferred ? $"{values.Count} 项修改已排队：{check.Reason}" : check.Reason;
+                return false;
+            }
+            string Title(string path) => Parameters.FirstOrDefault(p => p.Path == path)?.Title ?? path;
+            var risky = proposal.Changes.Where(ParameterRules.RequiresConfirmation).ToList();
+            if (risky.Count > 0)
+            {
+                if (!interactive) return false;
+                var text = string.Join("\n", risky.Select(c => $"· {Title(c.Path)}：{c.OldValue} → {c.NewValue}"));
+                if (MessageBox.Show("这些修改会消耗不可退回的资源或分解遗器：\n\n" + text + "\n\n确认写入星铁助手？", "VIvian · 确认修改",
+                        MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                {
+                    foreach (var row in Parameters.Where(p => risky.Any(r => r.Path == p.Path))) row.Current = row.Original;
+                    Status = "已取消，这些项保持原值。";
+                    return PendingCount == 0;
+                }
+            }
+            var result = _control.ApplyChanges(proposal, _auditDirectory, _isRunning());
+            _snapshot = result.Snapshot;
+            Show(result.Snapshot, null);
+            var note = check.Reason.Contains("提示：", StringComparison.Ordinal) ? " " + check.Reason[check.Reason.IndexOf("提示：", StringComparison.Ordinal)..] : "";
+            Status = $"已写入星铁助手并读回核对（{DateTime.Now:HH:mm:ss}）：" +
+                string.Join("、", proposal.Changes.Select(c => $"{Title(c.Path)} → {c.NewValue}")) + "。" + note;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException or UnauthorizedAccessException)
+        {
+            Status = "没有写入：" + ex.Message;
+            return false;
+        }
+        finally { _applying = false; Raise(nameof(PendingCount)); }
+    }
+
     private void OnExternalChange(object sender, FileSystemEventArgs e) =>
         Application.Current?.Dispatcher.BeginInvoke(Reconcile);
 
     /// <summary>
-    /// Brings the page in line with the real file after the original software (or anything else) changed it.
-    /// Rows the user has not touched show the new values; unsaved edits are kept. An edit whose field was also
-    /// changed elsewhere is reported now, and saving it is refused until the user re-reads.
-    /// Called by the file watcher and every few seconds (watchers can miss whole-file replacements).
+    /// Brings the page in line with the real file after the original software changed it. Untouched rows show
+    /// the new values; pending edits are kept. An edit whose field was also changed elsewhere is reported.
     /// </summary>
     public void Reconcile()
     {
-        if (_snapshot is null) return;
+        if (_snapshot is null || _applying) return;
         ConfigurationSnapshot latest;
         try { latest = _control.ReadConfiguration(_game, _installPath(_game)); }
         catch (Exception ex) { Status = "原软件修改了配置，重新读取失败：" + ex.Message; return; }
@@ -114,49 +206,23 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             .Select(e => Parameters.First(p => p.Path == e.Key).Title).ToList();
         if (conflicts.Count > 0)
         {
-            Status = $"原软件也改了你正在编辑的“{string.Join("”“", conflicts)}”。点“重新读取”查看最新值后再决定；保存会被拒绝，不会互相覆盖。";
+            Status = $"原软件也改了“{string.Join("”“", conflicts)}”。点“重新读取”查看最新值后再改；不会互相覆盖。";
             return;
         }
         _snapshot = latest;
-        Parameters.Clear();
-        foreach (var value in latest.Values)
-        {
-            var row = new ParameterRow(value);
-            if (edits.TryGetValue(row.Path, out var edit)) row.Current = edit.Current;
-            Parameters.Add(row);
-        }
+        Show(latest, edits.ToDictionary(e => e.Key, e => e.Value.Current));
         Status = edits.Count > 0
-            ? $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）；你未保存的 {edits.Count} 项改动仍保留。"
+            ? $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）；{edits.Count} 项修改等待写入。"
             : $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）。";
     }
-    private Task SaveAsync()
-    {
-        if (_snapshot is null) { Status = "请先读取配置。"; return Task.CompletedTask; }
-        var values = Parameters.Where(p => p.Editable && p.Current != p.Original)
-            .ToDictionary(p => p.Path, p => p.Current);
-        var proposal = _control.ProposeChanges(_snapshot, values);
-        var running = _isRunning();
-        var check = _control.ValidateChanges(proposal, running);
-        if (!check.Valid) { Status = check.Reason; return Task.CompletedTask; }
-        string Title(string path) => Parameters.FirstOrDefault(p => p.Path == path)?.Title ?? path;
-        var diff = string.Join("\n", proposal.Changes.Select(c => $"· {Title(c.Path)}：{c.OldValue} → {c.NewValue}"));
-        var note = check.Reason.Contains("提示：", StringComparison.Ordinal) ? "\n\n" + check.Reason[check.Reason.IndexOf("提示：", StringComparison.Ordinal)..] : "";
-        if (MessageBox.Show("将写入星铁助手的配置：\n\n" + diff + note + "\n\n写入前自动备份，写入后读回核对。", "VIvian · 保存配置",
-            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return Task.CompletedTask;
-        running = _isRunning();
-        var result = _control.ApplyChanges(proposal, _auditDirectory, running);
-        _snapshot = result.Snapshot; Parameters.Clear();
-        foreach (var value in result.Snapshot.Values) Parameters.Add(new(value));
-        Status = $"已写入星铁助手的配置并读回核对（{proposal.Changes.Count} 项）。原软件开着时会自动刷新它的设置页。备份：{result.BackupPath}";
-        return Task.CompletedTask;
-    }
+
     private void OpenSettings()
     {
         var path = _snapshot?.Path;
         if (path is null || !File.Exists(path)) { Status = "请先读取配置。"; return; }
         Clipboard.SetText(path);
-        Status = "已复制上游设置文件路径；请在原软件中打开设置，或将路径粘贴到文件管理器。";
+        Status = "已复制星铁助手设置文件路径。";
     }
     private void Error(Exception ex) => Status = ex.Message;
-    public void Dispose() { _watcher?.Dispose(); _timer?.Stop(); }
+    public void Dispose() { _watcher?.Dispose(); _timer?.Stop(); _debounce?.Stop(); }
 }

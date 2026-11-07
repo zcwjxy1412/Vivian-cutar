@@ -446,6 +446,9 @@ public sealed class MainViewModel : ObservableObject
         if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
         if (!admission.Allowed) { Status = admission.Text; return; }
         var allowTemporary = AllowTemporaryConfigurationThisRun;
+        // Edits made on the Star Rail page must be in the upstream file before the engine reads it.
+        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
+        { Status = $"还有 {Configuration.PendingCount} 项配置修改没写入星铁助手（{Configuration.Status}）。任务未启动。"; return; }
         if (RealExecutionPolicy.IsM5DailyTest)
         {
             if (_control.HasPendingConfigurationRestore)

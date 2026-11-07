@@ -152,10 +152,10 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Button Command="{Binding OneClickCommand}" HorizontalAlignment="Center" Margin="0,8,0,14" Cursor="Hand" AutomationProperties.Name="一键日常">
 <Button.Template><ControlTemplate TargetType="Button"><Grid Width="176" Height="176">
 <Ellipse Stroke="{StaticResource Gold}" StrokeThickness="3" Fill="#DDE6FF"/>
-<Border x:Name="Core" Margin="12" CornerRadius="76" Background="{StaticResource Dream}" BorderBrush="White" BorderThickness="2"/>
+<Border x:Name="Core" Margin="12" CornerRadius="76" Background="{StaticResource Dream}" BorderBrush="White" BorderThickness="2">
 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
 <Path Data="M 0,0 L 26,15 L 0,30 Z" Fill="White" HorizontalAlignment="Center" Margin="6,0,0,6"/>
-<TextBlock Text="一键日常" Foreground="White" FontSize="22" FontWeight="Bold"/></StackPanel></Grid>
+<TextBlock Text="一键日常" Foreground="White" FontSize="22" FontWeight="Bold"/></StackPanel></Border></Grid>
 <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
 <Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
 <UniformGrid Columns="3">

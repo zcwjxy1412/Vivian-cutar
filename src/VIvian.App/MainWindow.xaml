@@ -138,7 +138,7 @@ Title="VIvian" Width="1240" Height="820" MinWidth="960" MinHeight="600" Backgrou
 <TextBlock Text="{Binding State}" Foreground="{StaticResource Warn}" FontSize="12" Margin="0,4,0,0" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></StackPanel>
 <Grid Grid.Column="1" VerticalAlignment="Center">
 <CheckBox Style="{StaticResource Switch}" IsChecked="{Binding BoolValue}" IsEnabled="{Binding Editable}" HorizontalAlignment="Right" Visibility="{Binding IsBoolean, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
-<ComboBox ItemsSource="{Binding Options}" SelectedItem="{Binding Current}" IsEnabled="{Binding Editable}" Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<ComboBox ItemsSource="{Binding Options}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Current}" IsEnabled="{Binding Editable}" Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
 <TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" ToolTip="{Binding Rule}" Visibility="{Binding IsTextual, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
 <TextBlock Text="由原软件管理" Style="{StaticResource Small}" HorizontalAlignment="Right" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></Grid>
 </Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></DockPanel>

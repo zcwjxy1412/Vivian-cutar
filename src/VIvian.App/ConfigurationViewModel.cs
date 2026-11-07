@@ -29,7 +29,7 @@ public sealed class ParameterRow(ConfigurationValue value) : ObservableObject
     public bool IsChoice => value.Schema.DataType == "enum";
     public bool IsTextual => value.Schema.DataType is "integer" or "text";
     public bool IsReadOnlyDisplay => !IsBoolean && !IsChoice && !IsTextual;
-    public IReadOnlyList<string> Options => ParameterRules.Options(value.Schema);
+    public IReadOnlyList<ParameterOption> Options => ParameterRules.LabelledOptions(value.Schema);
     public bool IsChanged => Editable && Current != Original;
     /// <summary>Two-way switch binding for boolean parameters; writes "true"/"false" into <see cref="Current"/>.</summary>
     public bool BoolValue { get => Current == "true"; set => Current = value ? "true" : "false"; }
@@ -45,6 +45,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private readonly string _auditDirectory;
     private ConfigurationSnapshot? _snapshot;
     private FileSystemWatcher? _watcher;
+    private System.Windows.Threading.DispatcherTimer? _timer;
     private GameId _game = GameId.StarRail;
     private string _status = "选择游戏后读取配置。";
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -84,28 +85,49 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             _watcher.Changed += OnExternalChange;
             _watcher.Renamed += OnExternalChange;
         }
+        if (_timer is null && Application.Current is not null)
+        {
+            _timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
+            _timer.Tick += (_, _) => Reconcile();
+            _timer.Start();
+        }
         return Task.CompletedTask;
     }
-    private void OnExternalChange(object sender, FileSystemEventArgs e)
+    private void OnExternalChange(object sender, FileSystemEventArgs e) =>
+        Application.Current?.Dispatcher.BeginInvoke(Reconcile);
+
+    /// <summary>
+    /// Brings the page in line with the real file after the original software (or anything else) changed it.
+    /// Rows the user has not touched show the new values; unsaved edits are kept. An edit whose field was also
+    /// changed elsewhere is reported now, and saving it is refused until the user re-reads.
+    /// Called by the file watcher and every few seconds (watchers can miss whole-file replacements).
+    /// </summary>
+    public void Reconcile()
     {
-        Application.Current?.Dispatcher.BeginInvoke(() =>
+        if (_snapshot is null) return;
+        ConfigurationSnapshot latest;
+        try { latest = _control.ReadConfiguration(_game, _installPath(_game)); }
+        catch (Exception ex) { Status = "原软件修改了配置，重新读取失败：" + ex.Message; return; }
+        if (latest.Revision == _snapshot.Revision) return;
+        var edits = Parameters.Where(p => p.IsChanged).ToDictionary(p => p.Path, p => (p.Original, p.Current));
+        var conflicts = edits.Where(e => latest.Values.SingleOrDefault(v => v.Schema.Path == e.Key)?.Value != e.Value.Original)
+            .Select(e => Parameters.First(p => p.Path == e.Key).Title).ToList();
+        if (conflicts.Count > 0)
         {
-            if (_snapshot is null) return;
-            try
-            {
-                var latest = _control.ReadConfiguration(_game, _installPath(_game));
-                if (latest.Revision == _snapshot.Revision) return;
-                if (Parameters.Any(p => p.Current != p.Original))
-                    Status = "上游已修改配置，且你有未保存的改动。请核对差异并重新读取；保存已阻止静默覆盖。";
-                else
-                {
-                    _snapshot = latest; Parameters.Clear();
-                    foreach (var value in latest.Values) Parameters.Add(new(value));
-                    Status = "已自动同步上游配置修改。";
-                }
-            }
-            catch (Exception ex) { Status = "外部配置发生变化，重新读取失败：" + ex.Message; }
-        });
+            Status = $"原软件也改了你正在编辑的“{string.Join("”“", conflicts)}”。点“重新读取”查看最新值后再决定；保存会被拒绝，不会互相覆盖。";
+            return;
+        }
+        _snapshot = latest;
+        Parameters.Clear();
+        foreach (var value in latest.Values)
+        {
+            var row = new ParameterRow(value);
+            if (edits.TryGetValue(row.Path, out var edit)) row.Current = edit.Current;
+            Parameters.Add(row);
+        }
+        Status = edits.Count > 0
+            ? $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）；你未保存的 {edits.Count} 项改动仍保留。"
+            : $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）。";
     }
     private Task SaveAsync()
     {
@@ -116,14 +138,16 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         var running = _isRunning();
         var check = _control.ValidateChanges(proposal, running);
         if (!check.Valid) { Status = check.Reason; return Task.CompletedTask; }
-        var diff = string.Join("\n", proposal.Changes.Select(c => $"{c.Path}: {c.OldValue} → {c.NewValue}"));
-        if (MessageBox.Show("确认保存到上游配置？\n" + diff + "\n保存前将自动备份。", "VIvian 配置变更",
+        string Title(string path) => Parameters.FirstOrDefault(p => p.Path == path)?.Title ?? path;
+        var diff = string.Join("\n", proposal.Changes.Select(c => $"· {Title(c.Path)}：{c.OldValue} → {c.NewValue}"));
+        var note = check.Reason.Contains("提示：", StringComparison.Ordinal) ? "\n\n" + check.Reason[check.Reason.IndexOf("提示：", StringComparison.Ordinal)..] : "";
+        if (MessageBox.Show("将写入星铁助手的配置：\n\n" + diff + note + "\n\n写入前自动备份，写入后读回核对。", "VIvian · 保存配置",
             MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return Task.CompletedTask;
         running = _isRunning();
         var result = _control.ApplyChanges(proposal, _auditDirectory, running);
         _snapshot = result.Snapshot; Parameters.Clear();
         foreach (var value in result.Snapshot.Values) Parameters.Add(new(value));
-        Status = "已保存、备份并重新读取验证；审计记录：" + result.AuditPath;
+        Status = $"已写入星铁助手的配置并读回核对（{proposal.Changes.Count} 项）。原软件开着时会自动刷新它的设置页。备份：{result.BackupPath}";
         return Task.CompletedTask;
     }
     private void OpenSettings()
@@ -134,5 +158,5 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         Status = "已复制上游设置文件路径；请在原软件中打开设置，或将路径粘贴到文件管理器。";
     }
     private void Error(Exception ex) => Status = ex.Message;
-    public void Dispose() => _watcher?.Dispose();
+    public void Dispose() { _watcher?.Dispose(); _timer?.Stop(); }
 }

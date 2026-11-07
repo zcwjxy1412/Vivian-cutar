@@ -120,9 +120,10 @@ public sealed class M5DailyReadinessTests : IDisposable
         var manager = NewManager();
         var snapshot = _control.ReadConfiguration(GameId.StarRail, _root);
         var plan = TemporaryConfigurationManager.Plan(snapshot, March7thTaskRequirements.For("daily"));
-        File.AppendAllText(Config, "external_edit: true\r\n"); // revision conflict
-        Assert.Throws<IOException>(() => manager.Apply(snapshot, plan, _root, "daily"));
-        Assert.Contains("reward_enable: false", File.ReadAllText(Config));
+        // The user switched the same field in the original software after VIvian read it.
+        File.WriteAllText(Config, File.ReadAllText(Config).Replace("reward_enable: false", "reward_enable: true"));
+        Assert.Throws<ConfigurationConflictException>(() => manager.Apply(snapshot, plan, _root, "daily"));
+        Assert.Contains("reward_enable: true", File.ReadAllText(Config)); // their value stands, not "restored" to false
         Assert.False(manager.HasPending);
     }
 

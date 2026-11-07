@@ -59,8 +59,38 @@ public sealed class M5ConfigurationTests : IDisposable
         var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
         var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["power_enable"] = "false" });
         Assert.False(_service.ValidateChanges(proposal, true).Valid);
+        // An unrelated change made elsewhere (upstream timestamps, other settings) no longer blocks the save...
         File.AppendAllText(Config, "external: true\r\n");
-        Assert.Throws<IOException>(() => _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false));
+        var saved = _service.ApplyChanges(proposal, Path.Combine(_root, "audit"), false);
+        Assert.Equal("false", saved.Snapshot.Values.Single(v => v.Schema.Path == "power_enable").Value);
+        Assert.Contains("external: true", File.ReadAllText(Config));
+        // ...but a change to the same field is a conflict and nothing is written.
+        var stale = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["daily_enable"] = "false" });
+        File.WriteAllText(Config, File.ReadAllText(Config).Replace("daily_enable: true", "daily_enable: false"));
+        var before = File.ReadAllText(Config);
+        var conflict = Assert.Throws<ConfigurationConflictException>(() => _service.ApplyChanges(stale, Path.Combine(_root, "audit"), false));
+        Assert.Equal("daily_enable", conflict.Path);
+        Assert.Equal(before, File.ReadAllText(Config));
+    }
+
+    [Fact]
+    public void OpenGuiDoesNotBlockSavingButARunningTaskDoes()
+    {
+        var snapshot = _service.ReadConfiguration(GameId.StarRail, _root);
+        var proposal = _service.ProposeChanges(snapshot, new Dictionary<string, string> { ["power_enable"] = "false" });
+        Assert.True(_service.ValidateChanges(proposal, false).Valid);
+        var runs = Directory.CreateDirectory(Path.Combine(_root, "logs", "runs")).FullName;
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        var created = new DateTimeOffset(self.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds() / 1000.0;
+        File.WriteAllText(Path.Combine(runs, "active.json"),
+            $"{{\"run_id\": \"20261107-010203-abcd\", \"pid\": {self.Id}, \"pid_create_time\": {created.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}");
+        var blocked = _service.ValidateChanges(proposal, false);
+        Assert.False(blocked.Valid);
+        Assert.Contains("20261107-010203-abcd", blocked.Reason);
+        // A stale lock from a process that started at another time (PID reuse) does not block.
+        File.WriteAllText(Path.Combine(runs, "active.json"),
+            $"{{\"run_id\": \"old\", \"pid\": {self.Id}, \"pid_create_time\": 1000}}");
+        Assert.True(_service.ValidateChanges(proposal, false).Valid);
     }
 
     [Fact]

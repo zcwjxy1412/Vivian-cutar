@@ -99,6 +99,12 @@ public sealed class TemporaryConfigurationManager(IConfigurationControl control,
             var proposal = control.ProposeChanges(snapshot, changes.ToDictionary(c => c.Path, c => c.Temporary));
             return control.ApplyChanges(proposal, auditDirectory, engineRunning: false);
         }
+        catch (ConfigurationConflictException)
+        {
+            // Nothing was written (checked before any write); restoring would overwrite the user's own change.
+            File.Delete(RecordPath);
+            throw;
+        }
         catch
         {
             // The write may not have happened at all; Restore decides from the real file and keeps the record if unsure.

@@ -50,7 +50,7 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
         var betterGiExe = Path.Combine(root, "BetterGI.exe");
         var betterGiVersionMatches = game != GameId.Genshin ||
             (File.Exists(betterGiExe) && System.Diagnostics.FileVersionInfo.GetVersionInfo(betterGiExe).FileVersion?.StartsWith("0.66.0", StringComparison.Ordinal) == true);
-        var values = profile.Parameters.Select(p =>
+        var values = profile.Parameters.Select(definition => game == GameId.StarRail ? WithInstanceChoices(definition, root) : definition).Select(p =>
         {
             if (game != GameId.StarRail) return new ConfigurationValue(p, null,
                 betterGiVersionMatches ? "固定版本匹配；由原软件管理" : "版本未匹配或无法确认；只读");
@@ -96,9 +96,13 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
         var root = Path.GetDirectoryName(proposal.Base.Path)!;
         if (!string.Equals(Path.GetFullPath(proposal.Base.Path), Path.Combine(root, "config.yaml"), StringComparison.OrdinalIgnoreCase))
             return new(false, "配置路径不符合固定版本结构。");
-        if (FakeEngineAdapter.ForeignProcessIds(Path.Combine(root, "m7a.exe")).Count > 0 ||
-            FakeEngineAdapter.ForeignProcessIds(Path.Combine(root, "March7th Assistant.exe")).Count > 0)
-            return new(false, "检测到上游程序正在运行；请退出后再保存。");
+        // The pinned GUI may stay open: it re-reads config.yaml before every set_value and reloads its pages on
+        // external changes (module/config/config.py set_value; app/main_window.py _on_config_file_changed).
+        // A running task is different: it already loaded its settings, so a change would not apply to it.
+        if (FakeEngineAdapter.ForeignProcessIds(Path.Combine(root, "m7a.exe")).Count > 0)
+            return new(false, "星铁助手的命令行任务正在运行；任务结束后再保存。");
+        if (March7thRunLock.ActiveRunId(root) is { } runId)
+            return new(false, $"星铁助手正在执行任务（运行编号 {runId}）；任务结束后再保存。原软件窗口开着不影响保存。");
         var warnings = ParameterRules.Warnings(proposal);
         return new(true, "可以保存；写入前仍会核对文件版本和运行状态。" +
             (warnings.Count > 0 ? " 提示：" + string.Join("；", warnings) + "。" : ""));
@@ -112,9 +116,17 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
         try
         {
             var path = proposal.Base.Path;
-            var current = ReadConfiguration(GameId.StarRail, Path.GetDirectoryName(path)!);
-            if (current.Revision != proposal.Base.Revision) throw new IOException("配置已被外部修改；请重新读取并处理冲突。");
+            // Field-level conflict detection: the file may have changed elsewhere (upstream writes timestamps,
+            // window state, other settings). Only a change to a field this proposal edits is a conflict.
             var bytes = File.ReadAllBytes(path);
+            var latestRevision = Convert.ToHexString(SHA256.HashData(bytes));
+            var latest = ReadConfiguration(GameId.StarRail, Path.GetDirectoryName(path)!);
+            foreach (var change in proposal.Changes)
+            {
+                var now = latest.Values.Single(v => v.Schema.Path == change.Path);
+                if (now.Value != change.OldValue)
+                    throw new ConfigurationConflictException(change.Path, now.Schema.Title, change.OldValue, now.Value);
+            }
             var original = Utf8.GetString(bytes);
             var updated = original;
             foreach (var change in proposal.Changes)
@@ -133,20 +145,33 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
             try
             {
                 File.WriteAllBytes(temporary, Utf8.GetBytes(updated));
-                if (Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) != proposal.Base.Revision)
-                    throw new IOException("配置在保存前被外部修改；请重新读取。");
+                if (Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))) != latestRevision)
+                    throw new IOException("配置在保存的瞬间被原软件修改；没有写入，请再点一次保存。");
                 var lastCheck = ValidateChanges(proposal, engineRunning);
                 if (!lastCheck.Valid) throw new IOException(lastCheck.Reason);
                 File.Replace(temporary, path, backup);
                 var reread = ReadConfiguration(GameId.StarRail, Path.GetDirectoryName(path)!);
                 if (proposal.Changes.Any(c => reread.Values.Single(v => v.Schema.Path == c.Path).Value != c.NewValue))
                     throw new IOException("写入后读取的参数与预期不符；备份已保留。");
-                File.WriteAllLines(audit, proposal.Changes.Select(c => $"{stamp} {c.Path}: {c.OldValue} -> {c.NewValue}; before={proposal.Base.Revision}; after={reread.Revision}"), Utf8);
+                File.WriteAllLines(audit, proposal.Changes.Select(c => $"{stamp} {c.Path}: {c.OldValue} -> {c.NewValue}; before={latestRevision}; after={reread.Revision}"), Utf8);
                 return new(reread, backup, audit);
             }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
         finally { WriteGate.Release(); }
+    }
+
+    /// <summary>
+    /// Instance names come from the installed release's own list (assets/config/instance_names.json), so the
+    /// choices always match the pinned upstream version. Each option is "name=purpose".
+    /// </summary>
+    private static EngineParameterDefinition WithInstanceChoices(EngineParameterDefinition p, string root)
+    {
+        if (!p.Path.StartsWith("instance_names.", StringComparison.Ordinal)) return p;
+        var choices = March7thInstanceCatalog.Read(root);
+        return choices is not null && choices.TryGetValue(p.Path["instance_names.".Length..], out var options) && options.Count > 0
+            ? p with { DataType = "enum", AllowedValues = string.Join("|", options.Select(o => o.Name + "=" + o.Purpose)) }
+            : p;
     }
 
     private static string Shorten(string value) => value.Length <= 24 ? value : value[..24] + "…";

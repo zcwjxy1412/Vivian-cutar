@@ -153,3 +153,49 @@ public sealed class M5TypedConfigurationTests : IDisposable
         }
     }
 }
+
+/// <summary>Instance names are chosen from the installed release's own instance_names.json.</summary>
+public sealed class M5InstanceChoiceTests : IDisposable
+{
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "vivian-m5i-" + Guid.NewGuid().ToString("N"));
+    private readonly VersionedConfigurationControl _control = new();
+
+    public M5InstanceChoiceTests()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "assets", "config"));
+        File.WriteAllText(Path.Combine(_root, "assets", "config", "version.txt"), "v2026.10.31\n");
+        // Shape of v2026.10.31 assets/config/instance_names.json (type → name → purpose).
+        File.WriteAllText(Path.Combine(_root, "assets", "config", "instance_names.json"),
+            "{\"拟造花萼（金）\": {\"无\": \"跳过\", \"回忆之蕾\": \"角色经验\", \"以太之蕾\": \"武器经验\"}," +
+            " \"凝滞虚影\": {\"无\": \"跳过\", \"空海之形\": \"\"}}");
+        File.WriteAllText(Path.Combine(_root, "config.yaml"),
+            "instance_type: 拟造花萼（金）\r\ninstance_names:\r\n  拟造花萼（金）: 回忆之蕾\r\n  凝滞虚影: 无\r\n  侵蚀隧洞: 睿治之径\r\n");
+    }
+    public void Dispose() => TestDirectories.DeleteWithRetry(_root);
+
+    [Fact]
+    public void InstanceNamesBecomeChoicesWithPurposeLabels()
+    {
+        var s = _control.ReadConfiguration(GameId.StarRail, _root);
+        var golden = s.Values.Single(v => v.Schema.Path == "instance_names.拟造花萼（金）");
+        Assert.Equal("enum", golden.Schema.DataType);
+        Assert.Equal(["无", "回忆之蕾", "以太之蕾"], ParameterRules.Options(golden.Schema));
+        Assert.Contains(new ParameterOption("以太之蕾", "以太之蕾（武器经验）"), ParameterRules.LabelledOptions(golden.Schema));
+        Assert.Contains(new ParameterOption("空海之形", "空海之形"),
+            ParameterRules.LabelledOptions(s.Values.Single(v => v.Schema.Path == "instance_names.凝滞虚影").Schema));
+        // Types missing from the file keep the conservative free-text rule.
+        Assert.Equal("text", s.Values.Single(v => v.Schema.Path == "instance_names.侵蚀隧洞").Schema.DataType);
+    }
+
+    [Fact]
+    public void ANameOutsideTheInstalledListIsRejectedAndAListedOneIsWritten()
+    {
+        var s = _control.ReadConfiguration(GameId.StarRail, _root);
+        Assert.False(_control.ValidateChanges(_control.ProposeChanges(s,
+            new Dictionary<string, string> { ["instance_names.拟造花萼（金）"] = "不存在之蕾" }), false).Valid);
+        var ok = _control.ProposeChanges(s, new Dictionary<string, string> { ["instance_names.拟造花萼（金）"] = "以太之蕾" });
+        Assert.True(_control.ValidateChanges(ok, false).Valid);
+        _control.ApplyChanges(ok, Path.Combine(_root, "audit"), false);
+        Assert.Contains("  拟造花萼（金）: 以太之蕾\r\n", File.ReadAllText(Path.Combine(_root, "config.yaml")));
+    }
+}

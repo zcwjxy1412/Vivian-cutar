@@ -7,6 +7,8 @@ namespace VIvian.Core.Engines;
 /// configuration validation and (later) the AI tools, so all three accept and reject exactly the same values.
 /// DataType: boolean · integer (AllowedValues "min-max") · enum (AllowedValues "a|b|c") · text (free single-line).
 /// </summary>
+public sealed record ParameterOption(string Value, string Label);
+
 public static class ParameterRules
 {
     public static bool IsScalar(EngineParameterDefinition p) => p.DataType is "boolean" or "integer" or "enum" or "text";
@@ -14,7 +16,18 @@ public static class ParameterRules
     public static IReadOnlyList<string> Options(EngineParameterDefinition p) => p.DataType switch
     {
         "boolean" => ["true", "false"],
-        "enum" => p.AllowedValues.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+        "enum" => p.AllowedValues.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(o => o.Split('=', 2)[0]).ToArray(),
+        _ => [],
+    };
+
+    /// <summary>Value plus a readable label ("回忆之蕾（角色经验）") for choice lists. Option encoding: "value=purpose".</summary>
+    public static IReadOnlyList<ParameterOption> LabelledOptions(EngineParameterDefinition p) => p.DataType switch
+    {
+        "boolean" => [new("true", "开启"), new("false", "关闭")],
+        "enum" => p.AllowedValues.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(o => o.Split('=', 2)).Select(x => new ParameterOption(x[0],
+                x.Length == 2 && x[1].Length > 0 ? $"{x[0]}（{x[1]}）" : x[0])).ToArray(),
         _ => [],
     };
 

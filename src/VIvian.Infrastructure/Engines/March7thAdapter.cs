@@ -47,7 +47,8 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
         var group = await supervisor.StartAsync(new ProcessLaunchSpec(install.CliPath,
             March7thTaskContract.StartArguments(task), installDirectory), context.RunId, ct).ConfigureAwait(false);
         // The task capability is single-use; exact-RunId control commands are separately Job-supervised.
-        return new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task);
+        return new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task,
+            March7thDailyTemplates.Read(Path.Combine(installDirectory, "config.yaml")));
     }
 }
 
@@ -58,17 +59,23 @@ internal sealed class March7thRun : IEngineRun
     private readonly string _cli;
     private readonly string _directory;
     private readonly string _task;
+    private readonly March7thDailyTemplates _templates;
     private readonly Channel<RunEvent> _events = Channel.CreateUnbounded<RunEvent>();
     private readonly List<string> _output = [];
     private readonly Task<RunVerdict> _verdict;
     private string? _upstreamRunId;
     private bool _runIdConflict;
     private bool _outputTruncated;
+    private readonly DateTimeOffset _startedAt = DateTimeOffset.Now.AddSeconds(-5);
+    /// <summary>How long a stopped worker may take to reach its next checkpoint; upstream force-exits after 60 s.</summary>
+    internal static TimeSpan WorkerExitWait { get; set; } = TimeSpan.FromSeconds(65);
+    internal static TimeSpan StopAcknowledgeWait { get; set; } = TimeSpan.FromSeconds(5);
 
     public March7thRun(Guid runId, ISupervisedProcessGroup group, IProcessSupervisor supervisor,
-        string cli, string directory, string task)
+        string cli, string directory, string task, March7thDailyTemplates? templates = null)
     {
         RunId = runId; _group = group; _supervisor = supervisor; _cli = cli; _directory = directory; _task = task;
+        _templates = templates ?? March7thDailyTemplates.Default;
         _verdict = ObserveAsync();
     }
 
@@ -109,7 +116,7 @@ internal sealed class March7thRun : IEngineRun
             if (id is null) return Unknown("上游运行编号缺失或冲突。");
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
-            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id);
+            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates);
             // The verdict's reason is part of the run's own record (UI log, database events, diagnostic export).
             _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow,
                 parsed.Outcome == RunOutcome.Success ? RunEventKind.Evidence : RunEventKind.Warning,
@@ -143,9 +150,25 @@ internal sealed class March7thRun : IEngineRun
 
     public async Task<StopResult> RequestStopAsync(StopMode mode, CancellationToken ct)
     {
-        string? id;
-        lock (_output) id = _upstreamRunId;
+        var id = UpstreamRunId();
         if (id is null) return new(CleanupState.Unconfirmed, ReasonCodes.CleanupUnconfirmed);
+        // Fast path: the control file this exact run polls every 0.3 s. Keyboard and mouse are released as soon as
+        // the worker reads it; "stopping" is its receipt. No process has to start first.
+        if (March7thUpstreamActivity.TrySendStop(_directory, id) is { } controlFile)
+        {
+            Note(RunEventKind.Warning, "[VIvian] 已向星铁助手发出停止指令（运行编号 " + id + "）。");
+            var deadline = DateTimeOffset.UtcNow + StopAcknowledgeWait;
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                if (March7thUpstreamActivity.ReadControlState(controlFile) == "stopping")
+                {
+                    Note(RunEventKind.Warning, "[VIvian] 星铁助手已确认停止：键鼠已释放，不会再操作游戏。正在等它退出（通常几秒，最长约 60 秒）。");
+                    return new(CleanupState.Pending, ReasonCodes.UserStop);
+                }
+                if (_verdict.IsCompleted) return new(CleanupState.Pending, ReasonCodes.UserStop);
+                await Task.Delay(100, ct).ConfigureAwait(false);
+            }
+        }
         await using var control = await _supervisor.StartAsync(new ProcessLaunchSpec(_cli,
             March7thTaskContract.StopArguments(id), _directory), RunId, ct).ConfigureAwait(false);
         var controlOutput = new List<string>();
@@ -171,17 +194,44 @@ internal sealed class March7thRun : IEngineRun
     {
         // A stop receipt can precede worker exit. Give the frontend a bounded chance to follow
         // the elevated process and emit its final record before closing our own Job.
-        try { await _verdict.WaitAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false); }
-        catch (TimeoutException) { /* still running: cleanup remains unconfirmed */ }
+        var id = UpstreamRunId();
+        // The elevated worker is outside our Job and cannot be ended by VIvian: wait (bounded) until its own record
+        // shows its exact PID + creation time gone. A stop acknowledgement alone is never enough.
+        var deadline = DateTimeOffset.UtcNow + WorkerExitWait;
+        while (id is not null && DateTimeOffset.UtcNow < deadline)
+        {
+            var state = March7thUpstreamActivity.WorkerState(_directory, id);
+            // Provably alive: keep waiting even if the entry window has gone. Not yet decidable: wait for the entry.
+            if (state == WorkerExitState.Exited || (state == WorkerExitState.Unknown && _verdict.IsCompleted)) break;
+            await Task.Delay(250, ct).ConfigureAwait(false);
+        }
+        try { await _verdict.WaitAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false); }
+        catch (TimeoutException) { /* the entry may linger; checked below */ }
         var own = await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
-        string? id; string output;
-        lock (_output) { id = _upstreamRunId; output = string.Join('\n', _output); }
+        string output;
+        lock (_output) output = string.Join('\n', _output);
         if (own != CleanupState.Confirmed || id is null) return CleanupState.Unconfirmed;
-        // The elevated worker may be outside our Job. Its exact PID + creation time must be absent
-        // and the final record must belong to this run; a stop acknowledgement is insufficient.
-        return March7thWorkerExit.Check(output, id, _task) == WorkerExitState.Exited
-            ? CleanupState.Confirmed : CleanupState.Unconfirmed;
+        if (March7thWorkerExit.Check(output, id, _task) == WorkerExitState.Exited) return CleanupState.Confirmed;
+        // No final record from the entry (stopped, window closed, crash): the worker's own record decides.
+        var exited = March7thUpstreamActivity.WorkerState(_directory, id) == WorkerExitState.Exited;
+        Note(exited ? RunEventKind.Evidence : RunEventKind.Warning, exited
+            ? "[VIvian] 已核实星铁助手工作进程已退出（运行编号 " + id + "）。"
+            : "[VIvian] 无法核实星铁助手工作进程已退出（运行编号 " + id + "）。");
+        return exited ? CleanupState.Confirmed : CleanupState.Unconfirmed;
     }
+
+    private string? UpstreamRunId()
+    {
+        lock (_output)
+        {
+            if (_upstreamRunId is not null || _runIdConflict) return _upstreamRunId;
+        }
+        // The launch line was not captured (yet): the lock holder for this task that started after us is ours.
+        return March7thUpstreamActivity.ActiveRunStartedSince(_directory, _task, _startedAt);
+    }
+
+    private void Note(RunEventKind kind, string message) =>
+        _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow, kind, message));
 
     public ValueTask DisposeAsync() => _group.DisposeAsync();
 }

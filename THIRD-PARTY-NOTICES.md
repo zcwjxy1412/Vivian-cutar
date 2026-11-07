@@ -11,5 +11,7 @@
 | xUnit | Apache-2.0 | https://github.com/xunit/xunit |
 | Microsoft.NET.Test.Sdk | MIT | https://github.com/microsoft/vstest |
 | SQLitePCLRaw | Apache-2.0；原生SQLite另有其自身声明 | https://github.com/ericsink/SQLitePCL.raw |
+| XamlAnimatedGif | Apache-2.0 | https://github.com/XamlAnimatedGif/XamlAnimatedGif |
+| System.Security.Cryptography.ProtectedData | MIT | https://github.com/dotnet/runtime |
 
 自包含运行时的LICENSE/ThirdPartyNotices应随发布包保留。此清单用于M1审查，不是完整法律合规或SBOM通过证明，M6需复核最终包的全部组件与许可证文本。

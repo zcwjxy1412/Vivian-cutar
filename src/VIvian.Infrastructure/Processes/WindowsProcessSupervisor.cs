@@ -18,6 +18,22 @@ namespace VIvian.Infrastructure.Processes;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsProcessSupervisor : IProcessSupervisor
 {
+    /// <summary>
+    /// Opens an engine's own window for the user (e.g. March7th Launcher.exe), exactly as a double-click would:
+    /// through the shell, so Windows shows its UAC prompt when the program asks for administrator rights and the user
+    /// decides. The program is not placed in a Job, is never controlled and is never ended by VIvian. Only an
+    /// existing .exe directly inside <paramref name="installDirectory"/> can be opened.
+    /// </summary>
+    public static void OpenUserInterface(string installDirectory, string fileName)
+    {
+        if (Path.GetFileName(fileName) != fileName || !fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("只能打开安装目录里的程序。", nameof(fileName));
+        var exe = Path.Combine(Path.GetFullPath(installDirectory), fileName);
+        if (!File.Exists(exe)) throw new FileNotFoundException("安装目录里没有找到 " + fileName + "。", exe);
+        using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe)
+        { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
+    }
+
     // Keep our launches serialized while inheritable pipe ends exist in this process.
     private static readonly Lock LaunchLock = new();
 

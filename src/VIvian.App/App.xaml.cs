@@ -17,6 +17,7 @@ public partial class App : Application
 {
     private IHost? _host;
     private SingleInstanceGuard? _instance;
+    private WindowActivation? _activation;
     private bool _smoke;
     private bool _startupCheck;
     protected override async void OnStartup(StartupEventArgs e)
@@ -66,6 +67,12 @@ public partial class App : Application
             _instance = SingleInstanceGuard.Acquire(root);
             if (!_instance.IsOwner)
             {
+                // A second launch brings the open window to the front instead of only saying it is open.
+                if (!_smoke && _instance.Result != InstanceLockResult.AccessDenied && WindowActivation.SignalExisting(root))
+                {
+                    Shutdown(2);
+                    return;
+                }
                 if (!_smoke)
                     MessageBox.Show(_instance.Result == InstanceLockResult.AccessDenied
                         ? "检测到另一个 VIvian 实例（可能以其他用户或管理员身份运行），无法确认它的状态。为避免冲突，本窗口不会启动。"
@@ -96,7 +103,7 @@ public partial class App : Application
                 services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(),
                     sp.GetRequiredService<IProcessSupervisor>(),
                     options: RealExecutionPolicy.BuildPermitsRealExecution ? SchedulerOptions.Default with
-                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(45) }
+                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(95) }
                     : SchedulerOptions.Default,
                     admitReal: adapter =>
                         RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
@@ -136,7 +143,7 @@ public partial class App : Application
                         await vm.CheckFoundationAsync();
                         if (!vm.LastCheckPassed) throw new InvalidOperationException("Foundation smoke failed");
                         if (RealExecutionPolicy.BuildPermitsRealExecution &&
-                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != (RealExecutionPolicy.IsM5DailyTest ? "daily" : "screen_test") || vm.CanStartMarch7th))
+                            (vm.March7thTasks.Count != 1 || vm.March7thTasks[0].Id != (RealExecutionPolicy.IsM5DailyTest ? RealExecutionPolicy.M5RealTask : "screen_test") || vm.CanStartMarch7th))
                             throw new InvalidOperationException("Real-test admission is not constrained");
                         if (RealExecutionPolicy.IsReusableManualTest && !vm.ManualTestStateText.Contains("未通过安装核验", StringComparison.Ordinal))
                             throw new InvalidOperationException("Manual-test page does not report the unverified installation");
@@ -159,6 +166,7 @@ public partial class App : Application
                 };
             }
             window.Show();
+            if (!_smoke) _activation = WindowActivation.Listen(root, window);
             // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
             Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
                 RealExecutionPolicy.IsM5DailyTest
@@ -336,6 +344,7 @@ public partial class App : Application
     {
         _host?.Dispose();
         Log.CloseAndFlush();
+        _activation?.Dispose();
         _instance?.Dispose();
         base.OnExit(e);
     }

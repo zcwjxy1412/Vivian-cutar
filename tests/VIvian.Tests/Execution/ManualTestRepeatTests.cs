@@ -58,6 +58,16 @@ public sealed class ManualTestRepeatTests : IDisposable
 
     private static QueueItem Item(IGameAdapter a) => new(GameId.StarRail, a);
 
+    private static async Task WaitUntilClearAsync(QueueScheduler scheduler)
+    {
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (scheduler.SessionHazards.Count > 0)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException("Session barrier did not clear after a confirmed stop.");
+            await Task.Delay(10);
+        }
+    }
+
     [Fact]
     public async Task FailedRunWithConfirmedCleanupAllowsAnotherManualRun()
     {
@@ -113,6 +123,9 @@ public sealed class ManualTestRepeatTests : IDisposable
         Assert.Equal(RunOutcome.Cancelled, stopped.Outcome);
         Assert.Equal(CleanupState.Confirmed, stopped.Cleanup);
 
+        // A stop can return while the abandoned adapter call is still unwinding; the session barrier
+        // (by design) admits nothing until it has. Confirmed cleanup must free the next run once it has.
+        await WaitUntilClearAsync(scheduler);
         var next = Real(Completes);
         Assert.Equal(QueueStatus.Completed, (await scheduler.RunAsync([Item(next)])).Status);
 

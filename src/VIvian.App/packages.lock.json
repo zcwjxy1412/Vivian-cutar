@@ -54,6 +54,12 @@
           "Serilog": "4.2.0"
         }
       },
+      "XamlAnimatedGif": {
+        "type": "Direct",
+        "requested": "[2.3.2, )",
+        "resolved": "2.3.2",
+        "contentHash": "Wy8XkF7XVWZHz6I93S+051UYhsx3B3GgQ1wnQzMs1xlxyvFye4UuSKW/7KPfPh2Fg3B4RjurL3bAyi2D9pbhLA=="
+      },
       "Microsoft.Data.Sqlite": {
         "type": "Transitive",
         "resolved": "10.0.14",
@@ -368,6 +374,11 @@
         "resolved": "10.0.14",
         "contentHash": "O/RzNwWoDzehkLlAG9hR8xooY5L41U7VUaYlcKvE3+FhHohBJqF10oLUzuv0v59VeJ62hv3uw9VoeX12zej7Sg=="
       },
+      "System.Security.Cryptography.ProtectedData": {
+        "type": "Transitive",
+        "resolved": "10.0.14",
+        "contentHash": "UuaBUHgmtc9h6CMxaQqFDDJxkS5JVy7XEB+DbtCvD68GFcVM9/AccuNwFpARx8nwCnvjaxzoOBjG3gPz32P1Eg=="
+      },
       "vivian.core": {
         "type": "Project"
       },
@@ -375,6 +386,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.14, )",
+          "System.Security.Cryptography.ProtectedData": "[10.0.14, )",
           "VIvian.Core": "[1.0.0, )"
         }
       }

@@ -56,7 +56,7 @@ public class ManualTestAdmissionTests
     [Fact]
     public void DailyRequiresFreshConsentAndConfirmedCleanup()
     {
-        var daily = Ready with { TaskId = "daily" };
+        var daily = Ready with { TaskId = RealExecutionPolicy.M5RealTask };
         Assert.True(ManualTestPolicy.Evaluate(daily).Allowed);
         Assert.Equal(ManualTestState.NotAvailable, ManualTestPolicy.Evaluate(Ready).State);
         Assert.Equal(ManualTestState.NeedsConfirmation,

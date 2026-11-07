@@ -45,7 +45,7 @@ public static class March7thWorkerExit
         { return WorkerExitState.Unknown; }
     }
 
-    private static (bool Exists, double? StartedAt) Observe(int pid)
+    internal static (bool Exists, double? StartedAt) Observe(int pid)
     {
         try
         {

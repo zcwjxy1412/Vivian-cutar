@@ -34,6 +34,8 @@ public sealed record AppPaths(string DataDirectory)
     }
 }
 
+public sealed record RecentRunRow(string Game, string When, string Result, bool Succeeded, string Duration);
+
 public sealed class MainViewModel : ObservableObject
 {
     private readonly ISettingsStore _settings;
@@ -51,6 +53,8 @@ public sealed class MainViewModel : ObservableObject
         ? "单次星铁 screen_test 测试包：请先核对官方包与安装路径，再逐项确认本次执行。"
         : "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
     public string Status { get => _status; private set => Set(ref _status, value); }
+    private string _stopKeyText = "运行中可按 F10 立即停止（游戏全屏时也有效）。";
+    public string StopKeyText { get => _stopKeyText; set => Set(ref _stopKeyText, value); }
     private bool _busy;
     public bool IsIdle => !_busy;
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
@@ -65,6 +69,8 @@ public sealed class MainViewModel : ObservableObject
         : RealExecutionPolicy.BuildPermitsRealExecution
         ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
+    /// <summary>Page title of the home page, e.g. "11月6日 星期五".</summary>
+    public string TodayText => DateTime.Now.ToString("M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
     public Visibility M5Visibility => RealExecutionPolicy.IsM5DailyTest ? Visibility.Visible : Visibility.Collapsed;
     public string DiagnosticSessionText => "诊断会话：" + _diagnosticSessionId;
     private readonly string _diagnosticSessionId = Guid.NewGuid().ToString("N")[..12];
@@ -79,7 +85,7 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<DiagnosticRecord> History { get; } = [];
     public ObservableCollection<TaskPlanViewModel> TaskPlans { get; } = [];
     private TaskPlanViewModel? _selectedPlan;
-    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set { Set(ref _selectedPlan, value); if (value is not null) Configuration?.SelectGame(value.Game); } }
+    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set => Set(ref _selectedPlan, value); }
     public ConfigurationViewModel Configuration { get; }
     private EngineCard? _selectedEngine;
     public EngineCard? SelectedEngine { get => _selectedEngine; set => Set(ref _selectedEngine, value); }
@@ -103,11 +109,11 @@ public sealed class MainViewModel : ObservableObject
         ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
         : EngineCatalog.March7th.Tasks;
     private EngineTaskDefinition? _march7thTask = EngineCatalog.March7th.Tasks.FirstOrDefault(t => t.Id ==
-        (RealExecutionPolicy.IsM5DailyTest ? "daily" : RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
+        (RealExecutionPolicy.IsM5DailyTest ? RealExecutionPolicy.M5RealTask : RealExecutionPolicy.BuildPermitsRealExecution ? "screen_test" : "daily"));
     public EngineTaskDefinition? March7thTask
     {
         get => _march7thTask;
-        set { Set(ref _march7thTask, value); March7thConfirmedThisRun = false; }
+        set { Set(ref _march7thTask, value); March7thConfirmedThisRun = false; AllowTemporaryConfigurationThisRun = false; RefreshTemporaryConfigurationNeeds(); }
     }
     private bool _march7thConfirmedThisRun;
     private string? _confirmedInstallPath;
@@ -126,10 +132,66 @@ public sealed class MainViewModel : ObservableObject
             RaiseAdmission();
         }
     }
+    private bool _allowTemporaryConfiguration;
+    /// <summary>Per-run consent to the listed temporary upstream setting changes; never carried over.</summary>
+    public bool AllowTemporaryConfigurationThisRun
+    {
+        get => _allowTemporaryConfiguration;
+        set => Set(ref _allowTemporaryConfiguration, value);
+    }
+    private string _temporaryConfigurationText = "";
+    public string TemporaryConfigurationText
+    {
+        get => _temporaryConfigurationText;
+        private set { Set(ref _temporaryConfigurationText, value); Raise(nameof(TemporaryConfigurationVisibility)); }
+    }
+    public Visibility TemporaryConfigurationVisibility =>
+        RealExecutionPolicy.IsM5DailyTest && TemporaryConfigurationText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    private string _pendingRestoreText = "";
+    public string PendingRestoreText
+    {
+        get => _pendingRestoreText;
+        private set { Set(ref _pendingRestoreText, value); Raise(nameof(PendingRestoreVisibility)); }
+    }
+    public Visibility PendingRestoreVisibility => PendingRestoreText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public AsyncCommand RestoreConfigurationCommand { get; }
+
+    /// <summary>Shows which settings the selected task would temporarily change. Read-only; never writes.</summary>
+    private void RefreshTemporaryConfigurationNeeds()
+    {
+        if (!RealExecutionPolicy.IsM5DailyTest || March7thTask is null) { TemporaryConfigurationText = ""; return; }
+        var path = Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
+        if (string.IsNullOrWhiteSpace(path)) { TemporaryConfigurationText = ""; return; }
+        try
+        {
+            var snapshot = _control.ReadConfiguration(GameId.StarRail, path);
+            var changes = TemporaryConfigurationManager.Plan(snapshot, March7thTaskRequirements.For(March7thTask.Id));
+            TemporaryConfigurationText = changes.Count == 0 ? "" :
+                "允许本次临时修改：" + TemporaryConfigurationManager.Describe(changes, snapshot) + "（结束后自动恢复并核对）";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+        { TemporaryConfigurationText = ""; }
+    }
+
+    private void ShowRestore(RestoreResult result)
+    {
+        PendingRestoreText = result.State == RestoreState.Blocked
+            ? "临时配置尚未恢复：" + result.Detail + " 关闭星铁助手后点击“恢复临时配置”。" : "";
+        Log.Information("Temporary configuration restore: {State}", result.State);
+    }
+
+    private async Task RestoreConfigurationAsync()
+    {
+        var result = await Task.Run(_control.RestorePendingConfiguration);
+        ShowRestore(result);
+        Status = result.Detail;
+        RefreshTemporaryConfigurationNeeds();
+    }
+
     private bool _oneShotConsumed;
     private string OneShotMarker => Path.Combine(_paths.DataDirectory, "screen_test.attempted");
     public string March7thExecutionBlock => RealExecutionPolicy.IsM5DailyTest
-        ? "仅开放 daily；每次核验发行包、安装、配置及清理状态，并由本人确认。缺少完成证据时结果为未知。"
+        ? "仅开放“日常（清体力 + 每日实训 + 领奖）”；每次核验发行包、安装、配置及清理状态，并由本人确认。缺少完成证据时结果为未知。"
         : !RealExecutionPolicy.BuildPermitsRealExecution
         ? "真实执行闸门关闭：跨 UAC 工作进程清理及任务完成证据尚未经实机验证。"
         : RealExecutionPolicy.IsReusableManualTest
@@ -140,7 +202,7 @@ public sealed class MainViewModel : ObservableObject
         ? "无害 UAC 边界已核对；上游 Worker 的停止结果需以本次实测为准。"
         : "跨权限安全停止：待实机验证；当前不能运行真实任务。";
     public string March7thConsentNote => RealExecutionPolicy.IsM5DailyTest
-        ? "每日实训会操作真实游戏与账号。请先确认登录状态、原软件配置与本次任务，再由本人处理 UAC。"
+        ? "每日实训会操作真实游戏与账号。请先登录游戏并关闭星铁助手窗口，再由本人处理 UAC。VIvian 以非交互模式运行，无需修改“成功后暂停/失败后退出”。"
         : RealExecutionPolicy.IsReusableManualTest
         ? "开始前请先手动打开星铁并确认账号已登录（登录过期会导致测试失败）。UAC 弹窗由你本人核对 m7a.exe 路径后处理；VIvian 不会自动提权。"
         : RealExecutionPolicy.BuildPermitsRealExecution
@@ -199,7 +261,8 @@ public sealed class MainViewModel : ObservableObject
         IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
-        _control = new UnifiedTaskControl(queue, runs, statusSupervisor);
+        queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
+        _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
             () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"));
@@ -208,7 +271,7 @@ public sealed class MainViewModel : ObservableObject
         Queue.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(QueueViewModel.IsRunning) or nameof(QueueViewModel.IsIdle) or nameof(QueueViewModel.HasUnresolved))
-                RaiseAdmission();
+            { RaiseAdmission(); RaiseHome(); }
         };
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         AutoDiscoverCommand = new(() => RunAsync(() => AutoDiscoverAsync(persist: true)), HandleError);
@@ -225,10 +288,33 @@ public sealed class MainViewModel : ObservableObject
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
+        RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
+        OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
+        foreach (var card in Engines)
+        {
+            card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
+            card.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(EngineCard.IncludeInOneClick) or nameof(EngineCard.Compatibility)) RaiseHome(); };
+        }
+        Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
+            new VIvian.Infrastructure.Assistant.AssistantTools(_control, game => Engines.Single(e => e.Id == game).InstallPath,
+                () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version, e.Compatibility, e.CanRunForReal)).ToList(),
+                async () => await _runs.ReadRecentRunsAsync(20)),
+            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
+            () => { _ = Configuration.ReadAsync(); });
         Configuration.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(ConfigurationViewModel.Status) && _sessionPath is not null)
-                _ = WriteDiagnosticSessionSafelyAsync();
+            if (e.PropertyName == nameof(ConfigurationViewModel.PendingCount)) RaiseHome();
+            // Results of writing settings are shown in the tip bar too, wherever the user is.
+            if (e.PropertyName == nameof(ConfigurationViewModel.Status) && Configuration.Status is { } cs &&
+                (cs.StartsWith("已写入", StringComparison.Ordinal) || cs.StartsWith("没有写入", StringComparison.Ordinal)
+                 || cs.Contains("项修改已排队", StringComparison.Ordinal) || cs.StartsWith("原软件也改了", StringComparison.Ordinal)
+                 || cs.StartsWith("已从星铁助手同步", StringComparison.Ordinal) || cs.StartsWith("已打开星铁助手", StringComparison.Ordinal)))
+                Status = cs;
+            if (e.PropertyName == nameof(ConfigurationViewModel.Status))
+            {
+                RefreshTemporaryConfigurationNeeds();
+                if (_sessionPath is not null) _ = WriteDiagnosticSessionSafelyAsync();
+            }
         };
         SelectedEngine = Engines[0];
     }
@@ -260,6 +346,8 @@ public sealed class MainViewModel : ObservableObject
                 ReleaseArchivePath = archive;
                 await VerifyReleaseAsync();
             }
+            // An interrupted earlier run may have left a temporary change: restore it before anything else.
+            if (_control.HasPendingConfigurationRestore) await RestoreConfigurationAsync();
             if (!string.IsNullOrWhiteSpace(Engines.Single(e => e.Id == GameId.StarRail).InstallPath))
                 try { await Configuration.ReadAsync(); }
                 catch (Exception ex) { Status = "已发现星铁，但配置读取失败：" + UserFacingError.Describe(ex); }
@@ -297,8 +385,74 @@ public sealed class MainViewModel : ObservableObject
         var recent = await Task.Run(() => _runs.ReadRecentRunsAsync(50));
         foreach (var card in Engines) card.ShowLastRun(recent.FirstOrDefault(r => r.Game == card.Id));
         var real = recent.FirstOrDefault(r => r.Game == GameId.StarRail && !r.IsSimulation);
+        RecentRuns.Clear();
+        foreach (var r in recent.Where(r => !r.IsSimulation).Take(4))
+            RecentRuns.Add(new RecentRunRow(Engines.Single(e => e.Id == r.Game).Name, r.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm"),
+                RealResultLabel(r), r.Outcome == RunOutcome.Success && r.Cleanup != CleanupState.Unconfirmed,
+                Duration(r.UpdatedAt - r.CreatedAt)));
+        var finished = recent.Where(r => !r.IsSimulation && r.Outcome == RunOutcome.Success).Take(5).ToList();
+        EstimateText = finished.Count == 0 ? "—" : "≈ " + Math.Max(1, (int)Math.Round(finished.Average(r => (r.UpdatedAt - r.CreatedAt).TotalMinutes))) + " 分钟";
+        RaiseHome();
         LastRealResultText = real is null ? "上次结果：本版本尚无真实运行记录。"
             : $"上次结果（{real.UpdatedAt.ToLocalTime():MM-dd HH:mm}，RunId {real.RunId:D}）：{RealResultLabel(real)}";
+    }
+
+    private static string Duration(TimeSpan t) => t.TotalHours >= 1 ? $"{(int)t.TotalHours}时{t.Minutes:D2}分" : $"{t.Minutes}分{t.Seconds:D2}秒";
+
+    // ---- Home page (overview). Every figure comes from real state; nothing is decorative data. ----
+    public ThemeAssets Theme { get; } = new();
+    public ArtSlot CharacterArt => new(Theme.Character);
+    public ArtSlot AssistantArt => new(Theme.Assistant);
+    public AssistantViewModel Assistant { get; }
+    public ObservableCollection<RecentRunRow> RecentRuns { get; } = [];
+    private string _estimate = "—";
+    public string EstimateText { get => _estimate; private set => Set(ref _estimate, value); }
+    public string RunnableText => $"{Engines.Count(e => e.CanRunForReal)} / {Engines.Count}";
+    public string SelectedGamesText => Engines.Count(e => e.IncludeInOneClick).ToString();
+    public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
+    public string RunStateText => Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
+    public string ConfigSyncText => Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
+    private void RaiseHome()
+    {
+        foreach (var name in new[] { nameof(RunnableText), nameof(SelectedGamesText), nameof(InstalledText), nameof(RunStateText), nameof(ConfigSyncText) })
+            Raise(name);
+    }
+    public AsyncCommand OneClickCommand { get; }
+
+    /// <summary>
+    /// The big button: runs every selected game that can run for real (today: Star Rail "日常"). The dialog is the
+    /// per-run consent, and lists any temporary setting change; nothing starts without "是".
+    /// </summary>
+    private async Task OneClickAsync()
+    {
+        var card = Engines.Single(e => e.Id == GameId.StarRail);
+        // A previous run whose worker exit could not be confirmed blocks everything until it is verified:
+        // first by VIvian itself from March7th's run records, only then by asking the user.
+        if (Queue.HasUnresolved && !await Queue.TryAutoResolveAsync())
+        {
+            if (Queue.LastActivity?.State == VIvian.Infrastructure.Engines.UpstreamActivityState.Busy)
+            { Status = Queue.Status; return; }
+            if (MessageBox.Show("上一次运行结束时，VIvian 没能确认星铁助手的工作进程已经退出（例如游戏窗口被关掉、任务被中途停止），所以暂停了新任务，防止两个自动化同时操作游戏。\n\n" +
+                    "请确认：星铁助手窗口、它的命令行窗口和游戏都已关闭（不确定可在任务管理器里查看是否还有 March7th Assistant）。\n\n已经确认全部关闭了吗？",
+                    "VIvian · 上次运行未确认清理", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            { Status = "上次运行的清理还没确认，任务未启动。确认全部关闭后再点“一键日常”。"; return; }
+            await Queue.AcknowledgeAllAsync();
+            if (Queue.HasUnresolved) { Status = Queue.Status; return; }
+        }
+        if (!card.IncludeInOneClick || !card.CanRunForReal)
+        { Status = "没有选中可以真实执行的游戏。目前只有星铁的“日常”可以运行。"; return; }
+        IReadOnlyList<TemporaryChange> changes = [];
+        try { changes = _control.RequiredTemporaryChanges(card.InstallPath, RealExecutionPolicy.M5RealTask); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException) { Status = "读取星铁配置失败，未启动：" + ex.Message; return; }
+        var snapshot = changes.Count > 0 ? _control.ReadConfiguration(GameId.StarRail, card.InstallPath) : null;
+        var text = "将运行：崩坏：星穹铁道 · 日常（清体力 + 每日实训 + 领奖）\n会操作真实游戏和账号；需要管理员权限时由你在 UAC 中决定。" +
+            (snapshot is null ? "" : "\n\n本次需要临时修改：" + TemporaryConfigurationManager.Describe(changes, snapshot) + "，结束后自动恢复。");
+        if (MessageBox.Show(text, "VIvian · 一键日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        { Status = "已取消，没有启动任何任务。"; return; }
+        March7thConfirmedThisRun = true;
+        AllowTemporaryConfigurationThisRun = changes.Count > 0;
+        if (!CanStartMarch7th) { Status = "暂时不能启动：" + Admission.Text; March7thConfirmedThisRun = false; return; }
+        await StartMarch7thAsync();
     }
 
     /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>
@@ -381,14 +535,19 @@ public sealed class MainViewModel : ObservableObject
         { Status = "安装身份未核对，或有上次运行尚未确认清理；任务未启动。"; return; }
         if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
         if (!admission.Allowed) { Status = admission.Text; return; }
+        var allowTemporary = AllowTemporaryConfigurationThisRun;
+        // Edits made on the Star Rail page must be in the upstream file before the engine reads it.
+        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
+        { Status = $"还有 {Configuration.PendingCount} 项配置修改没写入星铁助手（{Configuration.Status}）。任务未启动。"; return; }
         if (RealExecutionPolicy.IsM5DailyTest)
         {
-            ConfigurationSnapshot config;
-            try { config = _control.ReadConfiguration(GameId.StarRail, card.InstallPath); }
+            if (_control.HasPendingConfigurationRestore)
+            { Status = "上一次运行的临时配置尚未恢复；请先点击“恢复临时配置”。任务未启动。"; return; }
+            IReadOnlyList<TemporaryChange> changes;
+            try { changes = _control.RequiredTemporaryChanges(card.InstallPath, March7thTask.Id); }
             catch (Exception ex) { Status = "上游配置检查失败，任务未启动：" + ex.Message; return; }
-            if (config.Values.Single(v => v.Schema.Path == "pause_after_success").Value != "false" ||
-                config.Values.Single(v => v.Schema.Path == "exit_after_failure").Value != "true")
-            { Status = "请在原软件中关闭“成功后暂停”并开启“失败后退出”，重新读取配置后再执行。"; return; }
+            if (changes.Count > 0 && !allowTemporary)
+            { RefreshTemporaryConfigurationNeeds(); Status = "本任务需要临时修改上游设置：请勾选“允许本次临时修改”后再开始。"; return; }
         }
         await PersistInstallPathAsync(card);
         if (RealExecutionPolicy.IsReusableManualTest)
@@ -419,13 +578,18 @@ public sealed class MainViewModel : ObservableObject
             var result = await _control.ExecuteTaskPlan(plan, new RealTaskAuthorization(card.InstallPath,
                 _march7thEvidence, () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath
                     && _confirmedArchivePath == ReleaseArchivePath && _confirmedTask == March7thTask?.Id,
-                card.Report?.Compatibility == CompatibilityClass.IdentityVerified));
-            Status = result is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
+                card.Report?.Compatibility == CompatibilityClass.IdentityVerified, allowTemporary));
+            Status = result.Queue is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
+            if (result.Restore is not null) { ShowRestore(result.Restore); Status += " " + result.Restore.Detail; }
         }
         finally
         {
             // Never carried over: the next attempt needs a new, explicit confirmation.
             March7thConfirmedThisRun = false;
+            AllowTemporaryConfigurationThisRun = false;
+            if (_control.HasPendingConfigurationRestore && PendingRestoreText.Length == 0)
+                PendingRestoreText = "临时配置尚未恢复；关闭星铁助手后点击“恢复临时配置”。";
+            RefreshTemporaryConfigurationNeeds();
             try { await RefreshLastRunsAsync(); } catch (Exception ex) { Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
             await SaveFeedbackAsync();
             RaiseAdmission();

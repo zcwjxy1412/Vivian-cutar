@@ -1,241 +1,440 @@
-<Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:VIvian.App"
-Title="VIvian · 三游戏日常控制中心" Width="1120" Height="780" MinWidth="640" MinHeight="480" Background="#0D1523" Foreground="#EEF3FB" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True">
+<Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+xmlns:local="clr-namespace:VIvian.App" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
+Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeight="720" Background="#DCE6FB" Foreground="{StaticResource Text}" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
 <Window.Resources>
-<!-- Window-level implicit styles stop at template boundaries, so controls keep their own readable text colours. -->
-<Style TargetType="TextBlock"><Setter Property="Foreground" Value="#EEF3FB"/><Setter Property="TextWrapping" Value="Wrap"/></Style>
-<Style x:Key="Card" TargetType="Border"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
-<Style x:Key="Notice" TargetType="Border"><Setter Property="Background" Value="#3A2A12"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16"/><Setter Property="Margin" Value="0,0,0,16"/></Style>
+<Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
+<Style x:Key="H1" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="LineHeight" Value="36"/></Style>
+<Style x:Key="Kana" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Sakura}"/><Setter Property="FontSize" Value="15"/><Setter Property="FontFamily" Value="{StaticResource JapaneseFont}"/><Setter Property="Margin" Value="14,0,0,5"/><Setter Property="VerticalAlignment" Value="Bottom"/></Style>
+<Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="Margin" Value="0,0,0,6"/></Style>
+<Style x:Key="Lead" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Margin" Value="0,6,0,20"/><Setter Property="MaxWidth" Value="780"/><Setter Property="HorizontalAlignment" Value="Left"/></Style>
+<Style x:Key="Small" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="LineHeight" Value="20"/></Style>
+<Style x:Key="Panel" TargetType="Border"><Setter Property="Background" Value="{StaticResource Surface}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="18"/><Setter Property="Padding" Value="20"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
+<Style x:Key="Notice" TargetType="Border"><Setter Property="Background" Value="{StaticResource WarnBack}"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,12"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
+<Style x:Key="Page" TargetType="ScrollViewer"><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="Padding" Value="34,26,34,20"/></Style>
+<Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{StaticResource Sakura}"/></Style>
+<!-- Navy ribbon heading with gold trim, as in the reference design. -->
+<Style x:Key="Ribbon" TargetType="Border"><Setter Property="Background" Value="{StaticResource NavyRibbon}"/><Setter Property="BorderBrush" Value="{StaticResource Gold}"/><Setter Property="BorderThickness" Value="1.5"/><Setter Property="CornerRadius" Value="14,4,14,4"/><Setter Property="Padding" Value="14,6,22,6"/><Setter Property="HorizontalAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
+<Style x:Key="RibbonText" TargetType="TextBlock"><Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="Bold"/></Style>
+<Style x:Key="Icon" TargetType="TextBlock"><Setter Property="FontFamily" Value="Segoe Fluent Icons, Segoe MDL2 Assets"/><Setter Property="VerticalAlignment" Value="Center"/></Style>
+<!-- Art slot: GIF animates, other images are static, no file shows the vector guide. -->
+<DataTemplate x:Key="Art"><Grid>
+<Image gif:AnimationBehavior.SourceUri="{Binding Uri}" Visibility="{Binding GifVisibility}" Stretch="Uniform"/>
+<Image Source="{Binding Uri}" Visibility="{Binding StaticVisibility}" Stretch="Uniform"/>
+<local:Mascot Visibility="{Binding FallbackVisibility}"/></Grid></DataTemplate>
+<DataTemplate x:Key="AvatarFill"><Grid>
+<Image gif:AnimationBehavior.SourceUri="{Binding Uri}" Visibility="{Binding GifVisibility}" Stretch="UniformToFill" VerticalAlignment="Top"/>
+<Image Source="{Binding Uri}" Visibility="{Binding StaticVisibility}" Stretch="UniformToFill" VerticalAlignment="Top"/>
+<local:Mascot Visibility="{Binding FallbackVisibility}" Margin="4"/></Grid></DataTemplate>
+
+<!-- Left rail navigation item: Tag holds the icon glyph. -->
+<Style x:Key="RailTab" TargetType="TabItem">
+<Setter Property="FocusVisualStyle" Value="{x:Null}"/><Setter Property="Cursor" Value="Hand"/>
+<Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+<Border x:Name="Row" Background="Transparent" CornerRadius="14" Padding="16,11" Margin="10,3" BorderThickness="1.5" BorderBrush="Transparent">
+<StackPanel Orientation="Horizontal">
+<TextBlock x:Name="Glyph" Text="{TemplateBinding Tag}" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="18" Foreground="{StaticResource OnNavy}" VerticalAlignment="Center" Margin="0,0,14,0"/>
+<TextBlock x:Name="Label" Text="{TemplateBinding Header}" Foreground="{StaticResource OnNavy}" FontSize="15" VerticalAlignment="Center"/></StackPanel></Border>
+<ControlTemplate.Triggers>
+<Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="BorderBrush" Value="#5A75C8"/></Trigger>
+<Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#DDE6FF"/><Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource Gold}"/>
+<Setter TargetName="Label" Property="Foreground" Value="{StaticResource Text}"/><Setter TargetName="Label" Property="FontWeight" Value="Bold"/><Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource Sakura}"/></Trigger>
+<Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Row" Property="BorderBrush" Value="White"/></Trigger>
+</ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
+<!-- Pill tabs inside a page (game management). -->
+<Style x:Key="PillTab" TargetType="TabItem">
+<Setter Property="FocusVisualStyle" Value="{x:Null}"/><Setter Property="Cursor" Value="Hand"/>
+<Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+<Border x:Name="Pill" Background="{StaticResource Surface}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="18" Padding="18,8" Margin="0,0,10,0">
+<TextBlock x:Name="Label" Text="{TemplateBinding Header}" Foreground="{StaticResource Text}" FontWeight="SemiBold"/></Border>
+<ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Pill" Property="Background" Value="{StaticResource Navy}"/><Setter TargetName="Pill" Property="BorderBrush" Value="{StaticResource Gold}"/><Setter TargetName="Label" Property="Foreground" Value="White"/></Trigger></ControlTemplate.Triggers>
+</ControlTemplate></Setter.Value></Setter></Style>
 </Window.Resources>
-<Grid Margin="28">
-<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<Grid Margin="0,0,0,24"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<StackPanel><TextBlock Text="VIvian" FontSize="32" FontWeight="Bold"/><TextBlock Text="每天的旅程，从这里开始。" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/></StackPanel>
-<Border Grid.Column="1" Background="#3A2A12" CornerRadius="14" Padding="14,8" VerticalAlignment="Center"><TextBlock Text="{Binding ExecutionBanner}" Foreground="#F2CC85"/></Border>
-</Grid>
-<TabControl Grid.Row="1" Background="#0D1523" BorderThickness="0" Padding="0,20,0,0">
 
-<TabItem Header="概览"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
-<Border Style="{StaticResource Card}" Visibility="{Binding M5Visibility}"><StackPanel>
-<TextBlock Text="星铁 · 每日实训" FontSize="22" FontWeight="SemiBold"/>
-<TextBlock Text="{Binding VersionText}" Foreground="#93B3FF" Margin="0,5,0,8"/>
-<TextBlock Text="{Binding DiagnosticSessionText}" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
-<TextBlock Text="{Binding ManualTestStateText}" FontWeight="SemiBold" Foreground="#F2CC85" AutomationProperties.LiveSetting="Polite"/>
-<TextBlock Text="{Binding Configuration.Status, StringFormat=配置同步：{0}}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
-<TextBlock Text="{Binding LastRealResultText}" Foreground="{StaticResource Muted}" Margin="0,5,0,8"/>
-<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏测试（仅 daily）" AutomationProperties.Name="确认本次星铁 daily"/>
-<WrapPanel Margin="0,10,0,0"><Button Content="开始本次真实测试" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,8,0"/>
-<Button Content="停止当前任务" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Margin="0,0,8,0"/>
-<Button Content="保存反馈" Command="{Binding SaveFeedbackCommand}"/></WrapPanel>
-<TextBlock Text="需要 UAC 时请由本人决定；启动 VIvian 不会自动运行游戏。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Card}" Padding="24" Margin="0,0,0,16"><StackPanel>
-<TextBlock Text="准备好你的三段旅程" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="VIvian 会在启动时自动发现已安装的引擎并核对固定版本。缺少引擎会显示未检测到，不妨碍其他功能。真实任务仅在明确确认后执行。" Foreground="{StaticResource Muted}" Margin="0,10,0,22"/>
-<WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="检查全部引擎（只读）" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="运行基础自检" Command="{Binding CheckCommand}" Margin="0,0,10,8"/><TextBlock Text="只读取文件信息，不启动任何程序或游戏" VerticalAlignment="Center" Foreground="{StaticResource Muted}"/></WrapPanel>
-</StackPanel></Border>
-<Border Style="{StaticResource Notice}"><StackPanel>
-<TextBlock Text="模拟与真实的区别" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="标注【模拟】的运行来自内置模拟引擎，不代表任何游戏的真实日常。“待桌面验证”表示安装文件看起来正确，但启动方式、进程归属和完成信号都还没有实测，因此不会执行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
-</StackPanel></Border>
+<Grid>
+<!-- Background: soft royal-blue sky with bubbles and a wave (decorative; panels keep solid colours). -->
+<Rectangle IsHitTestVisible="False"><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0.4,1"><GradientStop Color="#EEF3FF" Offset="0"/><GradientStop Color="#D3E0FB" Offset="0.55"/><GradientStop Color="#B9CCF5" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+<Image Source="{Binding Theme.Background}" Stretch="UniformToFill" Opacity="0.45" IsHitTestVisible="False"/>
+<Ellipse IsHitTestVisible="False" Width="640" Height="640" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-300,-180,0"><Ellipse.Fill><RadialGradientBrush><GradientStop Color="#80FFFFFF" Offset="0"/><GradientStop Color="#00FFFFFF" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+<Path IsHitTestVisible="False" VerticalAlignment="Bottom" Stretch="Fill" Height="120" Data="M 0,60 C 200,0 400,120 600,60 C 800,0 1000,120 1200,60 L 1200,120 L 0,120 Z"><Path.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0,1"><GradientStop Color="#663D6BEA" Offset="0"/><GradientStop Color="#AA2341A8" Offset="1"/></LinearGradientBrush></Path.Fill></Path>
+<Canvas IsHitTestVisible="False">
+<Ellipse Canvas.Left="300" Canvas.Top="180" Width="26" Height="26" Stroke="#99FFFFFF" StrokeThickness="1.5"><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.3,0.3"><GradientStop Color="#CCFFFFFF" Offset="0"/><GradientStop Color="#225F86E8" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+<Ellipse Canvas.Left="1240" Canvas.Top="96" Width="40" Height="40" Stroke="#99FFFFFF" StrokeThickness="1.5"><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.3,0.3"><GradientStop Color="#CCFFFFFF" Offset="0"/><GradientStop Color="#225F86E8" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+<Ellipse Canvas.Left="560" Canvas.Top="760" Width="18" Height="18" Stroke="#99FFFFFF" StrokeThickness="1.2"><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.3,0.3"><GradientStop Color="#CCFFFFFF" Offset="0"/><GradientStop Color="#225F86E8" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+</Canvas>
+
+<Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<!-- Title -->
+<StackPanel Orientation="Horizontal" Margin="26,14,0,8">
+<Path Width="46" Height="34" Stretch="Uniform" VerticalAlignment="Center" Data="M 2,30 L 6,8 L 16,20 L 24,2 L 32,20 L 42,8 L 46,30 Z M 4,33 L 44,33 L 44,37 L 4,37 Z" Fill="{StaticResource Gold}" Stroke="#8C6A24" StrokeThickness="1"/>
+<StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
+<TextBlock Text="{Binding Theme.Title}" FontFamily="{StaticResource Script}" FontStyle="Italic" FontSize="32" Foreground="{StaticResource Navy}" LineHeight="36"/>
+<TextBlock Text="游戏自动化代理工具 · 一键完成多游戏日常" Foreground="{StaticResource Muted}" FontSize="13"/></StackPanel></StackPanel>
+
+<TabControl x:Name="Navigation" Grid.Row="1" TabStripPlacement="Left" Background="Transparent" BorderThickness="0" Padding="0" ItemContainerStyle="{StaticResource RailTab}">
+<TabControl.Template><ControlTemplate TargetType="TabControl">
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="214"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<Border Background="{StaticResource Rail}" CornerRadius="0,22,22,0" Margin="0,4,0,8" Padding="0,14,0,14"><DockPanel>
+<Border DockPanel.Dock="Bottom" Margin="14,12,14,4" Padding="12,10" CornerRadius="12" Background="#2E4AA8" BorderBrush="{StaticResource Gold}" BorderThickness="1">
+<TextBlock Text="{Binding ExecutionBanner}" Foreground="White" FontSize="12" LineHeight="18" TextWrapping="Wrap"/></Border>
+<TabPanel IsItemsHost="True" Background="Transparent" KeyboardNavigation.TabIndex="1"/></DockPanel></Border>
+<ContentPresenter Grid.Column="1" ContentSource="SelectedContent"/></Grid>
+</ControlTemplate></TabControl.Template>
+
+<!-- ============ 首页概览 ============ -->
+<TabItem Header="首页概览" Tag="&#xE80F;"><Grid Margin="0,0,16,0">
+<Grid.ColumnDefinitions><ColumnDefinition Width="320"/><ColumnDefinition Width="*"/><ColumnDefinition Width="292"/></Grid.ColumnDefinitions>
+<Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<!-- Character: click to open the assistant -->
+<Button Grid.RowSpan="2" Click="OpenAssistant" Cursor="Hand" ToolTip="{Binding Assistant.Name, StringFormat=点我打开 AI 助手 · {0}}" AutomationProperties.Name="打开 AI 助手" VerticalAlignment="Bottom" Margin="6,0,0,0">
+<Button.Template><ControlTemplate TargetType="Button"><ContentPresenter/></ControlTemplate></Button.Template>
+<ContentPresenter Content="{Binding CharacterArt}" ContentTemplate="{StaticResource Art}" MaxHeight="700" Margin="-10,0,-20,0"/></Button>
+
+<ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="4,6,10,10"><StackPanel>
+<!-- Blocked by an unconfirmed cleanup: say so where the user is, with the way out. -->
+<Border Background="{StaticResource DangerBack}" BorderBrush="{StaticResource Danger}" BorderThickness="1.5" CornerRadius="16" Padding="18,14" Margin="0,0,0,14">
+<Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Queue.HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
+<StackPanel><TextBlock Text="新任务暂时等待：正在核实上一次运行已经结束" Foreground="{StaticResource DangerText}" FontWeight="Bold" FontSize="15"/>
+<TextBlock Text="VIvian 每 5 秒自动核实一次：星铁助手的任务进程一退出，这里会自己消失，不用你操作。只有一直无法核实时，才需要你确认星铁助手窗口和命令行窗口都已关闭后点下面的按钮。原判定结果不会被改写。" Foreground="{StaticResource DangerText}" Margin="0,6,0,4"/>
+<TextBlock Text="{Binding Queue.Status}" Foreground="{StaticResource DangerText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
+<Button Content="我已确认，全部已关闭" Command="{Binding Queue.AcknowledgeCommand}" IsEnabled="{Binding Queue.IsIdle}" HorizontalAlignment="Left" Background="White"/></StackPanel></Border>
+<!-- 今日概览 -->
+<Border Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
+<StackPanel Orientation="Horizontal"><Border Style="{StaticResource Ribbon}" Margin="0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE734;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="今日概览" Style="{StaticResource RibbonText}"/></StackPanel></Border>
+<TextBlock Text="{Binding TodayText}" Style="{StaticResource Small}" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel>
+<UniformGrid Columns="4" Margin="0,14,0,0">
+<Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="可运行游戏" Style="{StaticResource Small}"/><TextBlock Text="{Binding RunnableText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
+<Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE787;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="一键日常已选" Style="{StaticResource Small}"/><TextBlock Text="{Binding SelectedGamesText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
+<Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE916;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="预计耗时" Style="{StaticResource Small}"/><TextBlock Text="{Binding EstimateText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
+<Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="运行状态" Style="{StaticResource Small}"/><TextBlock Text="{Binding RunStateText}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Ok}"/></StackPanel></StackPanel></Border>
+</UniformGrid></StackPanel></Border>
+
+<!-- 游戏与日常任务 -->
+<Border Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
+<Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="游戏与日常任务" Style="{StaticResource RibbonText}"/></StackPanel></Border>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate>
-<Border Style="{StaticResource Card}"><Grid>
-<Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="{Binding Glyph}" FontSize="24" Foreground="#93B3FF" VerticalAlignment="Top"/>
-<StackPanel Grid.Column="1">
-<TextBlock Text="{Binding Name}" FontSize="19" FontWeight="SemiBold"/>
-<TextBlock Text="{Binding Engine}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
-<TextBlock Text="{Binding PinnedVersion}" Foreground="{StaticResource Muted}" Margin="0,5,12,0"/>
-<TextBlock Text="{Binding DetectedVersion}" Foreground="{StaticResource Muted}" Margin="0,5,12,0"/>
-<TextBlock Text="{Binding Evidence}" Foreground="{StaticResource Muted}" Margin="0,5,12,0"/>
-<TextBlock Text="{Binding PendingWarning}" Foreground="#F2CC85" Margin="0,5,12,0"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
-<TextBlock Text="{Binding LastRun}" Foreground="{StaticResource Muted}" Margin="0,5,12,0"/>
-<TextBlock Text="{Binding Execution}" Foreground="#F2CC85" Margin="0,5,12,0"/>
-</StackPanel>
-<TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold" VerticalAlignment="Top" MaxWidth="220" Margin="12,0,0,0" AutomationProperties.Name="引擎状态"/>
-</Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-</StackPanel></ScrollViewer></TabItem>
+<Border Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="14" Margin="0,0,0,10" ClipToBounds="True"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<!-- Banner: user image if supplied, otherwise a game-coloured plate with the title -->
+<Border CornerRadius="13,0,0,13" MinHeight="78">
+<Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="{Binding BannerFrom}" Offset="0"/><GradientStop Color="{Binding BannerTo}" Offset="1"/></LinearGradientBrush></Border.Background>
+<Grid><Image Source="{Binding Banner.Uri}" Stretch="UniformToFill" Visibility="{Binding Banner.StaticVisibility}"/>
+<Image gif:AnimationBehavior.SourceUri="{Binding Banner.Uri}" Stretch="UniformToFill" Visibility="{Binding Banner.GifVisibility}"/>
+<StackPanel Margin="18,0,0,0" VerticalAlignment="Center" Visibility="{Binding Banner.FallbackVisibility}">
+<TextBlock Text="{Binding Name}" Foreground="White" FontSize="22" FontWeight="Bold" TextWrapping="NoWrap"/>
+<TextBlock Text="{Binding Tagline}" Foreground="#E6ECFF" FontFamily="{StaticResource Script}" FontStyle="Italic" FontSize="13" TextWrapping="NoWrap"/></StackPanel></Grid></Border>
+<StackPanel Grid.Column="1" Margin="16,10,8,10" VerticalAlignment="Center">
+<DockPanel><Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+<TextBlock DockPanel.Dock="Right" Text="{Binding RunHint}" Style="{StaticResource Small}" FontSize="12" TextWrapping="NoWrap" Margin="8,0,0,0"/>
+<TextBlock Text="{Binding ShortVersion}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Version}"/></DockPanel>
+<ItemsControl ItemsSource="{Binding Chips}" Margin="0,8,0,0"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+<ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,2" Margin="0,0,6,4"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+<StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
+<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding IncludeInOneClick}" IsEnabled="{Binding CanToggle}" ToolTip="加入一键日常" Margin="0,0,10,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 加入一键日常}"/>
+<Button Content="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Click="OpenGameSettings" Tag="{Binding Id}" ToolTip="配置" Padding="10,8" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 配置}"/>
+<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.OneClickCommand, RelativeSource={RelativeSource AncestorType=Window}}" IsEnabled="{Binding CanRunForReal}" ToolTip="运行" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
+</StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 
-<TabItem Header="引擎管理"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel IsEnabled="{Binding IsIdle}">
-<TextBlock Text="引擎位置与检查" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="填写已经安装的目录；留空也可以。保存后 VIvian 只读检查：不创建目录、不修改引擎文件、不读取上游配置内容、不运行程序。" Foreground="{StaticResource Muted}" Margin="0,10,0,20"/>
-<ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Card}"><StackPanel>
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="{Binding Name}" FontSize="18"/><TextBlock Grid.Column="1" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold"/></Grid>
-<TextBlock Text="{Binding PinnedVersion}" Foreground="{StaticResource Muted}" Margin="0,4,0,10"/>
-<DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseEngineFolder" Tag="{Binding}" Margin="8,0,0,0"/>
-<TextBox Text="{Binding InstallPath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name}" ToolTip="引擎安装目录"/></DockPanel>
-<TextBlock Text="{Binding DetectedVersion}" Foreground="{StaticResource Muted}" Margin="0,10,0,0"/>
-<Expander Margin="0,10,0,0" Foreground="#EEF3FB"><Expander.Header><Border Background="#24324A" CornerRadius="6" Padding="8,4"><TextBlock Text="检查详情" Foreground="#EEF3FB"/></Border></Expander.Header><ItemsControl ItemsSource="{Binding Checks}" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate>
-<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<TextBlock Text="{Binding State}" Foreground="{Binding Brush}" FontWeight="SemiBold"/>
-<StackPanel Grid.Column="1"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Message}" Foreground="{StaticResource Muted}"/><TextBlock Text="{Binding Action}" Foreground="#93B3FF"/></StackPanel>
-</Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
-<Expander Margin="0,6,0,0" Foreground="#EEF3FB"><Expander.Header><Border Background="#24324A" CornerRadius="6" Padding="8,4"><TextBlock Text="能力与证据" Foreground="#EEF3FB"/></Border></Expander.Header><ItemsControl ItemsSource="{Binding Capabilities}" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate>
-<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Status}" Foreground="{Binding Brush}"/></StackPanel>
-<TextBlock Grid.Column="1" Text="{Binding Note}" Foreground="{StaticResource Muted}" Margin="10,0,0,0"/>
-</Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
-</StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<WrapPanel Margin="0,12,0,0"><Button Content="自动填入已发现目录" Command="{Binding AutoDiscoverCommand}" Margin="0,0,10,8"/><Button Content="保存路径并检查" Command="{Binding SaveCommand}" Margin="0,0,10,8"/><Button Content="重新检查（只读）" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="重新加载（放弃未保存修改）" Command="{Binding ReloadCommand}" Margin="0,0,10,8"/></WrapPanel>
-<Border Style="{StaticResource Card}" Margin="0,20,0,0"><StackPanel>
-<TextBlock Text="核对星铁官方发行包（验证证据）" FontSize="18" Margin="0,0,0,6"/>
-<TextBlock Text="选择从 March7thAssistant 官方 GitHub Release 下载的 March7thAssistant_full.zip（v2026.10.31）。VIvian 计算它的 SHA-256 并与官方公布的摘要比对，再从压缩包内读取 m7a.exe 的摘要，用来核对上面填写的安装目录。不解压、不运行任何文件；核对结果只在本次运行中有效，文件位置会被记住。" Foreground="{StaticResource Muted}" Margin="0,0,0,10"/>
-<DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseReleaseArchive" Margin="8,0,0,0"/><TextBox Text="{Binding ReleaseArchivePath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="官方发行包路径" ToolTip="官方发行包文件路径"/></DockPanel>
-<WrapPanel Margin="0,10,0,0"><Button Content="核对官方发行包" Command="{Binding VerifyReleaseCommand}"/></WrapPanel>
-<TextBlock Text="{Binding ReleaseStatus}" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
-</StackPanel></Border>
-</StackPanel></ScrollViewer></TabItem>
+<!-- 最近运行 + 本次运行 -->
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
+<Border Style="{StaticResource Panel}" Padding="18,14" Margin="0,0,10,14"><StackPanel>
+<Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE81C;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="最近运行" Style="{StaticResource RibbonText}"/></StackPanel></Border>
+<TextBlock Text="还没有真实运行记录。"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding RecentRuns.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+<ItemsControl ItemsSource="{Binding RecentRuns}"><ItemsControl.ItemTemplate><DataTemplate>
+<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<TextBlock FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center" Margin="0,0,10,0"><TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Text" Value="&#xE783;"/><Setter Property="Foreground" Value="{StaticResource Warn}"/><Style.Triggers><DataTrigger Binding="{Binding Succeeded}" Value="True"><Setter Property="Text" Value="&#xE930;"/><Setter Property="Foreground" Value="{StaticResource Ok}"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Game}" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="{Binding Result}" Style="{StaticResource Small}" FontSize="12"/></StackPanel>
+<StackPanel Grid.Column="2" Margin="8,0,0,0"><TextBlock Text="{Binding When}" Style="{StaticResource Small}" FontSize="12" HorizontalAlignment="Right"/><TextBlock Text="{Binding Duration}" Style="{StaticResource Small}" FontSize="12" HorizontalAlignment="Right"/></StackPanel>
+</Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+<Border Grid.Column="1" Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
+<Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="本次运行" Style="{StaticResource RibbonText}"/></StackPanel></Border>
+<TextBlock Text="{Binding Queue.Current}" FontSize="13"/>
+<TextBlock Text="{Binding Queue.Status}" Style="{StaticResource Small}" Margin="0,4,0,0"/>
+<TextBlock Text="{Binding ManualTestStateText}" Style="{StaticResource Small}" Margin="0,8,0,0"/></StackPanel></Border></Grid>
+</StackPanel></ScrollViewer>
 
-<TabItem Header="{Binding RealTestTabHeader}"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
-<TextBlock Text="{Binding RealTestTitle}" FontSize="24" FontWeight="SemiBold"/>
-<Border Style="{StaticResource Card}" Margin="0,14,0,0"><StackPanel>
-<TextBlock Text="{Binding ManualTestStateText}" FontSize="18" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite"/>
-<TextBlock Text="{Binding LastRealResultText}" Foreground="{StaticResource Muted}" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
+<!-- Right column: automation control + system status -->
+<ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="0,6,0,10"><StackPanel>
+<Border Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
+<Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE945;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="自动化控制" Style="{StaticResource RibbonText}"/></StackPanel></Border>
+<Button Command="{Binding OneClickCommand}" HorizontalAlignment="Center" Margin="0,8,0,14" Cursor="Hand" AutomationProperties.Name="一键日常">
+<Button.Template><ControlTemplate TargetType="Button"><Grid Width="176" Height="176">
+<Ellipse Stroke="{StaticResource Gold}" StrokeThickness="3" Fill="#DDE6FF"/>
+<Border x:Name="Core" Margin="12" CornerRadius="76" Background="{StaticResource Dream}" BorderBrush="White" BorderThickness="2">
+<StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+<Path Data="M 0,0 L 26,15 L 0,30 Z" Fill="White" HorizontalAlignment="Center" Margin="6,0,0,6"/>
+<TextBlock Text="一键日常" Foreground="White" FontSize="22" FontWeight="Bold"/></StackPanel></Border></Grid>
+<ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
+<Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
+<UniformGrid Columns="3">
+<Button Content="计划运行" IsEnabled="False" ToolTip="定时执行将在手动运行稳定后开放" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
+<Button Content="暂停" IsEnabled="False" ToolTip="暂停尚未接入" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
+<Button Style="{StaticResource DangerButton}" Content="停止" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Margin="0" Padding="6,9" FontSize="13"/></UniformGrid>
+<TextBlock Text="点“一键日常”会先确认本次运行；需要管理员权限时由你在 UAC 中决定。" Style="{StaticResource Small}" FontSize="12" Margin="0,10,0,0"/>
+<TextBlock Text="{Binding StopKeyText}" Style="{StaticResource Small}" FontSize="12" Margin="0,4,0,0"/>
 </StackPanel></Border>
-<Border Style="{StaticResource Notice}" Margin="0,14,0,12"><StackPanel>
-<TextBlock Text="执行安全闸门" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="{Binding March7thExecutionBlock}" Foreground="#E8D9BC" Margin="0,6,0,0" AutomationProperties.LiveSetting="Polite"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Card}"><StackPanel>
-<TextBlock Text="上游安装与固定版本" FontSize="18" FontWeight="SemiBold"/>
-<TextBlock Text="支持版本：March7thAssistant v2026.10.31；游戏路径须由上游设置，并在状态查询中核对。" Foreground="{StaticResource Muted}" Margin="0,6,0,10"/>
-<TextBlock Text="{Binding Engines[1].InstallPath, StringFormat=安装目录：{0}}" Foreground="{StaticResource Muted}"/>
-<TextBlock Text="{Binding Engines[1].Compatibility, StringFormat=安装检查：{0}}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
-<TextBlock Text="{Binding ReleaseStatus}" Foreground="{StaticResource Muted}" Margin="0,5,0,0"/>
-<TextBlock Text="{Binding March7thStopStatus}" Foreground="#F2CC85" Margin="0,5,0,0"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Card}"><StackPanel>
-<TextBlock Text="任务与本次确认" FontSize="18" FontWeight="SemiBold"/>
-<ComboBox ItemsSource="{Binding March7thTasks}" SelectedItem="{Binding March7thTask}" DisplayMemberPath="Title" Width="260" HorizontalAlignment="Left" Margin="0,10,0,10" AutomationProperties.Name="星铁真实任务选择"/>
-<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我了解这会运行真实游戏自动化任务，仅确认本次执行" AutomationProperties.Name="确认本次星铁真实任务"/>
-<WrapPanel Margin="0,12,0,0">
-<Button Content="{Binding StartButtonText}" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}" Margin="0,0,10,0"/>
-<Button Content="紧急停止当前任务" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}" Background="#F08A80"/>
-</WrapPanel>
-<TextBlock Text="{Binding March7thConsentNote}" Foreground="{StaticResource Muted}" Margin="0,10,0,0"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Card}"><StackPanel>
-<TextBlock Text="运行状态、日志与结果" FontSize="18" FontWeight="SemiBold"/>
-<TextBlock Text="{Binding Queue.Current}" Margin="0,8,0,0"/>
-<TextBlock Text="{Binding Queue.Status}" Foreground="{StaticResource Muted}" Margin="0,4,0,8"/>
-<ListBox ItemsSource="{Binding Queue.LogLines}" Height="180" Background="#101A2A" Foreground="#EEF3FB"/>
-<TextBlock Text="执行历史及清理结果详见“调度与监控”。出现问题时：先截图，再点击下面的按钮导出诊断报告。" Foreground="{StaticResource Muted}" Margin="0,8,0,0"/>
-<WrapPanel Margin="0,10,0,0" IsEnabled="{Binding IsIdle}"><Button Content="导出诊断报告" Command="{Binding ExportDiagnosticsCommand}" Margin="0,0,10,0"/></WrapPanel>
-<TextBlock Text="{Binding ExportStatus}" Foreground="{StaticResource Muted}" Margin="0,6,0,0"/>
-</StackPanel></Border>
-</StackPanel></ScrollViewer></TabItem>
+<Border Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
+<Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="系统状态" Style="{StaticResource RibbonText}"/></StackPanel></Border>
+<Grid Margin="0,2,0,8"><TextBlock Text="任务引擎"/><TextBlock Text="{Binding RunStateText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
+<Grid Margin="0,0,0,8"><TextBlock Text="配置同步"/><TextBlock Text="{Binding ConfigSyncText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
+<Grid Margin="0,0,0,8"><TextBlock Text="游戏检测"/><TextBlock Text="{Binding InstalledText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
+<Grid><TextBlock Text="运行权限"/><TextBlock Text="普通用户 · UAC 由你确认" Foreground="{StaticResource Muted}" FontSize="13" HorizontalAlignment="Right"/></Grid>
+</StackPanel></Border></StackPanel></ScrollViewer>
 
-<TabItem Header="任务管理"><Grid>
-<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<Border Style="{StaticResource Notice}"><StackPanel>
-<TextBlock Text="三游戏任务目录与配置" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="任务选择会保存为计划。星铁 daily 的真实执行仍需在专用页逐次确认；其他待验证任务不会自动运行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
-</StackPanel></Border>
-<DockPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock Text="游戏：" VerticalAlignment="Center" Margin="0,0,8,0"/>
-<ComboBox ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" MinWidth="320" HorizontalAlignment="Left" AutomationProperties.Name="选择游戏"/></DockPanel>
-<Grid Grid.Row="2" DataContext="{Binding SelectedPlan}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Background="#101A2A" BorderThickness="0" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="任务列表"><ListBox.ItemTemplate><DataTemplate>
-<Grid Margin="6"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title}"/>
-<StackPanel Grid.Column="1" Margin="10,0,10,0"><TextBlock Text="{Binding Title}" FontSize="15" Foreground="#EEF3FB"/><TextBlock Text="{Binding Note}" Foreground="#B6C3D5" FontSize="12"/></StackPanel>
-<TextBlock Grid.Column="2" Text="{Binding Status}" Foreground="#E5BF76" VerticalAlignment="Center"/>
-</Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
-<StackPanel Grid.Column="1" Margin="16,0,0,0" MinWidth="150">
-<Button Content="上移" Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,10"/>
-<Button Content="下移" Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,10"/>
-</StackPanel></Grid>
-<StackPanel Grid.Row="3" Margin="0,12,0,0">
-<TextBlock Text="{Binding SelectedPlan.Validation}" Foreground="#F2CC85" Margin="0,0,0,10" AutomationProperties.LiveSetting="Polite"/>
-<WrapPanel IsEnabled="{Binding IsIdle}"><Button Content="保存任务选择" Command="{Binding SaveTasksCommand}" Margin="0,0,10,0"/><Button Content="放弃修改" Command="{Binding ReloadTasksCommand}"/></WrapPanel>
-</StackPanel>
-<Border Grid.Row="4" Style="{StaticResource Card}" Margin="0,12,0,0" DataContext="{Binding Configuration}"><StackPanel>
-<TextBlock Text="上游配置 · 当前值与同步" FontSize="17" FontWeight="SemiBold"/>
-<TextBlock Text="星铁仅开放已核对的布尔参数；体力计划与每日任务明细由原软件管理。" Foreground="{StaticResource Muted}" Margin="0,5,0,8"/>
-<WrapPanel><Button Content="读取上游配置" Command="{Binding ReadCommand}" Margin="0,0,8,0"/><Button Content="保存参数" Command="{Binding SaveCommand}" Margin="0,0,8,0"/><Button Content="复制上游设置文件路径" Command="{Binding OpenSettingsCommand}"/></WrapPanel>
-<TextBlock Text="{Binding Status}" Foreground="#F2CC85" Margin="0,8,0,8" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
-<ScrollViewer MaxHeight="190" VerticalScrollBarVisibility="Auto"><ItemsControl ItemsSource="{Binding Parameters}"><ItemsControl.ItemTemplate><DataTemplate>
-<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="180"/><ColumnDefinition Width="*"/><ColumnDefinition Width="80"/></Grid.ColumnDefinitions>
-<StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Path}" Foreground="{StaticResource Muted}" FontSize="11"/></StackPanel>
-<StackPanel Grid.Column="1"><TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" AutomationProperties.Name="{Binding Title}"/><TextBlock Text="{Binding Description}" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/></StackPanel>
-<TextBlock Grid.Column="2" Text="{Binding State}" Foreground="#F2CC85" Margin="8,0,0,0"/></Grid>
-</DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
-</StackPanel></Border></Grid></TabItem>
-
-<TabItem Header="调度与监控"><Grid DataContext="{Binding Queue}">
-<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<Border Style="{StaticResource Notice}"><StackPanel>
-<TextBlock Text="模拟模式：这里的所有结果都是演示，不代表任何游戏的真实日常。" FontWeight="SemiBold" Foreground="#F2CC85"/>
-<TextBlock Text="不会启动游戏或任何程序，不读写游戏文件，也不操作键盘鼠标。用于检验 VIvian 的串行调度、停止、清理核对与结果判定逻辑。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
-<TextBlock Text="本页的队列只运行模拟引擎。星铁单次测试仅能从“星铁实测”页经本人确认后启动；结果或清理无法确认时会阻断后续运行。" Foreground="#E8D9BC" Margin="0,6,0,0"/>
-</StackPanel></Border>
-<Grid Grid.Row="1" Margin="0,0,0,16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<ItemsControl ItemsSource="{Binding Games}" IsEnabled="{Binding IsIdle}"><ItemsControl.ItemTemplate><DataTemplate>
-<Border Background="{StaticResource Surface}" CornerRadius="10" Padding="14,10" Margin="0,0,0,8"><Grid>
-<Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<CheckBox IsChecked="{Binding Include}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Name}"/>
-<TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="16" VerticalAlignment="Center" Margin="10,0,12,0"/>
-<ComboBox Grid.Column="2" MinWidth="200" ItemsSource="{Binding Source={x:Static local:DemoGameOption.Scenarios}}" DisplayMemberPath="Label" SelectedItem="{Binding Scenario}" AutomationProperties.Name="模拟情形"/>
-</Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<StackPanel Grid.Column="1" Margin="16,0,0,0" MinWidth="180">
-<Button Content="开始模拟队列" Command="{Binding StartCommand}" IsEnabled="{Binding IsIdle}" Margin="0,0,0,10"/>
-<Button Content="紧急停止" Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}" Background="#F08A80" Margin="0,0,0,10" AutomationProperties.HelpText="立即停止，不倒计时"/>
-<TextBlock Text="{Binding Current}" Foreground="{StaticResource Muted}" AutomationProperties.LiveSetting="Polite"/>
-</StackPanel></Grid>
-<Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<DockPanel Margin="0,0,8,0"><TextBlock DockPanel.Dock="Top" Text="运行日志" FontSize="16" Margin="0,0,0,8"/>
-<TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
-<ListBox ItemsSource="{Binding LogLines}" Background="#101A2A" Foreground="#EEF3FB" BorderThickness="0" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#EEF3FB"/></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel>
-<DockPanel Grid.Column="1" Margin="8,0,0,0"><TextBlock DockPanel.Dock="Top" Text="执行历史（清理状态与结果分开记录）" FontSize="16" Margin="0,0,0,8"/>
-<Border DockPanel.Dock="Top" Background="#4A1F22" CornerRadius="10" Padding="12" Margin="0,0,0,8">
-<Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
-<StackPanel><TextBlock Text="有运行无法确认已清理。在你确认之前，新的队列不会启动。" Foreground="#FFD3CF"/>
-<TextBlock Text="请先确认相关引擎和游戏都已关闭。你的确认会单独记录，不会改写原判定。" Foreground="#E8C2BE" Margin="0,4,0,8"/>
-<Button Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel></Border>
-<ListView ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="6">
-<TextBlock Text="{Binding When}" Foreground="#93B3FF"/><TextBlock Text="{Binding RunId, StringFormat=RunId {0:D}}" Foreground="#93B3FF" Margin="0,4,0,0"/><TextBlock Text="{Binding Summary}" Margin="0,4,0,0" TextWrapping="Wrap"/>
-</StackPanel></DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
-</Grid></Grid></TabItem>
-
-<TabItem Header="设置与诊断"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel IsEnabled="{Binding IsIdle}">
-<TextBlock Text="设置与诊断" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="{Binding VersionText}" Foreground="#93B3FF" Margin="0,10,0,4"/>
-<TextBlock Text="{Binding DataDirectoryText}" Foreground="{StaticResource Muted}" Margin="0,0,0,16"/>
-<Border Style="{StaticResource Card}"><StackPanel>
-<TextBlock Text="应用偏好" FontSize="18" Margin="0,0,0,10"/>
-<DockPanel Margin="0,0,0,10"><TextBlock Text="日志保留天数（3–90）：" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBox Text="{Binding LogRetentionDays, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" AutomationProperties.Name="日志保留天数"/></DockPanel>
-<DockPanel Margin="0,0,0,10"><CheckBox IsChecked="{Binding IncludeRunHistory}" VerticalAlignment="Center" AutomationProperties.Name="诊断包包含运行记录"/><TextBlock Text="诊断包中包含运行记录（只有状态与原因代码）" Margin="8,0,0,0" VerticalAlignment="Center"/></DockPanel>
-<WrapPanel><Button Content="保存设置" Command="{Binding SavePreferencesCommand}"/></WrapPanel>
-</StackPanel></Border>
-<Border Style="{StaticResource Card}"><StackPanel>
-<TextBlock Text="诊断" FontSize="18" Margin="0,0,0,6"/>
-<TextBlock Text="导出一个本地 ZIP，包含版本与系统信息、引擎只读检查结果、运行记录与最近日志。已去除用户目录、用户名、计算机名、邮箱以及口令/令牌样式的内容；不包含数据库、任何上游配置或账号信息；不会自动上传。" Foreground="{StaticResource Muted}" Margin="0,0,0,10"/>
-<WrapPanel><Button Content="导出诊断包" Command="{Binding ExportDiagnosticsCommand}" Margin="0,0,10,8"/><Button Content="复制导出文件夹路径" Click="CopyExportsPath" Margin="0,0,10,8"/><Button Content="复制日志文件夹路径" Click="CopyLogsPath" Margin="0,0,10,8"/></WrapPanel>
-<TextBlock Text="{Binding ExportStatus}" Foreground="{StaticResource Muted}" AutomationProperties.LiveSetting="Polite"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Card}"><StackPanel>
-<TextBlock Text="安装与兼容性说明" FontSize="18" Margin="0,0,0,6"/>
-<TextBlock Text="· VIvian 以普通用户权限运行，不需要管理员权限，也不会静默提权。" Foreground="{StaticResource Muted}"/>
-<TextBlock Text="· 支持基准：BetterGI v0.66.0、March7thAssistant v2026.10.31、OneDragon v2.6.0（WithRuntime-Full）。其他版本显示“不支持（版本）”。" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
-<TextBlock Text="· 只从各项目的官方 GitHub Release 下载引擎；星铁可在“引擎管理”中核对官方发行包。" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
-<TextBlock Text="· OneDragon 官方要求安装路径只含英文字母、数字、下划线和连字符，且没有空格。" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
-<TextBlock Text="· 请不要把引擎放在链接（符号链接、目录联接）后面；VIvian 会拒绝检查这样的目录。" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
-</StackPanel></Border>
-</StackPanel></ScrollViewer></TabItem>
-
-<TabItem Header="自检记录"><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<StackPanel Margin="0,0,0,16"><TextBlock Text="本地基础自检记录" FontSize="24"/><TextBlock Text="保留最近记录；这里不是游戏任务历史。时间显示为 UTC。" Foreground="{StaticResource Muted}" Margin="0,8,0,12"/><Button Content="刷新记录与配置" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel>
-<ListView Grid.Row="1" ItemsSource="{Binding History}" HorizontalContentAlignment="Stretch"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="10"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="#93B3FF"/><TextBlock Text="{Binding Summary}" Margin="0,6,0,0" TextWrapping="Wrap"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+<!-- Tip bar with the small assistant -->
+<Border Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Background="White" BorderBrush="{StaticResource Gold}" BorderThickness="1.5" CornerRadius="18" Padding="14,10" Margin="4,0,0,12">
+<DockPanel>
+<Button DockPanel.Dock="Right" Click="OpenAssistant" Cursor="Hand" Width="62" Height="62" Margin="10,-22,0,-6" ToolTip="打开 AI 助手" AutomationProperties.Name="打开 AI 助手">
+<Button.Template><ControlTemplate TargetType="Button"><ContentPresenter/></ControlTemplate></Button.Template>
+<ContentPresenter Content="{Binding AssistantArt}" ContentTemplate="{StaticResource Art}"/></Button>
+<Border DockPanel.Dock="Left" Background="{StaticResource Navy}" CornerRadius="12" Padding="12,4" VerticalAlignment="Center" Margin="0,0,14,0">
+<StackPanel Orientation="Horizontal"><TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="White" Margin="0,0,6,0"/><TextBlock Text="提示" Foreground="White" FontWeight="Bold"/></StackPanel></Border>
+<TextBlock Text="{Binding Status}" VerticalAlignment="Center" FontSize="13" AutomationProperties.LiveSetting="Polite"/></DockPanel></Border>
 </Grid></TabItem>
 
-<TabItem Header="关于"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="4">
-<TextBlock Text="一个控制中心，三款独立引擎。" FontSize="24" FontWeight="SemiBold"/>
-<TextBlock Text="{Binding VersionText}" Margin="0,14,0,24" Foreground="#93B3FF"/>
-<TextBlock Text="已提供并经自动测试：本地配置与任务计划、SQLite 持久化与迁移、日志轮转与保留、诊断包导出（已脱敏）、单实例保护，以及模拟模式下的串行调度、紧急停止、清理核对、运行记录与崩溃后对账；三款引擎的只读检查与星铁官方发行包核对。" Margin="0,0,0,16"/>
-<TextBlock Text="已实现但待 Windows 桌面验证：隔离副本中的引擎诊断命令、真实引擎的进程归属与 UAC 边界、完成证据的判定规则。" Margin="0,0,0,16"/>
-<TextBlock Text="未开放：真实游戏自动日常、引擎安装更新与回滚、托盘。" Margin="0,0,0,16"/>
-<TextBlock Text="三款引擎由各自开源项目维护。本程序无官方游戏关联，不收集游戏密码，不自动上传诊断信息。" Margin="0,0,0,16"/>
-<TextBlock Text="游戏自动化存在账号处罚风险。后续接入不会承诺零风险，也不会绕过反作弊。" Foreground="#E5BF76"/>
+<!-- ============ 游戏管理 ============ -->
+<TabItem Header="游戏管理" Tag="&#xE7FC;"><Grid Margin="34,22,34,10">
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="游戏管理" Style="{StaticResource H1}"/><TextBlock Text="ゲーム" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="查看并修改三款引擎的真实配置。修改会立即写入原软件，原软件里的修改也会自动同步回来。" Style="{StaticResource Lead}" Margin="0,4,0,12"/></StackPanel>
+<TabControl x:Name="GameTabs" Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="0,14,0,0" ItemContainerStyle="{StaticResource PillTab}">
+<TabItem Header="崩坏：星穹铁道"><Border Style="{StaticResource Panel}" Margin="0" Padding="20,6,8,8"><DockPanel DataContext="{Binding Configuration}" Margin="0,14,0,0">
+<StackPanel DockPanel.Dock="Top" Margin="0,0,16,10">
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<TextBlock Text="配置" Style="{StaticResource H2}" VerticalAlignment="Center" Margin="0"/>
+<WrapPanel Grid.Column="1"><Button Content="重新读取" Command="{Binding ReadCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource Primary}" Content="立即写入" Command="{Binding SaveCommand}" Margin="0,0,8,0" ToolTip="修改会自动写入；这里用于重试排队中的修改"/><Button Content="在星铁助手中修改" Command="{Binding OpenUpstreamCommand}" Margin="0,0,8,0" ToolTip="打开星铁助手自己的窗口；在那里保存的设置会自动同步到这里"/><Button Content="复制设置文件路径" Command="{Binding OpenSettingsCommand}" Margin="0"/></WrapPanel></Grid>
+<TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/></StackPanel>
+<ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
+<ScrollViewer.Resources><CollectionViewSource x:Key="Grouped" Source="{Binding Parameters}"><CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions></CollectionViewSource></ScrollViewer.Resources>
+<ItemsControl ItemsSource="{Binding Source={StaticResource Grouped}}">
+<ItemsControl.GroupStyle><GroupStyle><GroupStyle.HeaderTemplate><DataTemplate>
+<TextBlock Text="{Binding Name, StringFormat=✦ {0}}" FontSize="16" FontFamily="{StaticResource Round}" Foreground="{StaticResource Sakura}" Margin="0,20,0,6"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ItemsControl.GroupStyle>
+<ItemsControl.ItemTemplate><DataTemplate>
+<Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,10,0,12"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions>
+<StackPanel Margin="0,0,18,0" ToolTip="{Binding Dependencies}">
+<TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Description}" Style="{StaticResource Small}" Margin="0,2,0,0"/>
+<TextBlock Text="{Binding State}" Foreground="{StaticResource Warn}" FontSize="12" Margin="0,4,0,0" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></StackPanel>
+<Grid Grid.Column="1" VerticalAlignment="Center">
+<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding BoolValue}" IsEnabled="{Binding Editable}" HorizontalAlignment="Right" Visibility="{Binding IsBoolean, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<ComboBox ItemsSource="{Binding Options}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Current}" IsEnabled="{Binding Editable}" Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" ToolTip="{Binding Rule}" Visibility="{Binding IsTextual, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<TextBlock Text="由原软件管理" Style="{StaticResource Small}" HorizontalAlignment="Right" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></Grid>
+</Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></DockPanel></Border></TabItem>
+<TabItem Header="原神"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[0]}">
+<StackPanel Orientation="Horizontal"><TextBlock Text="原神" Style="{StaticResource H1}"/><TextBlock Text="げんしん" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="{Binding Version, StringFormat=由 {0} 执行。正在接入：目前只读取安装状态，不会运行它。}" Style="{StaticResource Lead}"/>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
+<TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="接下来会做到" Style="{StaticResource H2}"/>
+<TextBlock Text="读取 BetterGI 已有的一条龙方案与配置组，在这里选择今天要跑哪一套。" Style="{StaticResource Small}"/>
+<TextBlock Text="对任务开关等已核对的参数提供修改与双向同步；复杂脚本仍在原软件中编辑。" Style="{StaticResource Small}" Margin="0,4,0,0"/>
+<TextBlock Text="确认启动、提权、日志对应和进程清理之后，再开放真实执行。" Style="{StaticResource Small}" Margin="0,4,0,0"/></StackPanel></Border>
+</StackPanel></ScrollViewer></TabItem>
+<TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
+<StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="{Binding Version, StringFormat=由 {0} 执行。正在接入：目前只读取安装状态，不会运行它。}" Style="{StaticResource Lead}"/>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
+<TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="接下来会做到" Style="{StaticResource H2}"/>
+<TextBlock Text="明确选择账号实例：任何修改只作用于你选中的那个账号。" Style="{StaticResource Small}"/>
+<TextBlock Text="读取应用组、日常开关、体力计划和战斗预设，并提供已核对参数的修改与同步。" Style="{StaticResource Small}" Margin="0,4,0,0"/>
+<TextBlock Text="按 OneDragon v2.6.0 的真实要求核对安装目录，再开放应用组的真实执行。" Style="{StaticResource Small}" Margin="0,4,0,0"/></StackPanel></Border>
+</StackPanel></ScrollViewer></TabItem>
+</TabControl></Grid></TabItem>
+
+<!-- ============ 日常任务 ============ -->
+<TabItem Header="日常任务" Tag="&#xE787;"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="820" HorizontalAlignment="Left">
+<StackPanel Orientation="Horizontal"><TextBlock Text="日常任务" Style="{StaticResource H1}"/><TextBlock Text="にちじょう" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="{Binding Engines[1].Version, StringFormat=崩坏：星穹铁道由 {0} 执行。这里可以单独运行并查看实时过程。}" Style="{StaticResource Lead}"/>
+
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="{Binding March7thTask.Title}" Style="{StaticResource H2}"/>
+<TextBlock Text="按“游戏管理 · 崩坏：星穹铁道”里清体力设置的副本消耗开拓力（需要时借用支援角色），再做每日实训并领取奖励。开拓力不少于 120 才能拿满 500 分。" Style="{StaticResource Small}" Margin="0,0,0,14"/>
+<TextBlock Text="{Binding ManualTestStateText}" Foreground="{StaticResource Warn}" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="{Binding LastRealResultText}" Style="{StaticResource Small}" Margin="0,4,0,14" AutomationProperties.LiveSetting="Polite"/>
+<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏任务" AutomationProperties.Name="确认本次星铁真实任务"/>
+<CheckBox IsChecked="{Binding AllowTemporaryConfigurationThisRun}" Content="{Binding TemporaryConfigurationText}" Visibility="{Binding TemporaryConfigurationVisibility}" Margin="0,8,0,0"/>
+<StackPanel Visibility="{Binding PendingRestoreVisibility}" Margin="0,8,0,0"><TextBlock Text="{Binding PendingRestoreText}" Foreground="{StaticResource Warn}"/>
+<Button Content="恢复临时配置" Command="{Binding RestoreConfigurationCommand}" HorizontalAlignment="Left" Margin="0,8,0,0"/></StackPanel>
+<WrapPanel Margin="0,16,0,0"><Button Style="{StaticResource Primary}" Content="{Binding StartButtonText}" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}"/>
+<Button Style="{StaticResource DangerButton}" Content="紧急停止" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}"/></WrapPanel>
+<TextBlock Text="{Binding March7thConsentNote}" Style="{StaticResource Small}" Margin="0,12,0,0"/>
+</StackPanel></Border>
+
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="运行过程" Style="{StaticResource H2}"/>
+<TextBlock Text="{Binding Queue.Current}"/>
+<TextBlock Text="{Binding Queue.Status}" Style="{StaticResource Small}" Margin="0,2,0,10"/>
+<ListBox ItemsSource="{Binding Queue.LogLines}" Height="220" FontFamily="Consolas, Microsoft YaHei UI" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+<ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" LineHeight="18"/></DataTemplate></ListBox.ItemTemplate></ListBox>
+<WrapPanel Margin="0,12,0,0" IsEnabled="{Binding IsIdle}"><Button Content="导出诊断报告" Command="{Binding ExportDiagnosticsCommand}"/></WrapPanel>
+<TextBlock Text="{Binding ExportStatus}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+</StackPanel></Border>
+
+<Expander><Expander.Header><TextBlock Text="安装核验与安全细节" Foreground="{StaticResource Muted}"/></Expander.Header>
+<StackPanel Margin="0,10,0,0">
+<TextBlock Text="{Binding March7thExecutionBlock}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding Engines[1].InstallPath, StringFormat=安装目录：{0}}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
+<TextBlock Text="{Binding Engines[1].Compatibility, StringFormat=安装检查：{0}}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding ReleaseStatus}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding March7thStopStatus}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding VersionText}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
+<TextBlock Text="{Binding DiagnosticSessionText}" Style="{StaticResource Small}"/>
+</StackPanel></Expander>
+
+</StackPanel></ScrollViewer></TabItem>
+
+<!-- ============ 任务计划 ============ -->
+<TabItem Header="任务计划" Tag="&#xE8FD;"><Grid Margin="40,34,40,20">
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="任务计划" Style="{StaticResource H1}"/><TextBlock Text="けいかく" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="按游戏勾选要做的任务并排好顺序。计划只记录你的选择；标为“候选”的任务还没核对，不会被执行。" Style="{StaticResource Lead}"/></StackPanel>
+<ComboBox Grid.Row="1" ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" Width="320" HorizontalAlignment="Left" Margin="0,0,0,12" AutomationProperties.Name="选择游戏"/>
+<Grid Grid.Row="2" DataContext="{Binding SelectedPlan}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Background="{StaticResource Surface}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="任务列表"><ListBox.ItemTemplate><DataTemplate>
+<Grid Margin="10,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title}"/>
+<StackPanel Grid.Column="1" Margin="4,0,12,0"><TextBlock Text="{Binding Title}" FontSize="15"/><TextBlock Text="{Binding Note}" Style="{StaticResource Small}" FontSize="12"/></StackPanel>
+<TextBlock Grid.Column="2" Text="{Binding Status}" Foreground="{StaticResource Warn}" VerticalAlignment="Center" FontSize="13"/>
+</Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
+<StackPanel Grid.Column="1" Margin="14,0,0,0" MinWidth="120">
+<Button Content="上移" Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,8"/>
+<Button Content="下移" Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,8"/></StackPanel></Grid>
+<StackPanel Grid.Row="3" Margin="0,12,0,0">
+<TextBlock Text="{Binding SelectedPlan.Validation}" Foreground="{StaticResource Warn}" Margin="0,0,0,10" AutomationProperties.LiveSetting="Polite"/>
+<WrapPanel IsEnabled="{Binding IsIdle}"><Button Style="{StaticResource Primary}" Content="保存计划" Command="{Binding SaveTasksCommand}"/><Button Content="放弃修改" Command="{Binding ReloadTasksCommand}"/></WrapPanel></StackPanel>
+</Grid></TabItem>
+
+<!-- ============ 运行日志 ============ -->
+<TabItem Header="运行日志" Tag="&#xE9D2;"><Grid Margin="40,34,40,20" DataContext="{Binding Queue}">
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="运行日志" Style="{StaticResource H1}"/><TextBlock Text="きろく" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，VIvian 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>
+<Border Grid.Row="1" Background="{StaticResource DangerBack}" CornerRadius="10" Padding="16,12" Margin="0,0,0,14">
+<Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
+<StackPanel><TextBlock Text="有运行无法确认已清理。在你确认之前，新的任务不会启动。" Foreground="{StaticResource DangerText}" FontWeight="SemiBold"/>
+<TextBlock Text="请先确认相关引擎和游戏都已关闭。你的确认会单独记录，不会改写原判定。" Foreground="{StaticResource DangerText}" Margin="0,4,0,10"/>
+<Button Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left"/></StackPanel></Border>
+<Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<DockPanel Margin="0,0,10,0"><TextBlock DockPanel.Dock="Top" Text="历史" Style="{StaticResource H2}"/>
+<ListView ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate>
+<Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="4,8,4,10"><StackPanel>
+<TextBlock Text="{Binding When}" Foreground="{StaticResource Sakura}" FontSize="13"/><TextBlock Text="{Binding Summary}" Margin="0,2,0,0"/>
+<TextBlock Text="{Binding RunId, StringFormat=RunId {0:D}}" Style="{StaticResource Small}" FontSize="12"/></StackPanel></Border>
+</DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
+<DockPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock DockPanel.Dock="Top" Text="日志" Style="{StaticResource H2}"/>
+<TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+<ListBox ItemsSource="{Binding LogLines}" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" LineHeight="18"/></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel></Grid>
+<Expander Grid.Row="3" Margin="0,14,0,0"><Expander.Header><TextBlock Text="模拟队列：只用于检验调度、停止与清理逻辑，不会启动游戏" Foreground="{StaticResource Muted}"/></Expander.Header>
+<Grid Margin="0,10,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<ItemsControl ItemsSource="{Binding Games}" IsEnabled="{Binding IsIdle}"><ItemsControl.ItemTemplate><DataTemplate>
+<Border Background="{StaticResource Surface}" CornerRadius="8" Padding="14,8" Margin="0,0,0,6"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<CheckBox IsChecked="{Binding Include}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Name}"/>
+<TextBlock Grid.Column="1" Text="{Binding Name}" VerticalAlignment="Center" Margin="4,0,12,0"/>
+<ComboBox Grid.Column="2" MinWidth="200" ItemsSource="{Binding Source={x:Static local:DemoGameOption.Scenarios}}" DisplayMemberPath="Label" SelectedItem="{Binding Scenario}" AutomationProperties.Name="模拟情形"/>
+</Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+<StackPanel Grid.Column="1" Margin="14,0,0,0" MinWidth="170">
+<Button Content="开始模拟队列" Command="{Binding StartCommand}" IsEnabled="{Binding IsIdle}" Margin="0,0,0,8"/>
+<Button Style="{StaticResource DangerButton}" Content="紧急停止" Command="{Binding StopCommand}" IsEnabled="{Binding IsRunning}" Margin="0,0,0,8" AutomationProperties.HelpText="立即停止，不倒计时"/>
+<TextBlock Text="{Binding Current}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/></StackPanel></Grid></Expander>
+</Grid></TabItem>
+
+<!-- ============ 引擎与环境 ============ -->
+<TabItem Header="引擎与环境" Tag="&#xE950;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding IsIdle}" MaxWidth="980" HorizontalAlignment="Left">
+<StackPanel Orientation="Horizontal"><TextBlock Text="引擎与环境" Style="{StaticResource H1}"/><TextBlock Text="エンジン" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="VIvian 启动时会自动找到三款引擎并核对固定版本。只有自动发现失败时才需要手动填写目录。检查全程只读，不会运行任何程序。" Style="{StaticResource Lead}"/>
+<ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Panel}"><StackPanel>
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<Ellipse Width="10" Height="10" Fill="{Binding Accent}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+<TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/><TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold"/></Grid>
+<TextBlock Text="{Binding PinnedVersion}" Style="{StaticResource Small}" Margin="0,4,0,12"/>
+<DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseEngineFolder" Tag="{Binding}" Margin="8,0,0,0"/>
+<TextBox Text="{Binding InstallPath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name}" ToolTip="引擎安装目录"/></DockPanel>
+<TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,10,0,0"/>
+<TextBlock Text="{Binding PendingWarning}" Foreground="{StaticResource Warn}" FontSize="13" Margin="0,4,0,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Style.Triggers><Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed"/></Trigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+<Expander><Expander.Header><TextBlock Text="检查详情" Foreground="{StaticResource Muted}"/></Expander.Header><ItemsControl ItemsSource="{Binding Checks}" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate>
+<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="90"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<TextBlock Text="{Binding State}" Foreground="{Binding Brush}" FontWeight="SemiBold"/>
+<StackPanel Grid.Column="1"><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Message}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Action}" Foreground="{StaticResource Sakura}" FontSize="13"/></StackPanel>
+</Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
+<Expander><Expander.Header><TextBlock Text="能力与证据" Foreground="{StaticResource Muted}"/></Expander.Header><ItemsControl ItemsSource="{Binding Capabilities}" Margin="0,8,0,0"><ItemsControl.ItemTemplate><DataTemplate>
+<Grid Margin="0,0,0,8"><Grid.ColumnDefinitions><ColumnDefinition Width="220"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Status}" Foreground="{Binding Brush}" FontSize="13"/></StackPanel>
+<TextBlock Grid.Column="1" Text="{Binding Note}" Style="{StaticResource Small}" Margin="10,0,0,0"/>
+</Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
+</StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+<WrapPanel Margin="0,4,0,14"><Button Content="自动填入已发现目录" Command="{Binding AutoDiscoverCommand}" Margin="0,0,10,8"/><Button Style="{StaticResource Primary}" Content="保存路径并检查" Command="{Binding SaveCommand}" Margin="0,0,10,8"/><Button Content="重新检查" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="放弃未保存的修改" Command="{Binding ReloadCommand}" Margin="0,0,10,8"/></WrapPanel>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="星铁官方发行包" Style="{StaticResource H2}"/>
+<TextBlock Text="VIvian 用官方 March7thAssistant_full.zip（v2026.10.31）的 SHA-256 核对安装目录里的 m7a.exe。不解压，不运行；位置会被记住，每次启动自动核对。" Style="{StaticResource Small}" Margin="0,0,0,10"/>
+<DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseReleaseArchive" Margin="8,0,0,0"/><TextBox Text="{Binding ReleaseArchivePath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="官方发行包路径" ToolTip="官方发行包文件路径"/></DockPanel>
+<WrapPanel Margin="0,10,0,0"><Button Content="核对发行包" Command="{Binding VerifyReleaseCommand}"/></WrapPanel>
+<TextBlock Text="{Binding ReleaseStatus}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+</StackPanel></Border>
+</StackPanel></ScrollViewer></TabItem>
+
+<!-- ============ 资源与更新 ============ -->
+<TabItem Header="资源与更新" Tag="&#xE8B7;"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="900" HorizontalAlignment="Left">
+<StackPanel Orientation="Horizontal"><TextBlock Text="资源与更新" Style="{StaticResource H1}"/><TextBlock Text="リソース" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="界面角色、头像和游戏横幅来自你自己的素材文件夹；引擎版本固定为已核对的版本。" Style="{StaticResource Lead}"/>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="界面素材" Style="{StaticResource H2}"/>
+<TextBlock Text="{Binding Theme.Folder, StringFormat=素材文件夹：{0}}" Style="{StaticResource Small}"/>
+<TextBlock Text="放入以下文件后重新打开 VIvian 即可生效（GIF 会自动播放）：" Margin="0,10,0,4"/>
+<TextBlock Text="character.gif / .png：首页左侧的大角色，点击会打开 AI 助手" Style="{StaticResource Small}"/>
+<TextBlock Text="assistant.gif / .png：AI 助手头像和提示栏小人（不放则使用 character）" Style="{StaticResource Small}"/>
+<TextBlock Text="banner-genshin / banner-starrail / banner-zzz（.png/.jpg）：游戏横幅；background.png：背景" Style="{StaticResource Small}"/>
+<TextBlock Text="theme.json：{ &quot;assistantName&quot;: &quot;助手名字&quot;, &quot;title&quot;: &quot;窗口标题&quot; }" Style="{StaticResource Small}"/>
+<WrapPanel Margin="0,12,0,0"><Button Content="创建并复制素材文件夹路径" Click="CopyThemeFolder"/></WrapPanel></StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="引擎版本" Style="{StaticResource H2}"/>
+<ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,0,0,6"><TextBlock Text="{Binding Name}"/><TextBlock Text="{Binding Version}" Style="{StaticResource Small}" HorizontalAlignment="Right"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+<TextBlock Text="引擎更新与回滚尚未开放：换版本前需要重新核对配置格式与任务接口，避免写坏你的设置。" Style="{StaticResource Small}" Margin="0,8,0,0"/></StackPanel></Border>
+</StackPanel></ScrollViewer></TabItem>
+
+<!-- ============ 设置中心 ============ -->
+<TabItem Header="设置中心" Tag="&#xE713;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding IsIdle}" MaxWidth="900" HorizontalAlignment="Left">
+<StackPanel Orientation="Horizontal"><TextBlock Text="设置中心" Style="{StaticResource H1}"/><TextBlock Text="せってい" Style="{StaticResource Kana}"/></StackPanel>
+<TextBlock Text="{Binding VersionText}" Style="{StaticResource Lead}" Margin="0,6,0,2"/>
+<TextBlock Text="{Binding DataDirectoryText}" Style="{StaticResource Small}" Margin="0,0,0,20"/>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="偏好" Style="{StaticResource H2}"/>
+<DockPanel Margin="0,6,0,12"><TextBlock Text="日志保留天数（3–90）" VerticalAlignment="Center" Margin="0,0,12,0"/><TextBox Text="{Binding LogRetentionDays, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" AutomationProperties.Name="日志保留天数"/></DockPanel>
+<CheckBox IsChecked="{Binding IncludeRunHistory}" Content="诊断包中包含运行记录（只有状态与原因代码）" AutomationProperties.Name="诊断包包含运行记录" Margin="0,0,0,14"/>
+<WrapPanel><Button Style="{StaticResource Primary}" Content="保存设置" Command="{Binding SavePreferencesCommand}"/></WrapPanel></StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="诊断" Style="{StaticResource H2}"/>
+<TextBlock Text="导出本地 ZIP：版本、引擎检查、运行记录与最近日志。用户名、计算机名、口令与令牌已去除；不含数据库、上游配置或账号信息，也不会自动上传。" Style="{StaticResource Small}" Margin="0,0,0,12"/>
+<WrapPanel><Button Content="导出诊断包" Command="{Binding ExportDiagnosticsCommand}" Margin="0,0,10,8"/><Button Content="复制导出文件夹路径" Click="CopyExportsPath" Margin="0,0,10,8"/><Button Content="复制日志文件夹路径" Click="CopyLogsPath" Margin="0,0,10,8"/></WrapPanel>
+<TextBlock Text="{Binding ExportStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/></StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<TextBlock Text="基础自检记录" Style="{StaticResource H2}"/><Button Grid.Column="1" Content="刷新" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" Margin="0"/></Grid>
+<TextBlock Text="这里不是游戏任务历史。时间为 UTC。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
+<ListView ItemsSource="{Binding History}" MaxHeight="240" Background="{StaticResource Surface}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="0,6"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="{StaticResource Sakura}" FontSize="13"/><TextBlock Text="{Binding Summary}" Style="{StaticResource Small}"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+</StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="关于" Style="{StaticResource H2}"/>
+<TextBlock Text="VIvian 是三款开源自动化工具的统一控制中心：BetterGI v0.66.0、March7thAssistant v2026.10.31、ZenlessZoneZero-OneDragon v2.6.0。识别、战斗和寻路由它们完成，VIvian 负责配置、编排和结果核验。" Style="{StaticResource Small}"/>
+<TextBlock Text="以普通用户权限运行，不会静默提权；引擎只从官方 GitHub Release 获取；不要把引擎放在符号链接或目录联接后面。OneDragon 官方要求安装路径只含英文字母、数字、下划线和连字符。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+<TextBlock Text="本程序与游戏官方无关，不收集游戏密码，不自动上传诊断信息。游戏自动化存在账号处罚风险，VIvian 不承诺零风险，也不会绕过反作弊。" Foreground="{StaticResource Warn}" FontSize="13" Margin="0,8,0,0"/></StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 </TabControl>
-<Border Grid.Row="2" Background="#18253A" CornerRadius="10" Padding="14" Margin="0,18,0,0"><TextBlock Text="{Binding Status}" AutomationProperties.LiveSetting="Polite"/></Border>
-</Grid></Window>
+
+<!-- Status bar -->
+<Border Grid.Row="2" Background="{StaticResource Navy}" Padding="22,7">
+<Grid><StackPanel Orientation="Horizontal"><Path Width="18" Height="14" Stretch="Uniform" Data="M 2,30 L 6,8 L 16,20 L 24,2 L 32,20 L 42,8 L 46,30 Z" Fill="{StaticResource Gold}" Margin="0,0,10,0"/>
+<TextBlock Text="{Binding VersionText}" Foreground="{StaticResource OnNavy}" FontSize="12" TextWrapping="NoWrap"/></StackPanel>
+<StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+<TextBlock Text="{Binding RunStateText, StringFormat=● 引擎{0}}" Foreground="#9FE3B8" FontSize="12" Margin="0,0,22,0"/>
+<TextBlock Text="数据库：SQLite" Foreground="{StaticResource OnNavy}" FontSize="12" Margin="0,0,22,0"/>
+<TextBlock Text="{Binding ConfigSyncText, StringFormat=配置：{0}}" Foreground="{StaticResource OnNavy}" FontSize="12"/></StackPanel></Grid></Border>
+</Grid></Grid></Window>

@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 $target = 'artifacts/m4-probe'
 dotnet publish tools/VIvian.March7thProbe/VIvian.March7thProbe.csproj -c Release -r win-x64 --self-contained true -o $target

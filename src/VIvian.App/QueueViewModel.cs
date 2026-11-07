@@ -31,7 +31,7 @@ public sealed class DemoGameOption(GameId game) : ObservableObject
     public ScenarioOption Scenario { get => _scenario; set => Set(ref _scenario, value); }
 }
 
-public sealed record RunRow(Guid RunId, string Summary, string When, bool IsSimulation, bool IsUnresolved);
+public sealed record RunRow(Guid RunId, string Summary, string When, bool IsSimulation, bool IsUnresolved, GameId Game = GameId.StarRail);
 
 public sealed class RelayCommand(Action execute) : ICommand
 {
@@ -51,6 +51,7 @@ public sealed class QueueViewModel : ObservableObject
     private readonly IRunHistory _history;
     private readonly Dispatcher _dispatcher;
     private CancellationTokenSource? _stop;
+    private readonly DispatcherTimer _autoCheck;
 
     public QueueViewModel(QueueScheduler scheduler, IRunHistory history)
     {
@@ -63,6 +64,9 @@ public sealed class QueueViewModel : ObservableObject
         StartCommand = new AsyncCommand(() => RunDemoAsync(), HandleError);
         StopCommand = new RelayCommand(EmergencyStop);
         AcknowledgeCommand = new AsyncCommand(AcknowledgeAllAsync, HandleError);
+        // While a run is left unresolved, keep re-checking: the block lifts by itself once March7th has exited.
+        _autoCheck = new DispatcherTimer(TimeSpan.FromSeconds(5), DispatcherPriority.Background,
+            (_, _) => { if (HasUnresolved && !IsRunning) _ = TryAutoResolveAsync(); }, _dispatcher);
     }
 
     public ObservableCollection<DemoGameOption> Games { get; } =
@@ -132,6 +136,7 @@ public sealed class QueueViewModel : ObservableObject
             IsRunning = false;
             Current = "空闲";
             await RefreshAsync();
+            if (!simulation && HasUnresolved) await TryAutoResolveAsync();
         }
     }
 
@@ -163,7 +168,7 @@ public sealed class QueueViewModel : ObservableObject
             try { stop.Cancel(); }
             catch (Exception ex) when (ex is ObjectDisposedException or AggregateException) { /* queue ended or callback failed */ }
             // Delivered to the scheduler (its stop path is running); this is not a claim that anything has ended.
-            ui?.Post(_ => { if (IsRunning) Status = "紧急停止已送达调度器，正在等待引擎结束并核对清理…"; }, null);
+            ui?.Post(_ => { if (IsRunning) Status = "已发出停止：星铁助手会立即松开键鼠、不再操作游戏，VIvian 正在等它退出并自动核对（通常几秒，最长约 60 秒）…"; }, null);
         });
         // Only queued so far: the request may not have reached the scheduler yet.
         Status = "正在发送紧急停止…";
@@ -206,19 +211,73 @@ public sealed class QueueViewModel : ObservableObject
                 (h.LastKnown is { } u ? RunPresentation.Summary(u) : RunPresentation.GameName(h.Game))
                     + (h.PendingOperations > 0 ? " · " + RunPresentation.Reason(ReasonCodes.AdapterUnresponsive) : "")
                     + (h.TerminalPersisted ? "" : " · 记录尚未写入数据库"),
-                "本次会话", h.LastKnown?.IsSimulation ?? false, true));
+                "本次会话", h.LastKnown?.IsSimulation ?? false, true, h.Game));
         Raise(nameof(HasUnresolved));
     }
 
     private async Task RefreshSafeAsync()
     {
         if (IsRunning) return; // refreshed when the queue ends
-        try { await RefreshAsync(); }
+        try { await RefreshAsync(); if (HasUnresolved) await TryAutoResolveAsync(); }
         catch (Exception ex) { Serilog.Log.Warning("Refresh failed: {ErrorType}", ex.GetType().Name); }
     }
 
     private static RunRow ToRow(RunRecord r) => new(r.RunId, RunPresentation.Summary(r),
-        r.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), r.IsSimulation, r.IsUnresolved);
+        r.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), r.IsSimulation, r.IsUnresolved, r.Game);
+
+    /// <summary>Checks, from March7th's own run records, whether its task worker is still alive. Set by the shell.</summary>
+    public Func<string?>? StarRailInstallPath { get; set; }
+    public VIvian.Infrastructure.Engines.UpstreamActivity? LastActivity { get; private set; }
+    private bool _autoResolving;
+
+    /// <summary>
+    /// A stopped or interrupted Star Rail run blocks new runs until nothing it started can still act on the game.
+    /// When March7th's records show (by exact PID and creation time) that no task worker is alive, VIvian records
+    /// that check itself instead of asking the user. Returns true when nothing is left unresolved.
+    /// </summary>
+    public async Task<bool> TryAutoResolveAsync()
+    {
+        if (!HasUnresolved) return true;
+        if (IsRunning || _autoResolving || StarRailInstallPath?.Invoke() is not { Length: > 0 } install) return false;
+        var real = Unresolved.Where(r => !r.IsSimulation && r.Game == GameId.StarRail).ToList();
+        if (real.Count == 0 || real.Count != Unresolved.Count) return false;
+        _autoResolving = true;
+        try
+        {
+            var activity = await Task.Run(() => VIvian.Infrastructure.Engines.March7thUpstreamActivity.Inspect(install));
+            LastActivity = activity;
+            if (activity.State != VIvian.Infrastructure.Engines.UpstreamActivityState.Idle)
+            {
+                Status = activity.State == VIvian.Infrastructure.Engines.UpstreamActivityState.Busy
+                    ? activity.Detail + "它结束后 VIvian 会自动解除暂停。"
+                    : activity.Detail + "请确认星铁助手已关闭后手动确认。";
+                return false;
+            }
+            var refused = 0;
+            foreach (var row in real)
+            {
+                try
+                {
+                    await Task.Run(() => _scheduler.AcknowledgeAsync(row.RunId,
+                        "VIvian 自动核实：星铁助手运行记录中的工作进程（按进程号与启动时间）均已退出。", _history, DateTimeOffset.UtcNow));
+                }
+                catch (InvalidOperationException) { refused++; }
+            }
+            await RefreshAsync();
+            if (refused == 0)
+            {
+                Status = "已自动核实星铁助手已经退出，上次运行的清理已确认，可以直接开始新任务。";
+                Serilog.Log.Information("Unresolved Star Rail runs auto-acknowledged after upstream check");
+            }
+            return !HasUnresolved;
+        }
+        catch (Exception ex)
+        {
+            Serilog.Log.Warning("Auto resolve failed: {ErrorType}", ex.GetType().Name);
+            return false;
+        }
+        finally { _autoResolving = false; }
+    }
 
     private void OnRunChanged(RunUpdate update)
     {

@@ -96,7 +96,7 @@ public partial class App : Application
                 services.AddSingleton(sp => new QueueScheduler(sp.GetRequiredService<IRunJournal>(),
                     sp.GetRequiredService<IProcessSupervisor>(),
                     options: RealExecutionPolicy.BuildPermitsRealExecution ? SchedulerOptions.Default with
-                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(45) }
+                    { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(95) }
                     : SchedulerOptions.Default,
                     admitReal: adapter =>
                         RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));

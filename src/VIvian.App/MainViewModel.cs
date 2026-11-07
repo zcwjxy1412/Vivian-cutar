@@ -53,6 +53,8 @@ public sealed class MainViewModel : ObservableObject
         ? "单次星铁 screen_test 测试包：请先核对官方包与安装路径，再逐项确认本次执行。"
         : "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
     public string Status { get => _status; private set => Set(ref _status, value); }
+    private string _stopKeyText = "运行中可按 F10 立即停止（游戏全屏时也有效）。";
+    public string StopKeyText { get => _stopKeyText; set => Set(ref _stopKeyText, value); }
     private bool _busy;
     public bool IsIdle => !_busy;
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
@@ -259,6 +261,7 @@ public sealed class MainViewModel : ObservableObject
         IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor)
     {
         _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
+        queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
@@ -304,7 +307,8 @@ public sealed class MainViewModel : ObservableObject
             // Results of writing settings are shown in the tip bar too, wherever the user is.
             if (e.PropertyName == nameof(ConfigurationViewModel.Status) && Configuration.Status is { } cs &&
                 (cs.StartsWith("已写入", StringComparison.Ordinal) || cs.StartsWith("没有写入", StringComparison.Ordinal)
-                 || cs.Contains("项修改已排队", StringComparison.Ordinal) || cs.StartsWith("原软件也改了", StringComparison.Ordinal)))
+                 || cs.Contains("项修改已排队", StringComparison.Ordinal) || cs.StartsWith("原软件也改了", StringComparison.Ordinal)
+                 || cs.StartsWith("已从星铁助手同步", StringComparison.Ordinal) || cs.StartsWith("已打开星铁助手", StringComparison.Ordinal)))
                 Status = cs;
             if (e.PropertyName == nameof(ConfigurationViewModel.Status))
             {
@@ -422,9 +426,12 @@ public sealed class MainViewModel : ObservableObject
     private async Task OneClickAsync()
     {
         var card = Engines.Single(e => e.Id == GameId.StarRail);
-        // A previous run whose worker exit could not be confirmed blocks everything until the user confirms.
-        if (Queue.HasUnresolved)
+        // A previous run whose worker exit could not be confirmed blocks everything until it is verified:
+        // first by VIvian itself from March7th's run records, only then by asking the user.
+        if (Queue.HasUnresolved && !await Queue.TryAutoResolveAsync())
         {
+            if (Queue.LastActivity?.State == VIvian.Infrastructure.Engines.UpstreamActivityState.Busy)
+            { Status = Queue.Status; return; }
             if (MessageBox.Show("上一次运行结束时，VIvian 没能确认星铁助手的工作进程已经退出（例如游戏窗口被关掉、任务被中途停止），所以暂停了新任务，防止两个自动化同时操作游戏。\n\n" +
                     "请确认：星铁助手窗口、它的命令行窗口和游戏都已关闭（不确定可在任务管理器里查看是否还有 March7th Assistant）。\n\n已经确认全部关闭了吗？",
                     "VIvian · 上次运行未确认清理", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)

@@ -65,6 +65,27 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         ReadCommand = new(ReadAsync, Error);
         SaveCommand = new(() => { TryApplyPending(interactive: true); return Task.CompletedTask; }, Error);
         OpenSettingsCommand = new(OpenSettings);
+        OpenUpstreamCommand = new(OpenUpstreamAsync, Error);
+    }
+
+    public AsyncCommand OpenUpstreamCommand { get; }
+
+    /// <summary>Opens March7th's own window; whatever is saved there flows back here through the file watcher.</summary>
+    private async Task OpenUpstreamAsync()
+    {
+        if (_isRunning()) { Status = "任务运行中，请等它结束后再打开星铁助手，避免两边同时操作游戏。"; return; }
+        var path = _installPath(_game);
+        if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return; }
+        if (_snapshot is null) await ReadAsync();
+        try
+        {
+            VIvian.Infrastructure.Processes.WindowsProcessSupervisor.OpenUserInterface(path, "March7th Launcher.exe");
+            Status = "已打开星铁助手（如果弹出管理员确认，选“是”）。在那里改的设置一保存，就会自动同步到这里。";
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        { Status = "你在管理员确认里选了“否”，星铁助手没有打开。"; }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or ArgumentException)
+        { Status = "没能打开星铁助手：" + ex.Message; }
     }
 
     public void SelectGame(GameId game)
@@ -89,6 +110,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             _watcher = new FileSystemWatcher(Path.GetDirectoryName(snapshot.Path)!, Path.GetFileName(snapshot.Path))
             { NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size, EnableRaisingEvents = true };
             _watcher.Changed += OnExternalChange;
+            _watcher.Created += OnExternalChange;
             _watcher.Renamed += OnExternalChange;
         }
         if (_timer is null && Application.Current is not null)
@@ -187,33 +209,66 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         finally { _applying = false; Raise(nameof(PendingCount)); }
     }
 
+    private System.Windows.Threading.DispatcherTimer? _externalDebounce;
+    private int _externalRetries;
+
+    /// <summary>Saves arrive as bursts of change events (and a half-written file in between): wait until the file
+    /// has been quiet briefly, then read once.</summary>
     private void OnExternalChange(object sender, FileSystemEventArgs e) =>
-        Application.Current?.Dispatcher.BeginInvoke(Reconcile);
+        Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            _externalRetries = 0;
+            _externalDebounce ??= CreateExternalDebounce();
+            _externalDebounce.Stop();
+            _externalDebounce.Start();
+        });
+
+    private System.Windows.Threading.DispatcherTimer CreateExternalDebounce()
+    {
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(350) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (!Reconcile() && ++_externalRetries < 6) timer.Start(); // still being written: try again shortly
+        };
+        return timer;
+    }
 
     /// <summary>
     /// Brings the page in line with the real file after the original software changed it. Untouched rows show
     /// the new values; pending edits are kept. An edit whose field was also changed elsewhere is reported.
     /// </summary>
-    public void Reconcile()
+    public bool Reconcile()
     {
-        if (_snapshot is null || _applying) return;
+        if (_snapshot is null || _applying) return true;
         ConfigurationSnapshot latest;
         try { latest = _control.ReadConfiguration(_game, _installPath(_game)); }
-        catch (Exception ex) { Status = "原软件修改了配置，重新读取失败：" + ex.Message; return; }
-        if (latest.Revision == _snapshot.Revision) return;
+        catch (Exception ex) { Status = "原软件修改了配置，重新读取失败：" + ex.Message; return false; }
+        if (latest.Revision == _snapshot.Revision) return true;
+        var changed = latest.Values.Where(v => _snapshot.Values.SingleOrDefault(o => o.Schema.Path == v.Schema.Path)?.Value != v.Value)
+            .Select(v => Describe(v)).ToList();
         var edits = Parameters.Where(p => p.IsChanged).ToDictionary(p => p.Path, p => (p.Original, p.Current));
         var conflicts = edits.Where(e => latest.Values.SingleOrDefault(v => v.Schema.Path == e.Key)?.Value != e.Value.Original)
             .Select(e => Parameters.First(p => p.Path == e.Key).Title).ToList();
         if (conflicts.Count > 0)
         {
             Status = $"原软件也改了“{string.Join("”“", conflicts)}”。点“重新读取”查看最新值后再改；不会互相覆盖。";
-            return;
+            return true;
         }
         _snapshot = latest;
         Show(latest, edits.ToDictionary(e => e.Key, e => e.Value.Current));
-        Status = edits.Count > 0
-            ? $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）；{edits.Count} 项修改等待写入。"
-            : $"已同步原软件的修改（{DateTime.Now:HH:mm:ss}）。";
+        var what = changed.Count == 0 ? "" : "：" + string.Join("；", changed.Take(4)) + (changed.Count > 4 ? $" 等 {changed.Count} 项" : "");
+        Status = $"已从星铁助手同步（{DateTime.Now:HH:mm:ss}）" + what
+            + (edits.Count > 0 ? $"。{edits.Count} 项修改等待写入。" : "。");
+        return true;
+    }
+
+    private static string Describe(ConfigurationValue value)
+    {
+        var raw = value.Value ?? "（空）";
+        var shown = raw.Length > 24 ? raw[..24] + "…" : raw;
+        shown = shown switch { "true" => "开", "false" => "关", _ => shown };
+        return $"{value.Schema.Title} → {shown}";
     }
 
     private void OpenSettings()

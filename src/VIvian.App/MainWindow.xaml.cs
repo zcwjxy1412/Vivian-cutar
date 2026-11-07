@@ -24,7 +24,30 @@ public partial class MainWindow : Window
             _closeAfterStop = true;
             Close();
         };
+        // F10 stops a running queue from anywhere, even while the game is full-screen.
+        SourceInitialized += (_, _) =>
+        {
+            _hotkey = new StopHotkey(this, () =>
+            {
+                if (!viewModel.Queue.IsRunning) return;
+                Serilog.Log.Information("Emergency stop requested by F10");
+                viewModel.Queue.EmergencyStop();
+            });
+            viewModel.Queue.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName != nameof(QueueViewModel.IsRunning) || _hotkey is null) return;
+                if (!viewModel.Queue.IsRunning) { _hotkey.Unregister(); return; }
+                if (!_hotkey.Register())
+                    Serilog.Log.Warning("F10 stop key unavailable: owned by another program");
+                viewModel.StopKeyText = _hotkey.IsRegistered
+                    ? "游戏全屏时也可以按 F10 立即停止。"
+                    : "F10 已被其他程序占用（例如星铁助手窗口开着），请用 VIvian 里的“紧急停止”按钮。";
+            };
+        };
+        Closed += (_, _) => _hotkey?.Dispose();
     }
+
+    private StopHotkey? _hotkey;
 
     private void BrowseReleaseArchive(object sender, RoutedEventArgs e)
     {

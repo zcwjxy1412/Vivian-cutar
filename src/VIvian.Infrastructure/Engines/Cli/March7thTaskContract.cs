@@ -20,6 +20,8 @@ public static partial class March7thTaskContract
     private static partial Regex LaunchLine();
 
     /// <summary>只能从本次启动的标准输出中取得编号；调用方须拒绝多个不同编号。</summary>
+    public static bool IsRunId(string? value) => value is not null && RunIdPattern().IsMatch(value);
+
     public static string? CaptureRunId(IEnumerable<string> launchOutput)
     {
         var ids = launchOutput.Select(line => LaunchLine().Match(line)).Where(match => match.Success)

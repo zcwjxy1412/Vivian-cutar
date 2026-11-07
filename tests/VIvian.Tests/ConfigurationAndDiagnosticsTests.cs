@@ -115,12 +115,20 @@ public sealed class ConfigurationStoreTests : IDisposable
         {
             await c.OpenAsync();
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "DROP TABLE task_plans; DROP TABLE app_preferences; PRAGMA user_version=2;";
+            cmd.CommandText = "DROP TABLE batch_execution_records; DROP TABLE account_switch_history; DROP TABLE account_execution_history; DROP TABLE account_task_plans; DROP TABLE account_settings; DROP TABLE game_accounts; DROP TABLE task_plans; DROP TABLE app_preferences; PRAGMA user_version=2;";
             await cmd.ExecuteNonQueryAsync();
         }
         var upgraded = await CreateAsync();
         Assert.Single(await upgraded.ReadRecentRunsAsync(10));
         Assert.Equal(14, (await upgraded.LoadPreferencesAsync()).LogRetentionDays);
+        Assert.True(File.Exists(DbPath + ".pre-m5.1.bak"));
+        await using (var backup = new SqliteConnection("Pooling=False;Mode=ReadOnly;Data Source=" + DbPath + ".pre-m5.1.bak"))
+        {
+            await backup.OpenAsync();
+            using var check = backup.CreateCommand();
+            check.CommandText = "PRAGMA integrity_check;";
+            Assert.Equal("ok", await check.ExecuteScalarAsync());
+        }
     }
 
     [Fact]

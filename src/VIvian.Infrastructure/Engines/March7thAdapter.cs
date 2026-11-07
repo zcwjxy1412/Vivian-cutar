@@ -8,7 +8,8 @@ namespace VIvian.Infrastructure.Engines;
 
 /// <summary>Fixed-release task runner. The scheduler's real-execution admission remains closed until UAC ownership is validated.</summary>
 public sealed class March7thAdapter(string installDirectory, March7thReleaseEvidence release, string task,
-    Func<bool> userConfirmedThisRun, IProcessSupervisor statusSupervisor) : IGameAdapter
+    Func<bool> userConfirmedThisRun, IProcessSupervisor statusSupervisor, Action<IEngineRun>? onStarted = null,
+    March7thCircuitOptions? circuitOptions = null) : IGameAdapter
 {
     public GameId Game => GameId.StarRail;
     public string RuleVersion => "m7a-v2026.10.31-task-1";
@@ -47,12 +48,14 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
         var group = await supervisor.StartAsync(new ProcessLaunchSpec(install.CliPath,
             March7thTaskContract.StartArguments(task), installDirectory), context.RunId, ct).ConfigureAwait(false);
         // The task capability is single-use; exact-RunId control commands are separately Job-supervised.
-        return new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task,
-            March7thDailyTemplates.Read(Path.Combine(installDirectory, "config.yaml")));
+        var run = new March7thRun(context.RunId, group, statusSupervisor, install.CliPath, installDirectory, task,
+            March7thDailyTemplates.Read(Path.Combine(installDirectory, "config.yaml")), circuitOptions);
+        onStarted?.Invoke(run);
+        return run;
     }
 }
 
-internal sealed class March7thRun : IEngineRun
+internal sealed class March7thRun : IEngineRun, IPausableEngineRun
 {
     private readonly ISupervisedProcessGroup _group;
     private readonly IProcessSupervisor _supervisor;
@@ -60,23 +63,33 @@ internal sealed class March7thRun : IEngineRun
     private readonly string _directory;
     private readonly string _task;
     private readonly March7thDailyTemplates _templates;
+    private readonly March7thCircuitOptions _circuitOptions;
     private readonly Channel<RunEvent> _events = Channel.CreateUnbounded<RunEvent>();
     private readonly List<string> _output = [];
     private readonly Task<RunVerdict> _verdict;
     private string? _upstreamRunId;
     private bool _runIdConflict;
     private bool _outputTruncated;
+    private int _resolutionErrors;
+    private int _circuitTripped;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.Now.AddSeconds(-5);
     /// <summary>How long a stopped worker may take to reach its next checkpoint; upstream force-exits after 60 s.</summary>
     internal static TimeSpan WorkerExitWait { get; set; } = TimeSpan.FromSeconds(65);
     internal static TimeSpan StopAcknowledgeWait { get; set; } = TimeSpan.FromSeconds(5);
+    private readonly SemaphoreSlim _controlGate = new(1, 1);
+    private volatile bool _paused;
+    private volatile bool _stopRequested;
+    public bool IsPaused => _paused;
 
     public March7thRun(Guid runId, ISupervisedProcessGroup group, IProcessSupervisor supervisor,
-        string cli, string directory, string task, March7thDailyTemplates? templates = null)
+        string cli, string directory, string task, March7thDailyTemplates? templates = null,
+        March7thCircuitOptions? circuitOptions = null)
     {
         RunId = runId; _group = group; _supervisor = supervisor; _cli = cli; _directory = directory; _task = task;
         _templates = templates ?? March7thDailyTemplates.Default;
+        _circuitOptions = circuitOptions ?? March7thCircuitOptions.Default;
         _verdict = ObserveAsync();
+        _ = Task.Run(MonitorStartupLogAsync);
     }
 
     public Guid RunId { get; }
@@ -117,6 +130,9 @@ internal sealed class March7thRun : IEngineRun
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
             var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates);
+            if (Volatile.Read(ref _circuitTripped) != 0)
+                return new RunVerdict(RunOutcome.Failed, ReasonCodes.ResolutionCircuitOpen,
+                    [new Evidence(RunId, EvidenceKind.FailureReported, "上游日志连续报告游戏分辨率获取失败；已发送本次任务的停止命令。", DateTimeOffset.UtcNow)]);
             // The verdict's reason is part of the run's own record (UI log, database events, diagnostic export).
             _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow,
                 parsed.Outcome == RunOutcome.Success ? RunEventKind.Evidence : RunEventKind.Warning,
@@ -146,10 +162,92 @@ internal sealed class March7thRun : IEngineRun
     private RunVerdict Unknown(string detail) => new(RunOutcome.Indeterminate, ReasonCodes.NoCompletionEvidence,
         [new Evidence(RunId, EvidenceKind.Note, detail, DateTimeOffset.UtcNow)]);
 
+    private async Task MonitorStartupLogAsync()
+    {
+        var readLines = 0;
+        var started = DateTimeOffset.UtcNow;
+        while (!_verdict.IsCompleted && Volatile.Read(ref _circuitTripped) == 0)
+        {
+            var id = UpstreamRunId();
+            if (id is not null)
+            {
+                var path = Path.Combine(March7thUpstreamActivity.RunsDirectory(_directory), id + ".log");
+                try
+                {
+                    if (File.Exists(path) && new FileInfo(path).Length < 5_000_000)
+                    {
+                        var lines = File.ReadAllLines(path);
+                        if (lines.Length < readLines) readLines = 0;
+                        foreach (var line in lines.Skip(readLines))
+                            if (line.Contains("游戏分辨率获取失败", StringComparison.Ordinal) &&
+                                Interlocked.Increment(ref _resolutionErrors) >= _circuitOptions.MaxResolutionFailures)
+                            { await TripCircuitAsync(id, path).ConfigureAwait(false); break; }
+                        readLines = lines.Length;
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                { Note(RunEventKind.Warning, "[VIvian] 无法读取本次上游日志：" + ex.Message); }
+            }
+            if (DateTimeOffset.UtcNow - started > _circuitOptions.MaxStartupWait && id is null)
+            {
+                Note(RunEventKind.Warning, "[VIvian 熔断] 启动等待超时且未取得上游运行编号；正在结束本次拥有的进程。上游清理将保持未确认。");
+                Interlocked.Exchange(ref _circuitTripped, 1);
+                _stopRequested = true;
+                await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
+                return;
+            }
+            await Task.Delay(500).ConfigureAwait(false);
+        }
+    }
+
+    private async Task TripCircuitAsync(string id, string logPath)
+    {
+        if (Interlocked.Exchange(ref _circuitTripped, 1) != 0) return;
+        Note(RunEventKind.Warning, "[VIvian 熔断] 连续两次游戏分辨率获取失败；正在停止当前任务。请检查游戏窗口与显示模式。日志：" + logPath);
+        try { await RequestStopAsync(StopMode.Emergency, CancellationToken.None).ConfigureAwait(false); }
+        catch (Exception ex) { Note(RunEventKind.Warning, "[VIvian 熔断] 停止命令异常：" + ex.Message); }
+    }
+
     public Task<RunVerdict> WaitForVerdictAsync(CancellationToken ct) => _verdict.WaitAsync(ct);
+
+    public async Task<bool> SetPausedAsync(bool pause, CancellationToken ct)
+    {
+        await _controlGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_verdict.IsCompleted || _stopRequested) return false;
+            if (_paused == pause) return true;
+            var id = UpstreamRunId();
+            if (id is null || _stopRequested || March7thUpstreamActivity.WorkerState(_directory, id) != WorkerExitState.Running)
+                return false;
+            var control = March7thUpstreamActivity.TrySendControl(_directory, id, pause ? "pause" : "resume");
+            if (control is null) return false;
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(8);
+            while (DateTimeOffset.UtcNow < deadline && !_verdict.IsCompleted)
+            {
+                if (_stopRequested)
+                {
+                    March7thUpstreamActivity.TrySendStop(_directory, id);
+                    return false;
+                }
+                var state = March7thUpstreamActivity.ReadControlState(control);
+                if (state == (pause ? "paused" : "running"))
+                {
+                    _paused = pause;
+                    Note(RunEventKind.Warning, pause ? "[VIvian] 星铁助手已确认暂停并释放键鼠。" : "[VIvian] 星铁助手已确认继续当前任务。");
+                    return true;
+                }
+                if (state == "stopping") return false;
+                await Task.Delay(100, ct).ConfigureAwait(false);
+            }
+            return false;
+        }
+        finally { _controlGate.Release(); }
+    }
 
     public async Task<StopResult> RequestStopAsync(StopMode mode, CancellationToken ct)
     {
+        _stopRequested = true;
         var id = UpstreamRunId();
         if (id is null) return new(CleanupState.Unconfirmed, ReasonCodes.CleanupUnconfirmed);
         // Fast path: the control file this exact run polls every 0.3 s. Keyboard and mouse are released as soon as

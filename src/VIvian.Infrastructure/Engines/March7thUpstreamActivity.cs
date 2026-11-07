@@ -73,15 +73,20 @@ public static class March7thUpstreamActivity
     /// "stopping". Returns the control file path, or null when it could not be written.
     /// </summary>
     public static string? TrySendStop(string installDirectory, string runId)
+        => TrySendControl(installDirectory, runId, "stop");
+
+    /// <summary>Uses the exact-run control protocol documented by the pinned upstream release.</summary>
+    public static string? TrySendControl(string installDirectory, string runId, string command)
     {
+        if (command is not ("pause" or "resume" or "stop")) return null;
         if (!March7thTaskContract.IsRunId(runId)) return null;
         var runs = RunsDirectory(installDirectory);
         var control = ControlFile(runs, runId);
         if (control is null) return null;
-        var temporary = Path.Combine(runs, $".vivian_stop_{Guid.NewGuid():N}.tmp");
+        var temporary = Path.Combine(runs, $".vivian_control_{Guid.NewGuid():N}.tmp");
         try
         {
-            File.WriteAllText(temporary, "{\"command\": \"stop\"}", Utf8);
+            File.WriteAllText(temporary, "{\"command\": \"" + command + "\"}", Utf8);
             File.Move(temporary, control, overwrite: true);
             return control;
         }

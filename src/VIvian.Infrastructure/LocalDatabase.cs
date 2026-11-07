@@ -7,10 +7,12 @@ namespace VIvian.Infrastructure;
 public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
 {
     private readonly string _connectionString;
+    private readonly string _databasePath;
     public LocalDatabase(string path)
     {
+        _databasePath = Path.GetFullPath(path);
         _connectionString = new SqliteConnectionStringBuilder
-        { DataSource = Path.GetFullPath(path), Mode = SqliteOpenMode.ReadWriteCreate,
+        { DataSource = _databasePath, Mode = SqliteOpenMode.ReadWriteCreate,
           DefaultTimeout = 5, Pooling = false }.ToString();
     }
 
@@ -28,7 +30,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 5;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -75,6 +77,42 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         PRAGMA user_version=3;
         """;
 
+    private const string SchemaV4 = """
+        CREATE TABLE game_accounts(
+            account_id TEXT PRIMARY KEY, game INTEGER NOT NULL CHECK(game BETWEEN 0 AND 2),
+            display_name TEXT NOT NULL, region TEXT NOT NULL DEFAULT '', uid TEXT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
+            auto_run INTEGER NOT NULL DEFAULT 0 CHECK(auto_run IN (0,1)),
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            login_state TEXT NOT NULL DEFAULT 'unverified', verification_state TEXT NOT NULL DEFAULT 'unverified',
+            last_run_at TEXT NULL, last_result TEXT NULL, revision INTEGER NOT NULL DEFAULT 1);
+        CREATE INDEX ix_game_accounts_order ON game_accounts(game,sort_order,account_id);
+        CREATE TABLE account_settings(account_id TEXT PRIMARY KEY REFERENCES game_accounts(account_id) ON DELETE CASCADE,
+            settings_json TEXT NOT NULL DEFAULT '{}', revision INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE account_task_plans(account_id TEXT PRIMARY KEY REFERENCES game_accounts(account_id) ON DELETE CASCADE,
+            plan_json TEXT NOT NULL DEFAULT '[]', revision INTEGER NOT NULL DEFAULT 1);
+        CREATE TABLE account_execution_history(id TEXT PRIMARY KEY, batch_id TEXT NOT NULL,
+            account_id TEXT NULL REFERENCES game_accounts(account_id) ON DELETE SET NULL,
+            run_id TEXT NULL, at TEXT NOT NULL, result TEXT NOT NULL, detail TEXT NOT NULL);
+        CREATE TABLE account_switch_history(id TEXT PRIMARY KEY, from_account_id TEXT NULL, to_account_id TEXT NOT NULL,
+            at TEXT NOT NULL, state TEXT NOT NULL, detail TEXT NOT NULL);
+        CREATE TABLE batch_execution_records(id TEXT PRIMARY KEY, game INTEGER NOT NULL, started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL, state TEXT NOT NULL, current_account_id TEXT NULL, detail TEXT NOT NULL);
+        INSERT INTO game_accounts(account_id,game,display_name,sort_order)
+            VALUES('legacy-genshin',0,'原有账号',0),('legacy-star-rail',1,'原有账号',0),('legacy-zenless',2,'原有账号',0);
+        INSERT INTO account_settings(account_id) SELECT account_id FROM game_accounts;
+        INSERT INTO account_task_plans(account_id,plan_json)
+            SELECT 'legacy-genshin',COALESCE((SELECT plan_json FROM task_plans WHERE game=0),'[]') UNION ALL
+            SELECT 'legacy-star-rail',COALESCE((SELECT plan_json FROM task_plans WHERE game=1),'[]') UNION ALL
+            SELECT 'legacy-zenless',COALESCE((SELECT plan_json FROM task_plans WHERE game=2),'[]');
+        PRAGMA user_version=4;
+        """;
+
+    private const string SchemaV5 = """
+        ALTER TABLE game_accounts ADD COLUMN install_path TEXT NOT NULL DEFAULT '';
+        PRAGMA user_version=5;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -82,6 +120,25 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         {
             cmd.CommandText = "PRAGMA journal_mode=WAL;";
             await cmd.ExecuteScalarAsync(ct);
+        }
+        // SQLite's online backup includes committed WAL pages and is recoverable even if this process crashes
+        // during the migration. Never replace an earlier backup with a possibly damaged later copy.
+        using (var versionCommand = c.CreateCommand())
+        {
+            versionCommand.CommandText = "PRAGMA user_version;";
+            var oldVersion = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(ct));
+            var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak" : ".pre-m5.1.bak");
+            if (oldVersion is > 0 and < CurrentSchemaVersion && !File.Exists(backupPath))
+            {
+                await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
+                { DataSource = backupPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
+                await backup.OpenAsync(ct);
+                c.BackupDatabase(backup);
+                using var check = backup.CreateCommand();
+                check.CommandText = "PRAGMA integrity_check;";
+                if ((string?)await check.ExecuteScalarAsync(ct) != "ok")
+                    throw new IOException("数据库迁移备份未通过完整性检查，已取消迁移。");
+            }
         }
         using var tx = c.BeginTransaction();
         using var command = c.CreateCommand();
@@ -103,6 +160,16 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 2)
         {
             command.CommandText = SchemaV3;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 3)
+        {
+            command.CommandText = SchemaV4;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 4)
+        {
+            command.CommandText = SchemaV5;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

@@ -168,9 +168,8 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
     internal static Func<string, string, bool>? ReplaceOverride { get; set; }
 
     /// <summary>
-    /// Puts the new bytes at <paramref name="path"/>: atomic move of the same-directory temp file, retried briefly
-    /// because Windows antivirus/indexers hold files for a moment; if that keeps failing, overwrite in place (the
-    /// verified backup already exists) — the same fallback the pinned upstream uses (config.py save_config).
+    /// Puts the new bytes at <paramref name="path"/> with a same-directory atomic move, retried briefly when
+    /// Windows antivirus or an indexer holds the file. A persistent lock fails without truncating the original.
     /// </summary>
     private static void WriteVerified(string temporary, string path, byte[] bytes)
     {
@@ -184,10 +183,7 @@ public sealed class VersionedConfigurationControl : IConfigurationControl
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Thread.Sleep(120); }
         }
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
-        stream.SetLength(0);
-        stream.Write(bytes);
-        stream.Flush(flushToDisk: true);
+        throw new IOException("配置文件持续被占用，未执行非原子覆盖；原文件和备份均已保留。");
     }
 
     /// <summary>

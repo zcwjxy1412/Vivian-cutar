@@ -605,8 +605,10 @@ public sealed class QueueScheduler(
             // Off the scheduler's path: an adapter whose enumerator or verdict blocks synchronously cannot stall it.
             var pump = Task.Run(() => PumpEventsAsync(run, watchCts.Token), CancellationToken.None);
             var verdictTask = Task.Run(() => WaitVerdictSafeAsync(run), CancellationToken.None);
-            var timeoutTask = Task.Delay(limits.TaskTimeout, Time, watchCts.Token);
-            var stallTask = StallWatchAsync(limits.StallTimeout, watchCts.Token);
+            var timeoutTask = run is IPausableEngineRun pausable
+                ? ActiveTimeoutWatchAsync(limits.TaskTimeout, pausable, watchCts.Token)
+                : Task.Delay(limits.TaskTimeout, Time, watchCts.Token);
+            var stallTask = StallWatchAsync(limits.StallTimeout, run as IPausableEngineRun, watchCts.Token);
 
             var winner = await Task.WhenAny(verdictTask, timeoutTask, stallTask, emergency).ConfigureAwait(false);
             RunOutcome outcome;
@@ -754,13 +756,33 @@ public sealed class QueueScheduler(
             }
         }
 
-        private async Task StallWatchAsync(TimeSpan stall, CancellationToken ct)
+        private async Task StallWatchAsync(TimeSpan stall, IPausableEngineRun? pausable, CancellationToken ct)
         {
             while (true)
             {
+                if (pausable?.IsPaused == true)
+                {
+                    Interlocked.Exchange(ref _lastActivity, Time.GetTimestamp());
+                    await Task.Delay(TimeSpan.FromSeconds(1), Time, ct).ConfigureAwait(false);
+                    continue;
+                }
                 var idle = Time.GetElapsedTime(Interlocked.Read(ref _lastActivity));
                 if (idle >= stall) return;
                 await Task.Delay(stall - idle, Time, ct).ConfigureAwait(false);
+            }
+        }
+
+        private async Task ActiveTimeoutWatchAsync(TimeSpan limit, IPausableEngineRun run, CancellationToken ct)
+        {
+            var active = TimeSpan.Zero;
+            var previous = Time.GetTimestamp();
+            while (active < limit)
+            {
+                var interval = TimeSpan.FromSeconds(1);
+                await Task.Delay(interval, Time, ct).ConfigureAwait(false);
+                var now = Time.GetTimestamp();
+                if (!run.IsPaused) active += Time.GetElapsedTime(previous, now);
+                previous = now;
             }
         }
 

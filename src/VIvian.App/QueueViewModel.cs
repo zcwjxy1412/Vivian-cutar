@@ -63,6 +63,7 @@ public sealed class QueueViewModel : ObservableObject
         _scheduler.EventReceived += runEvent => Post(() => AppendLog(runEvent.At, runEvent.Message));
         StartCommand = new AsyncCommand(() => RunDemoAsync(), HandleError);
         StopCommand = new RelayCommand(EmergencyStop);
+        PauseCommand = new AsyncCommand(TogglePauseAsync, HandleError);
         AcknowledgeCommand = new AsyncCommand(AcknowledgeAllAsync, HandleError);
         // While a run is left unresolved, keep re-checking: the block lifts by itself once March7th has exited.
         _autoCheck = new DispatcherTimer(TimeSpan.FromSeconds(5), DispatcherPriority.Background,
@@ -76,6 +77,13 @@ public sealed class QueueViewModel : ObservableObject
     public ObservableCollection<RunRow> Unresolved { get; } = [];
     public AsyncCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
+    public AsyncCommand PauseCommand { get; }
+    private IPausableEngineRun? _activeRun;
+    private string _pauseState = "Stopped";
+    public string PauseState { get => _pauseState; private set { Set(ref _pauseState, value); Raise(nameof(PauseButtonText)); Raise(nameof(CanPause)); } }
+    public string PauseButtonText => PauseState == "Paused" ? "继续" : "暂停";
+    public bool CanPause => IsRunning && _activeRun is not null && PauseState is "Running" or "Paused";
+    public void RegisterActiveRun(IEngineRun run) => Post(() => { _activeRun = run as IPausableEngineRun; PauseState = "Running"; });
     public AsyncCommand AcknowledgeCommand { get; }
 
     /// <summary>Delay between simulated steps. Short in the smoke test, readable in normal use.</summary>
@@ -83,7 +91,7 @@ public sealed class QueueViewModel : ObservableObject
     public RunLimits Limits { get; set; } = new(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(8));
 
     private bool _isRunning;
-    public bool IsRunning { get => _isRunning; private set { Set(ref _isRunning, value); Raise(nameof(IsIdle)); } }
+    public bool IsRunning { get => _isRunning; private set { Set(ref _isRunning, value); Raise(nameof(IsIdle)); Raise(nameof(CanPause)); } }
     public bool IsIdle => !IsRunning;
     public bool HasUnresolved => Unresolved.Count > 0;
 
@@ -133,6 +141,8 @@ public sealed class QueueViewModel : ObservableObject
         finally
         {
             _stop = null;
+            _activeRun = null;
+            PauseState = "Stopped";
             IsRunning = false;
             Current = "空闲";
             await RefreshAsync();
@@ -141,6 +151,27 @@ public sealed class QueueViewModel : ObservableObject
     }
 
     private Task? _queueTask;
+
+    private async Task TogglePauseAsync()
+    {
+        if (!CanPause || _activeRun is null) return;
+        var pause = PauseState == "Running";
+        PauseState = pause ? "Pausing" : "Resuming";
+        Status = pause ? "正在等待星铁助手确认暂停…" : "正在等待星铁助手确认继续…";
+        try
+        {
+            var acknowledged = await _activeRun.SetPausedAsync(pause, CancellationToken.None);
+            PauseState = acknowledged ? (pause ? "Paused" : "Running") : "Failed";
+            Status = acknowledged
+                ? pause ? "星铁助手已暂停，键鼠已释放。" : "星铁助手已继续当前任务。"
+                : "星铁助手没有确认暂停状态；请查看运行日志，必要时停止任务。";
+        }
+        catch (Exception ex)
+        {
+            PauseState = "Failed";
+            Status = "暂停控制失败：" + ex.Message;
+        }
+    }
 
     /// <summary>
     /// Application shutdown: requests the emergency stop and waits, bounded, for the queue to end so its final state
@@ -160,6 +191,7 @@ public sealed class QueueViewModel : ObservableObject
     public void EmergencyStop()
     {
         if (_stop is not { } stop) return;
+        PauseState = "Stopping";
         // Sent immediately, no confirmation dialog or countdown. Cancelling runs adapter cancellation callbacks
         // synchronously, so it is done off the UI thread: a slow callback must never freeze the window.
         var ui = SynchronizationContext.Current;

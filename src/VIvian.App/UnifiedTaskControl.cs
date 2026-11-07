@@ -10,7 +10,8 @@ namespace VIvian.App;
 /// <param name="AllowTemporaryConfiguration">The user explicitly allowed the listed temporary upstream setting
 /// changes for this one run; VIvian restores them afterwards.</param>
 public sealed record RealTaskAuthorization(string InstallDirectory, March7thReleaseEvidence Release,
-    Func<bool> StillConfirmed, bool InstallationVerified, bool AllowTemporaryConfiguration = false);
+    Func<bool> StillConfirmed, bool InstallationVerified, bool AllowTemporaryConfiguration = false,
+    IReadOnlyDictionary<string, string>? AccountSettings = null);
 
 /// <summary>Queue result plus what happened to temporary configuration (null when nothing was changed).</summary>
 public sealed record TaskPlanExecution(QueueResult? Queue, RestoreResult? Restore);
@@ -35,12 +36,14 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
     private readonly IProcessSupervisor supervisor;
     private readonly IConfigurationControl _configuration;
     private readonly TemporaryConfigurationManager _temporary;
+    private readonly March7thCircuitOptions _circuitOptions;
 
     public UnifiedTaskControl(QueueViewModel queue, IRunHistory history, IProcessSupervisor supervisor, string dataDirectory,
         IConfigurationControl? configuration = null)
     {
         this.queue = queue; this.history = history; this.supervisor = supervisor;
         _configuration = configuration ?? new VersionedConfigurationControl();
+        _circuitOptions = March7thCircuitOptions.Load(dataDirectory);
         _temporary = new TemporaryConfigurationManager(_configuration, Path.Combine(dataDirectory, "configuration-recovery"),
             Path.Combine(dataDirectory, "configuration-audit"));
     }
@@ -77,7 +80,10 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
         var task = plan.Entries[0].TaskId;
         March7thTaskContract.StartArguments(task);
         var config = ReadConfiguration(GameId.StarRail, authorization.InstallDirectory);
-        var changes = TemporaryConfigurationManager.Plan(config, March7thTaskRequirements.For(task));
+        var desired = authorization.AccountSettings is null
+            ? new Dictionary<string, string>() : new Dictionary<string, string>(authorization.AccountSettings);
+        foreach (var (key, value) in March7thTaskRequirements.For(task)) desired[key] = value;
+        var changes = TemporaryConfigurationManager.Plan(config, desired);
         if (changes.Count > 0 && !authorization.AllowTemporaryConfiguration)
             throw new InvalidOperationException("本任务需要临时修改：" + TemporaryConfigurationManager.Describe(changes, config) +
                 "。请勾选“允许本次临时修改”后再开始。");
@@ -86,7 +92,7 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
         try
         {
             var adapter = new March7thAdapter(authorization.InstallDirectory, authorization.Release, task,
-                authorization.StillConfirmed, supervisor);
+                authorization.StillConfirmed, supervisor, queue.RegisterActiveRun, _circuitOptions);
             result = await queue.RunMarch7thAsync(adapter);
         }
         catch

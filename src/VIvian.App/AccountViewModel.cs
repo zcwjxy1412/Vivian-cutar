@@ -112,6 +112,9 @@ public sealed class AccountViewModel : ObservableObject
     }
     public event Action? SelectionChanged;
 
+    /// <summary>Items for the game page's account selector (restored: the binding was left without a source).</summary>
+    public IReadOnlyList<GameAccount> StarRailAccounts => Rows.Select(r => r.Account).ToArray();
+
     private AccountBatch? _selectedBatch;
     public AccountBatch? SelectedBatch
     {
@@ -153,6 +156,7 @@ public sealed class AccountViewModel : ObservableObject
         }
         Rows.Clear();
         foreach (var row in rows) Rows.Add(row);
+        Raise(nameof(StarRailAccounts));
         var batchId = SelectedBatch?.Id;
         RecentBatches.Clear();
         foreach (var batch in await _database.LoadRecentBatchesAsync()) RecentBatches.Add(batch);

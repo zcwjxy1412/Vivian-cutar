@@ -122,7 +122,28 @@ public sealed class MainViewModel : ObservableObject
     
     private bool _batchRunning;
     private bool _stopBatch;
-    public bool BatchRunning { get => _batchRunning; private set => Set(ref _batchRunning, value); }
+    public bool BatchRunning
+    {
+        get => _batchRunning;
+        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); BatchRunningChanged?.Invoke(); }
+    }
+    /// <summary>Raised when a multi-account batch starts or ends (the F10 key is held for the whole batch).</summary>
+    public event Action? BatchRunningChanged;
+    /// <summary>The home "停止" button and F10 stop whatever is running: a single run or a whole account batch.</summary>
+    public bool CanStopAll => BatchRunning || Queue.IsRunning;
+    public RelayCommand StopAllCommand { get; private set; } = null!;
+
+    public void StopAll()
+    {
+        if (BatchRunning)
+        {
+            _stopBatch = true;
+            _batchCts?.Cancel();
+            BatchStatus = "正在停止批次并等待清理…";
+            Status = BatchStatus;
+        }
+        if (Queue.IsRunning) Queue.EmergencyStop();
+    }
     private string _batchStatus = "尚未运行多账号批次。";
     public string BatchStatus { get => _batchStatus; private set => Set(ref _batchStatus, value); }
     public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = RealExecutionPolicy.BuildPermitsRealExecution
@@ -316,6 +337,8 @@ public sealed class MainViewModel : ObservableObject
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
         RunSelectedAccountsCommand = new(() => RunAsync(RunSelectedAccountsAsync), HandleError);
         StopBatchCommand = new(() => { _stopBatch = true; _batchCts?.Cancel(); Queue.EmergencyStop(); BatchStatus = "正在停止批次并等待清理…"; });
+        StopAllCommand = new(StopAll);
+        Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Raise(nameof(CanStopAll)); };
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
         foreach (var card in Engines)
@@ -454,6 +477,15 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     private async Task OneClickAsync()
     {
+        // One click = every selected Star Rail account, one after another, switched automatically at the login
+        // screen. Without bound accounts the original single-run path below is used unchanged.
+        var starRailCard = Engines.Single(e => e.Id == GameId.StarRail);
+        if (starRailCard.IncludeInOneClick && Accounts.SelectedRows.Count > 0)
+        {
+            await RunSelectedAccountsAsync();
+            Status = BatchStatus;
+            return;
+        }
         if (Accounts.SelectedStarRail is { Id: var selectedId } && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
         { Status = "当前选择的是新增账号。其设置尚未加载到上游；为避免用错账号配置，本次没有启动。"; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
@@ -648,12 +680,12 @@ public sealed class MainViewModel : ObservableObject
         { BatchStatus = "请勾选已绑定登录界面的星铁账号。"; return; }
         var mode = Accounts.ConfigurationMode;
         _batchMode = mode;
-        if (mode == AccountConfigurationMode.Unified)
-        {
-            var first = await Accounts.Database.LoadAccountSettingsAsync(selected[0].Id);
-            if (first.Values.Count == 0)
-            { BatchStatus = "第一个账号没有已保存的配置快照，无法作为统一配置。"; return; }
-        }
+        IReadOnlyDictionary<string, string> firstSnapshot;
+        try { firstSnapshot = await LoadBatchSettingsAsync(selected[0].Account, CancellationToken.None); }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException)
+        { BatchStatus = "读取星铁助手当前配置失败，批次未启动：" + ex.Message; return; }
+        if (firstSnapshot.Count == 0)
+        { BatchStatus = "没有可用的任务配置（账号、原有账号和星铁助手当前配置都为空），批次未启动。"; return; }
         var modeText = mode == AccountConfigurationMode.Unified ? "统一配置（继承第一个账号）" : "各账号独立配置";
         if (MessageBox.Show(
                 $"将串行运行 {selected.Count} 个星铁账号：\n" + string.Join("\n", selected.Select((r, i) => $"{i + 1}. {r.Name}（{r.MaskedPhone}）")) +
@@ -666,7 +698,7 @@ public sealed class MainViewModel : ObservableObject
         {
             var accounts = selected.Select(r => r.Account).ToArray();
             var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, mode,
-                async (account, ct) => (await Accounts.Database.LoadAccountSettingsAsync(account.Id, ct)).Values,
+                LoadBatchSettingsAsync,
                 RunAccountTasksAsync,
                 progress => Application.Current.Dispatcher.Invoke(() => BatchStatus =
                     $"{progress.AccountName} · {BatchProgressText.Describe(progress.State)} · {progress.Detail}"),
@@ -681,6 +713,30 @@ public sealed class MainViewModel : ObservableObject
             _batchCts.Dispose(); _batchCts = null;
             await Accounts.ReloadAsync();
         }
+    }
+
+    private static readonly Guid LegacyStarRail = Guid.Parse("00000000-0000-4000-8000-000000000002");
+
+    /// <summary>
+    /// The task configuration an account runs with. A freshly scanned account has no saved snapshot yet; it then uses
+    /// the original account's settings (which mirror March7thAssistant), and failing that March7thAssistant's current
+    /// configuration, restricted to the parameters VIvian is verified to write. Nothing here writes any profile.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, string>> LoadBatchSettingsAsync(GameAccount account,
+        CancellationToken cancellationToken)
+    {
+        var own = (await Accounts.Database.LoadAccountSettingsAsync(account.Id, cancellationToken)).Values;
+        if (own.Count > 0) return own;
+        if (account.Id != LegacyStarRail)
+        {
+            var legacy = (await Accounts.Database.LoadAccountSettingsAsync(LegacyStarRail, cancellationToken)).Values;
+            if (legacy.Count > 0) return legacy;
+        }
+        var card = Engines.Single(e => e.Id == GameId.StarRail);
+        var upstream = _control.ReadConfiguration(GameId.StarRail, card.InstallPath);
+        return upstream.Values
+            .Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+            .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
     }
 
     private async Task<BatchTaskResult> RunAccountTasksAsync(GameAccount account,

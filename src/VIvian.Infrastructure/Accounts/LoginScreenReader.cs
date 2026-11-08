@@ -98,6 +98,8 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
             var panelLines = await ReadPanelAsync(frame, panel, cancellationToken).ConfigureAwait(false);
             lines = MergeLines(ocr.Lines, panelLines);
         }
+        if (NeedsTitleCornerScan(lines))
+            lines = MergeLines(lines, await ReadCornersAsync(frame, cancellationToken).ConfigureAwait(false));
         var region = panel is null
             ? null
             : new ScreenRegion(panel.X - 8, panel.Y - 8, panel.Width + 16, panel.Height + 16);
@@ -112,6 +114,36 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
             new CaptureCheck(true, true, false, frame.Source == "window-print" ? "print" : "bitblt", 0, 0, false),
             result.Observation?.Accounts ?? []);
         return new LoginScreenView(result, frame, window, panel) { Lines = lines, Evidence = evidence };
+    }
+
+    /// <summary>
+    /// The title screen's account controls are small icons with tiny captions that full-frame OCR often misses.
+    /// When "点击进入" is visible but no logout caption was read, the four corners are read again at 3x.
+    /// </summary>
+    private static bool NeedsTitleCornerScan(IReadOnlyList<RecognizedText> lines)
+    {
+        var compact = lines.Select(l => LoginStateClassifier.Compact(l.Text)).ToArray();
+        return compact.Any(t => t.Contains("点击进入", StringComparison.Ordinal)) &&
+               !compact.Any(t => LoginStateClassifier.LogoutControls.Any(w => t.Contains(w, StringComparison.Ordinal)));
+    }
+
+    private static async Task<IReadOnlyList<RecognizedText>> ReadCornersAsync(CapturedFrame frame,
+        CancellationToken cancellationToken)
+    {
+        var result = new List<RecognizedText>();
+        var w = frame.Width * 32 / 100;
+        var h = frame.Height * 30 / 100;
+        foreach (var (x, y) in new[] { (frame.Width - w, 0), (0, 0), (frame.Width - w, frame.Height - h), (0, frame.Height - h) })
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            const int factor = 3;
+            var crop = frame.Crop(x, y, w, h);
+            var ocr = await WindowsOcrReader.ReadAsync(crop.Scale(factor), cancellationToken).ConfigureAwait(false);
+            if (!ocr.Available) continue;
+            result.AddRange(ocr.Lines.Select(l => new RecognizedText(l.Text, l.X / factor + x, l.Y / factor + y,
+                l.Width / factor, l.Height / factor)));
+        }
+        return result;
     }
 
     private static bool LooksLikeLogin(IReadOnlyList<RecognizedText> lines)

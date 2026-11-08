@@ -150,7 +150,20 @@ public partial class App : Application
                 services.AddSingleton<GamePathProvider>();
                 services.AddSingleton<ILoginSwitchDriver>(sp => new StarRailLoginDriver(
                     sp.GetRequiredService<LoginScreenReader>(), sp.GetRequiredService<IGameSessionVerifier>(),
-                    sp.GetRequiredService<IInputHost>(), sp.GetRequiredService<GamePathProvider>().Get));
+                    sp.GetRequiredService<IInputHost>(), sp.GetRequiredService<GamePathProvider>().Get,
+                    message => Log.Information("Login driver: {Message}", message),
+                    prepareLaunch: () => StarRailResolution.Apply(message => Log.Information("Login driver: {Message}", message)),
+                    saveEvidence: async (view, name) =>
+                    {
+                        // Kept on this computer only (the frame can show a masked phone number or UID); 30 newest.
+                        var dir = Path.Combine(root, "login-evidence");
+                        Directory.CreateDirectory(dir);
+                        var path = await LoginScreenReader.SaveEvidenceAsync(view, dir,
+                            $"{DateTime.Now:yyyyMMdd-HHmmss}-{name}", CancellationToken.None);
+                        Log.Warning("Login flow stopped; screen saved to {Path}", path);
+                        foreach (var old in new DirectoryInfo(dir).GetFiles("*.png").OrderByDescending(f => f.CreationTimeUtc).Skip(30))
+                            old.Delete();
+                    }));
                 services.AddSingleton(sp => new MultiAccountOrchestrator(sp.GetRequiredService<LocalDatabase>(),
                     sp.GetRequiredService<ILoginSwitchDriver>(), sp.GetRequiredService<IInputHostSession>()));
                 services.AddSingleton<IScanWindowShield, MainWindowScanShield>();

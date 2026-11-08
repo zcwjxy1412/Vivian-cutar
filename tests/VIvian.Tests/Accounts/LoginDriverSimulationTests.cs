@@ -173,6 +173,7 @@ public sealed class LoginDriverSimulationTests
         public bool WindowVisible { get; set; } = true;
         public bool ProcessRunning { get; set; } = true;
         public Action? OnEnter { get; set; }
+        public Action? OnStart { get; set; }
 
         public static FakeGame Standard() => new();
 
@@ -238,6 +239,7 @@ public sealed class LoginDriverSimulationTests
         public Task<InputResponse> StartGameAsync(string gamePath, CancellationToken cancellationToken)
         {
             Starts++;
+            OnStart?.Invoke();
             Screen = "titleA";
             ProcessRunning = true;
             WindowVisible = true;

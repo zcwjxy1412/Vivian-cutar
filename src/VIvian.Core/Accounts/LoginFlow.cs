@@ -48,7 +48,8 @@ public static class LoginStateClassifier
 {
     // Texts are compared after removing whitespace. Keep lists short and specific: a broad keyword would make an
     // unrelated in-game panel look like a login screen.
-    private static readonly string[] LogoutControls = ["退出登录", "登出", "切换账号", "注销登录"];
+    /// <summary>Labels of the title-screen control that signs the current account out (never "退出游戏").</summary>
+    public static readonly string[] LogoutControls = ["退出登录", "登出", "切换账号", "注销登录", "退出账号", "更换账号"];
     private static readonly string[] ConfirmButtons = ["确定", "确认"];
     private static readonly string[] AuthWords =
         ["验证码", "安全验证", "拖动滑块", "滑块", "请完成验证", "输入密码", "请输入密码", "短信验证", "人机验证", "实名认证"];
@@ -78,9 +79,12 @@ public static class LoginStateClassifier
             return new(LoginScreenState.AgreementRequired, lines, accounts, null,
                 "出现用户协议/隐私政策确认，需要用户本人同意。");
 
-        var logoutLine = FindAny(lines, LogoutControls);
+        var logoutLine = FindAny(lines.Where(l => !Compact(l.Text).Contains("退出游戏", StringComparison.Ordinal)).ToArray(),
+            LogoutControls);
         var confirm = FindAny(lines, ConfirmButtons);
-        if (logoutLine is not null && confirm is not null && Has("取消") && !Has("点击进入"))
+        // The confirmation dialog is drawn over the dimmed title screen, so "点击进入" may still be readable behind
+        // it; the dialog (confirm + cancel + a logout phrase) takes precedence over the title.
+        if (confirm is not null && Has("取消") && (logoutLine is not null || Has("退出当前")))
             return new(LoginScreenState.LogoutConfirm, lines, accounts, confirm, "退出登录确认框。");
 
         var enterGame = FindAny(lines, ["进入游戏"]);

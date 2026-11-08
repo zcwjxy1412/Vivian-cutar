@@ -9,23 +9,37 @@ public sealed record BatchTaskResult(Guid? RunId, bool Success, bool CleanupConf
 public delegate Task<BatchTaskResult> BatchTaskRunner(GameAccount account,
     IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken);
 
+/// <param name="HostLaunches">How many times the elevated host was started (= UAC prompts) in this batch.</param>
+/// <param name="HostCleanupConfirmed">False when the elevated host exit could not be proven at batch end.</param>
 public sealed record MultiAccountOutcome(Guid BatchId, bool Completed, int Succeeded, int Failed,
-    string Detail);
+    string Detail, int HostLaunches = 0, bool HostCleanupConfirmed = true);
 
 /// <summary>
-/// Serialises real account work: recognise the login screen, select the target account, start one upstream task,
-/// wait for cleanup, then return the game to the login screen before the next account is touched.
-/// This type never clicks by itself; the input host and login driver own native input.
+/// Serialises real account work: reach the saved-account list, select and verify the target account, start one
+/// upstream task, wait for cleanup and configuration restore, then return to the account list before the next account
+/// is touched. The batch stops — it never continues on an uncertain account — when identity cannot be proven, the user
+/// must complete authentication, the screen does not react, cleanup is unconfirmed, or the elevated host is refused or
+/// lost. This type never clicks by itself; the login driver and input host own native input.
 /// </summary>
 public sealed class MultiAccountOrchestrator
 {
     private readonly LocalDatabase _database;
     private readonly ILoginSwitchDriver _driver;
+    private readonly IInputHostSession? _host;
+    private readonly SwitchPolicy _policy;
 
     public MultiAccountOrchestrator(LocalDatabase database, ILoginSwitchDriver driver)
+        : this(database, driver, null)
+    {
+    }
+
+    public MultiAccountOrchestrator(LocalDatabase database, ILoginSwitchDriver driver, IInputHostSession? host,
+        SwitchPolicy? policy = null)
     {
         _database = database;
         _driver = driver;
+        _host = host;
+        _policy = policy ?? new SwitchPolicy();
     }
 
     public async Task<MultiAccountOutcome> ExecuteAsync(GameId game, IReadOnlyList<GameAccount> accounts,
@@ -37,7 +51,7 @@ public sealed class MultiAccountOrchestrator
             throw new ArgumentException("账号列表包含重复项。", nameof(accounts));
         if (accounts.Any(a => a.Game != game)) throw new ArgumentException("账号与游戏不匹配。", nameof(accounts));
 
-        var policy = new SwitchPolicy();
+        var policy = _policy;
         var batch = await _database.BeginBatchAsync(game, mode == AccountConfigurationMode.Unified
             ? "unified" : "independent", cancellationToken);
         var firstSettings = await settings(accounts[0], cancellationToken);
@@ -46,119 +60,160 @@ public sealed class MultiAccountOrchestrator
         var profiles = (await _database.LoadLoginProfilesAsync(game, cancellationToken))
             .ToDictionary(p => p.AccountId);
 
+        _host?.BeginBatch();
         var succeeded = 0;
         var failed = 0;
         var aborted = false;
         var cancelled = false;
-        // Start from a known login screen. This also handles a game left in-world by the user or a previous
-        // interrupted batch; the account currently logged in is never assumed to be the first target.
-        var prepared = await _driver.RestartToLoginAsync(policy, cancellationToken);
-        if (!prepared.Ok)
-        {
-            await RecordAsync(batch, accounts[0], "login_screen_failed", prepared.Detail, cancellationToken);
-            batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = null, State = "failed",
-                Detail = "无法把游戏启动到登录界面：" + prepared.Detail };
-            await _database.SaveBatchAsync(batch, cancellationToken);
-            return new(batch.Id, false, 0, 0, batch.Detail);
-        }
+        string? stopReason = null;
+        GameAccount? previous = null;
+        string? previousUid = null;
+        string? previousMasked = null;
         try
         {
-        for (var index = 0; index < accounts.Count; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var account = accounts[index];
-            var resolved = mode == AccountConfigurationMode.Unified
-                ? BatchConfigurationResolver.Resolve(firstSettings, firstSettings, AccountConfigurationMode.Unified)
-                : BatchConfigurationResolver.Resolve(firstSettings,
-                    await settings(account, cancellationToken), AccountConfigurationMode.Independent);
-
-            if (!profiles.TryGetValue(account.Id, out var profile))
+            // Start from the saved-account list. A game left in-world by the user or an interrupted batch is restarted
+            // and logged out; the account currently logged in is never assumed to be the first target.
+            var prepared = await _driver.RestartToLoginAsync(policy, cancellationToken);
+            if (!prepared.Ok)
             {
-                failed++;
-                await RecordAsync(batch, account, "login_profile_missing",
-                    "此账号尚未绑定登录界面上的已保存账号；请先扫描登录账号。", cancellationToken);
-                progress?.Invoke(P(account, BatchRunState.Failed, "尚未绑定登录界面"));
-                continue;
+                await RecordAsync(batch, accounts[0], prepared.NeedsUser ? "needs_user" : "login_screen_failed",
+                    prepared.Detail, cancellationToken);
+                return await FinishAsync(batch with { State = "failed",
+                    Detail = "无法把游戏带到登录界面（已保存账号选择）：" + prepared.Detail }, false, 0, 0, cancellationToken);
             }
 
-            batch = await StageAsync(batch, account, BatchRunState.Waiting, $"{index + 1}/{accounts.Count}：准备账号",
-                progress, cancellationToken);
-            var ensured = await _driver.EnsureLoginAsync(policy, cancellationToken);
-            if (!ensured.Ok)
+            for (var index = 0; index < accounts.Count; index++)
             {
-                failed++;
-                await RecordAsync(batch, account, "login_screen_failed", ensured.Detail, cancellationToken);
-                progress?.Invoke(P(account, BatchRunState.Failed, ensured.Detail));
-                if (!await TryReturnToLoginAsync(policy, progress, account, cancellationToken)) aborted = true;
-                if (aborted) break;
-                continue;
-            }
+                cancellationToken.ThrowIfCancellationRequested();
+                var account = accounts[index];
+                var resolved = mode == AccountConfigurationMode.Unified
+                    ? BatchConfigurationResolver.Resolve(firstSettings, firstSettings, AccountConfigurationMode.Unified)
+                    : BatchConfigurationResolver.Resolve(firstSettings,
+                        await settings(account, cancellationToken), AccountConfigurationMode.Independent);
 
-            batch = await StageAsync(batch, account, BatchRunState.SelectingAccount, "正在选择账号", progress, cancellationToken);
-            var target = new LoginTarget(profile.NormalizedPhone, profile.MaskedPhone, profile.RowOrder,
-                profile.ObservedUid);
-            var switched = await _driver.SwitchAsync(target, policy, cancellationToken);
-            if (!switched.Ok)
-            {
-                failed++;
-                var reauth = switched.Stage == LoginSwitchStage.WaitingForLogin &&
-                    switched.Detail.Contains("授权", StringComparison.Ordinal);
-                await RecordAsync(batch, account, reauth ? "reauth_required" : "switch_failed", switched.Detail,
+                if (!profiles.TryGetValue(account.Id, out var profile))
+                {
+                    failed++;
+                    await RecordAsync(batch, account, "login_profile_missing",
+                        "此账号尚未绑定登录界面上的已保存账号；请先扫描登录账号。", cancellationToken);
+                    progress?.Invoke(P(account, BatchRunState.Failed, "尚未绑定登录界面"));
+                    continue;
+                }
+
+                batch = await StageAsync(batch, account, BatchRunState.RecognizingLogin,
+                    $"{index + 1}/{accounts.Count}：确认账号选择界面", progress, cancellationToken);
+                var ensured = await _driver.EnsureLoginAsync(policy, cancellationToken);
+                if (!ensured.Ok)
+                {
+                    failed++;
+                    await RecordAsync(batch, account, ensured.NeedsUser ? "needs_user" : "login_screen_failed",
+                        ensured.Detail, cancellationToken);
+                    progress?.Invoke(P(account, ensured.NeedsUser ? BatchRunState.ReauthorizationRequired
+                        : BatchRunState.Failed, ensured.Detail));
+                    aborted = true;
+                    stopReason = ensured.Detail;
+                    break;
+                }
+
+                batch = await StageAsync(batch, account, BatchRunState.SelectingAccount, "正在选择并核对账号",
+                    progress, cancellationToken);
+                var target = new LoginTarget(profile.NormalizedPhone, profile.MaskedPhone, profile.RowOrder,
+                    profile.ObservedUid, previousMasked, previousUid);
+                var switched = await _driver.SwitchAsync(target, policy, cancellationToken);
+                var evidenceJson = switched.Evidence?.ToJson() ?? "";
+                if (!switched.Ok)
+                {
+                    failed++;
+                    var state = switched.NeedsUser ? "needs_user" : switched.Fatal ? "identity_uncertain" : "switch_failed";
+                    await RecordAsync(batch, account, state, switched.Detail, cancellationToken);
+                    await _database.RecordAccountSwitchAsync(previous?.Id, account.Id, state,
+                        Combine(switched.Detail, evidenceJson), cancellationToken);
+                    progress?.Invoke(P(account, switched.NeedsUser ? BatchRunState.ReauthorizationRequired
+                        : BatchRunState.Failed, switched.Detail));
+                    if (switched.Fatal)
+                    {
+                        aborted = true;
+                        stopReason = switched.Detail;
+                        break;
+                    }
+                    // Not fatal: nothing was entered, the game is still on the account list.
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(switched.Uid))
+                    await _database.SaveObservedUidAsync(account.Id, switched.Uid, cancellationToken);
+                await _database.RecordAccountSwitchAsync(previous?.Id, account.Id, "logged_in",
+                    Combine(switched.Detail, evidenceJson), cancellationToken);
+
+                batch = await StageAsync(batch, account, BatchRunState.LoadingConfiguration,
+                    switched.Detail + " 加载配置", progress, cancellationToken);
+                batch = await StageAsync(batch, account, BatchRunState.RunningTasks, "正在执行星铁日常", progress,
                     cancellationToken);
-                await _database.RecordAccountSwitchAsync(index == 0 ? null : accounts[index - 1].Id, account.Id,
-                    reauth ? "reauth_required" : "switch_failed", switched.Detail, cancellationToken);
-                progress?.Invoke(P(account, reauth ? BatchRunState.ReauthorizationRequired : BatchRunState.Failed, switched.Detail));
-                if (!await TryReturnToLoginAsync(policy, progress, account, cancellationToken)) { aborted = true; break; }
-                continue;
-            }
+                BatchTaskResult result;
+                try
+                {
+                    result = await runner(account, resolved, cancellationToken);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    failed++;
+                    await RecordAsync(batch, account, "failed", ex.Message, cancellationToken);
+                    progress?.Invoke(P(account, BatchRunState.Failed, ex.Message));
+                    aborted = true;
+                    stopReason = "任务异常：" + ex.Message;
+                    break;
+                }
 
-            if (!string.IsNullOrWhiteSpace(switched.Uid))
-                await _database.SaveObservedUidAsync(account.Id, switched.Uid, cancellationToken);
-            await _database.RecordAccountSwitchAsync(index == 0 ? null : accounts[index - 1].Id, account.Id,
-                "logged_in", "已通过登录界面进入游戏。", cancellationToken);
+                if (result.Success && result.CleanupConfirmed && result.ConfigurationRestored)
+                {
+                    succeeded++;
+                    await RecordAsync(batch, account, "success", result.Detail, cancellationToken, result.RunId);
+                    progress?.Invoke(P(account, BatchRunState.Completed, result.Detail));
+                }
+                else
+                {
+                    failed++;
+                    await RecordAsync(batch, account, "failed", result.Detail, cancellationToken, result.RunId);
+                    progress?.Invoke(P(account, BatchRunState.Failed, result.Detail));
+                }
 
-            batch = await StageAsync(batch, account, BatchRunState.LoadingConfiguration,
-                $"已登录{(string.IsNullOrWhiteSpace(switched.Uid) ? "" : "（UID " + switched.Uid + "）")}；加载配置",
-                progress, cancellationToken);
-            batch = await StageAsync(batch, account, BatchRunState.RunningTasks, "正在执行星铁日常", progress, cancellationToken);
-            BatchTaskResult result;
-            try
-            {
-                result = await runner(account, resolved, cancellationToken);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                failed++;
-                await RecordAsync(batch, account, "failed", ex.Message, cancellationToken);
-                progress?.Invoke(P(account, BatchRunState.Failed, ex.Message));
-                aborted = true;
-                break;
-            }
+                if (!result.CleanupConfirmed || !result.ConfigurationRestored)
+                {
+                    aborted = true;
+                    stopReason = !result.CleanupConfirmed
+                        ? "上一账号的任务进程清理未确认，已阻断下一个账号。"
+                        : "上一账号的临时配置未恢复，已阻断下一个账号。";
+                    break;
+                }
 
-            if (result.Success && result.CleanupConfirmed && result.ConfigurationRestored)
-            {
-                succeeded++;
-                await RecordAsync(batch, account, "success", result.Detail, cancellationToken, result.RunId);
-                progress?.Invoke(P(account, BatchRunState.Completed, result.Detail));
-            }
-            else
-            {
-                failed++;
-                await RecordAsync(batch, account, "failed", result.Detail, cancellationToken, result.RunId);
-                progress?.Invoke(P(account, BatchRunState.Failed, result.Detail));
-            }
+                previous = account;
+                previousMasked = profile.MaskedPhone;
+                previousUid = string.IsNullOrWhiteSpace(switched.Uid) ? null : switched.Uid;
 
-            if (!result.CleanupConfirmed || !result.ConfigurationRestored)
-            {
-                aborted = true;
-                break;
+                if (index + 1 < accounts.Count)
+                {
+                    batch = await StageAsync(batch, account, BatchRunState.SwitchingAccount,
+                        "正在退出当前账号并返回账号选择界面", progress, cancellationToken);
+                    var returned = await _driver.RestartToLoginAsync(policy, cancellationToken);
+                    if (!returned.Ok)
+                    {
+                        progress?.Invoke(P(account, BatchRunState.Failed, "无法确认已返回账号选择界面：" + returned.Detail));
+                        aborted = true;
+                        stopReason = "无法返回账号选择界面：" + returned.Detail;
+                        break;
+                    }
+                }
             }
-
-            batch = await StageAsync(batch, account, BatchRunState.StoppingTasks, "正在确认清理并返回登录界面",
-                progress, cancellationToken);
-            if (!await TryReturnToLoginAsync(policy, progress, account, cancellationToken)) { aborted = true; break; }
         }
+        catch (InputHostUnavailableException ex)
+        {
+            aborted = true;
+            stopReason = ex.Message;
+            var current = batch.CurrentAccountId is { } id ? accounts.FirstOrDefault(a => a.Id == id) ?? accounts[0] : accounts[0];
+            await RecordAsync(batch, current, ex.Kind == InputHostFailureKind.Refused ? "uac_refused" : "input_host_unavailable",
+                ex.Message, CancellationToken.None);
+            progress?.Invoke(P(current, BatchRunState.ReauthorizationRequired, ex.Message));
         }
         catch (OperationCanceledException)
         {
@@ -167,27 +222,43 @@ public sealed class MultiAccountOrchestrator
         }
 
         var completed = !aborted && !cancelled;
-        batch = batch with
+        return await FinishAsync(batch with
         {
-            UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = null,
             State = completed ? "finished" : "stopped",
             Detail = $"完成 {succeeded}，失败 {failed}。" +
-                     (cancelled ? " 用户停止了批次。" : aborted ? " 批次因资源清理或登录状态不明确而停止。" : "")
-        };
-        // A user stop has already cancelled this token; the final bookkeeping must still be written.
-        await _database.SaveBatchAsync(batch, CancellationToken.None);
-        return new(batch.Id, completed, succeeded, failed, batch.Detail);
+                     (cancelled ? " 用户停止了批次。" : aborted ? " 批次已停止：" + stopReason : "")
+        }, completed, succeeded, failed, CancellationToken.None);
     }
 
-    private async Task<bool> TryReturnToLoginAsync(SwitchPolicy policy, Action<BatchAccountProgress>? progress,
-        GameAccount account, CancellationToken cancellationToken)
+    private async Task<MultiAccountOutcome> FinishAsync(AccountBatch batch, bool completed, int succeeded, int failed,
+        CancellationToken cancellationToken)
     {
-        progress?.Invoke(P(account, BatchRunState.SwitchingAccount, "正在返回登录界面"));
-        var returned = await _driver.RestartToLoginAsync(policy, cancellationToken);
-        if (returned.Ok) return true;
-        progress?.Invoke(P(account, BatchRunState.Failed, "无法确认已返回登录界面：" + returned.Detail));
-        return false;
+        var launches = _host?.LaunchCount ?? 0;
+        var hostClean = true;
+        if (_host is not null)
+        {
+            try { hostClean = await _host.EndBatchAsync(CancellationToken.None); }
+            catch { hostClean = false; }
+        }
+        var detail = batch.Detail + $" 本批次管理员授权请求 {launches} 次。";
+        if (!hostClean)
+        {
+            completed = false;
+            detail += " 管理员输入宿主退出未能确认，请在任务管理器检查残留的 VIvian 进程。";
+        }
+        var final = batch with
+        {
+            UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = null,
+            State = batch.State == "finished" && !completed ? "stopped" : batch.State,
+            Detail = detail,
+        };
+        // A user stop has already cancelled the batch token; the final bookkeeping must still be written.
+        await _database.SaveBatchAsync(final, cancellationToken);
+        return new(final.Id, completed, succeeded, failed, final.Detail, launches, hostClean);
     }
+
+    private static string Combine(string detail, string evidence) =>
+        string.IsNullOrEmpty(evidence) ? detail : detail + "\n证据：" + evidence;
 
     private static BatchAccountProgress P(GameAccount account, BatchRunState state, string detail) =>
         new(account.Id, account.Name, state, detail, 1, DateTimeOffset.UtcNow);

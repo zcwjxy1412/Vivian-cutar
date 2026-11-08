@@ -2,8 +2,30 @@ using System.Diagnostics;
 
 namespace VIvian.Infrastructure.Accounts;
 
+/// <summary>
+/// One Star Rail top-level window. <paramref name="ProcessStartedAt"/> pins the process identity: a later process
+/// that happens to reuse the same PID has a different start time and is never treated as the same game.
+/// </summary>
 public sealed record StarRailWindowInfo(IntPtr Handle, int ProcessId, string Title, int ClientWidth,
-    int ClientHeight, int OriginX, int OriginY);
+    int ClientHeight, int OriginX, int OriginY, DateTimeOffset? ProcessStartedAt = null);
+
+/// <summary>Seam over the static window lookup so the login state machine can be tested without a desktop.</summary>
+public interface IGameWindowLocator
+{
+    StarRailWindowInfo? Find();
+    /// <summary>True when a StarRail process exists even without a usable window (for example still loading).</summary>
+    bool IsProcessRunning();
+    /// <summary>True only while the exact process (PID + start time) is still alive.</summary>
+    bool IsSameProcessAlive(StarRailWindowInfo window);
+}
+
+public sealed class StarRailWindowLocator : IGameWindowLocator
+{
+    public static StarRailWindowLocator Instance { get; } = new();
+    public StarRailWindowInfo? Find() => StarRailWindow.Find();
+    public bool IsProcessRunning() => StarRailWindow.IsProcessRunning();
+    public bool IsSameProcessAlive(StarRailWindowInfo window) => StarRailWindow.IsSameProcessAlive(window);
+}
 
 /// <summary>Locates and activates the Star Rail window. No game memory or login token is read.</summary>
 public static class StarRailWindow
@@ -22,23 +44,71 @@ public static class StarRailWindow
             {
                 using var process = Process.GetProcessById((int)processId);
                 if (!string.Equals(process.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase)) return true;
-                if (!WindowsNative.GetClientRect(handle, out var client) || client.Width <= 0 || client.Height <= 0)
-                    return true;
+                if (!WindowsNative.GetClientRect(handle, out var client)) return true;
+                // A minimised window reports an empty client rectangle; it is still the game and must be found
+                // so the caller can explain the problem instead of claiming the game is not running.
                 var origin = new WindowsNative.Point(0, 0);
-                if (!WindowsNative.ClientToScreen(handle, ref origin)) return true;
+                WindowsNative.ClientToScreen(handle, ref origin);
                 var title = new System.Text.StringBuilder(256);
                 WindowsNative.GetWindowText(handle, title, title.Capacity);
                 found = new StarRailWindowInfo(handle, process.Id, title.ToString(), client.Width,
-                    client.Height, origin.X, origin.Y);
+                    client.Height, origin.X, origin.Y, StartTime(process));
                 return false;
             }
             catch (InvalidOperationException) { return true; }
+            catch (ArgumentException) { return true; }
             catch (System.ComponentModel.Win32Exception) { return true; }
         }, IntPtr.Zero);
         return found;
     }
 
     public static bool IsRunning => Find() is not null;
+
+    /// <summary>
+    /// Detection only: true when any top-level window, visible or hidden, belongs to a StarRail process. Processes
+    /// are deliberately not looked up by name (see ProcessSafetyGuardTests); nothing is ever terminated from this.
+    /// </summary>
+    public static bool IsProcessRunning()
+    {
+        var found = false;
+        WindowsNative.EnumWindows((handle, _) =>
+        {
+            WindowsNative.GetWindowThreadProcessId(handle, out var processId);
+            try
+            {
+                using var process = Process.GetProcessById((int)processId);
+                if (!string.Equals(process.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase)) return true;
+                found = true;
+                return false;
+            }
+            catch (ArgumentException) { return true; }
+            catch (InvalidOperationException) { return true; }
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    public static bool IsSameProcessAlive(StarRailWindowInfo window)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(window.ProcessId);
+            if (process.HasExited) return false;
+            if (!string.Equals(process.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase)) return false;
+            var started = StartTime(process);
+            return window.ProcessStartedAt is null || started is null || started == window.ProcessStartedAt;
+        }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    /// <summary>Start time needs only PROCESS_QUERY_LIMITED_INFORMATION, which works across integrity levels.</summary>
+    public static DateTimeOffset? StartTime(Process process)
+    {
+        try { return new DateTimeOffset(process.StartTime.ToUniversalTime(), TimeSpan.Zero); }
+        catch (System.ComponentModel.Win32Exception) { return null; }
+        catch (InvalidOperationException) { return null; }
+        catch (NotSupportedException) { return null; }
+    }
 
     public static async Task<StarRailWindowInfo?> WaitForWindowAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
@@ -53,14 +123,17 @@ public static class StarRailWindow
         return null;
     }
 
-    public static bool BringToFront(IntPtr handle)
+    /// <summary>
+    /// Brings the game forward for one input. The window is raised above others only while the click happens and
+    /// is returned to the normal z-order afterwards, so the game never stays "always on top".
+    /// </summary>
+    public static bool BringToFront(IntPtr handle, bool keepRaised = false)
     {
         if (handle == IntPtr.Zero || !WindowsNative.IsWindow(handle)) return false;
         if (WindowsNative.IsIconic(handle)) WindowsNative.ShowWindow(handle, WindowsNative.SwRestore);
-        // Keep the game above VIvian while it is captured. Demoting it to non-topmost would put it
-        // behind a topmost VIvian window and BitBlt would capture the wrong pixels.
         WindowsNative.SetWindowPos(handle, WindowsNative.HwndTopmost, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0040);
         WindowsNative.SetForegroundWindow(handle);
+        if (!keepRaised) WindowsNative.SetWindowPos(handle, WindowsNative.HwndNotTopmost, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010 | 0x0040);
         return WindowsNative.GetForegroundWindow() == handle;
     }
 

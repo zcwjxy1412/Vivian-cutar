@@ -78,7 +78,14 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
     /// Terminates a Star Rail process after checking both its image name and executable file name. Used by the
     /// elevated input host, which can reach an already-running game that the medium-integrity VIvian cannot.
     /// </summary>
-    public static bool TerminateStarRail(int processId, out string detail)
+    public static bool TerminateStarRail(int processId, out string detail) =>
+        TerminateStarRail(processId, 0, out detail);
+
+    /// <summary>
+    /// As above, and when <paramref name="expectedStartUtcTicks"/> is known the process start time must match it,
+    /// so a recycled PID belonging to a later process is refused rather than terminated.
+    /// </summary>
+    public static bool TerminateStarRail(int processId, long expectedStartUtcTicks, out string detail)
     {
         detail = "";
         try
@@ -88,6 +95,17 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
             {
                 detail = "拒绝结束非星铁进程。";
                 return false;
+            }
+            if (expectedStartUtcTicks != 0)
+            {
+                long actual;
+                try { actual = process.StartTime.ToUniversalTime().Ticks; }
+                catch (Exception) { detail = "无法读取星铁进程启动时间，无法证明进程身份，拒绝结束。"; return false; }
+                if (actual != expectedStartUtcTicks)
+                {
+                    detail = "进程号已被另一个星铁进程复用（启动时间不一致），拒绝结束。";
+                    return false;
+                }
             }
             // Process.MainModule can itself fail with access denied; open an explicit handle with
             // PROCESS_TERMINATE through the elevated host instead of using the limited query handle.

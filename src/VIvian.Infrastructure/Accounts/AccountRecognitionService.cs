@@ -50,7 +50,14 @@ public sealed class AccountRecognitionService
     {
         var observation = view.Result.Observation;
         if (!view.Result.Success || observation is null)
+        {
+            // A failed scan is still worth recording: the window identity and ownership check explain why.
+            if (view.Evidence is { } failedEvidence)
+                await _database.RecordScanSessionAsync(GameId.StarRail, source, failedEvidence.ClientWidth,
+                    failedEvidence.ClientHeight, 0, "失败：" + view.Result.Detail + " | " + failedEvidence.Describe(),
+                    cancellationToken);
             return new(false, view.Result.Detail, view, [], []);
+        }
 
         var warnings = new List<string>();
         var registered = new List<GameAccount>();
@@ -101,7 +108,8 @@ public sealed class AccountRecognitionService
 
         await _database.RecordScanSessionAsync(GameId.StarRail, source, observation.WindowWidth,
             observation.WindowHeight, observation.Accounts.Count,
-            warnings.Count == 0 ? "识别完成。" : string.Join(" ", warnings), cancellationToken);
+            (warnings.Count == 0 ? "识别完成。" : string.Join(" ", warnings)) +
+            (view.Evidence is { } evidence ? " | " + evidence.Describe() : ""), cancellationToken);
 
         var detail = registered.Count == 0
             ? "识别到账号，但没有新建档案。" + (warnings.Count > 0 ? " " + string.Join(" ", warnings) : "")

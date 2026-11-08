@@ -42,6 +42,9 @@ public enum LoginScanFailure
     LoginScreenNotFound,
     NoAccountList,
     AmbiguousAccount,
+    WindowMinimized,
+    WindowOccluded,
+    CapturedWrongWindow,
 }
 
 public sealed record LoginScanResult(bool Success, LoginScanFailure Failure, string Detail,

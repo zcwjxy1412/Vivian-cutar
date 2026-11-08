@@ -127,7 +127,7 @@ public static class InputHostServer
     }
 
     private static InputResponse Kill(InputRequest request) =>
-        Processes.WindowsProcessSupervisor.TerminateStarRail(request.ProcessId, out var detail)
+        Processes.WindowsProcessSupervisor.TerminateStarRail(request.ProcessId, request.ProcessStartUtcTicks, out var detail)
             ? InputResponse.Success(detail)
             : InputResponse.Failure(detail);
 

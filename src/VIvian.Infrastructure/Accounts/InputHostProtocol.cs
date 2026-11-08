@@ -6,7 +6,9 @@ namespace VIvian.Infrastructure.Accounts;
 /// The elevated input host accepts a deliberately small command set. It never accepts a path, a command line
 /// or an arbitrary process name, so a compromised UI process cannot turn it into a general-purpose launcher.
 /// </summary>
-public sealed record InputRequest(string Op, long Hwnd = 0, int X = 0, int Y = 0, int ProcessId = 0, string? Path = null);
+/// <remarks><c>ProcessStartUtcTicks</c> pins the process identity for "kill"; 0 means the caller could not read it.</remarks>
+public sealed record InputRequest(string Op, long Hwnd = 0, int X = 0, int Y = 0, int ProcessId = 0, string? Path = null,
+    long ProcessStartUtcTicks = 0);
 
 public sealed record InputResponse(bool Ok, string? Error = null, string? Detail = null)
 {

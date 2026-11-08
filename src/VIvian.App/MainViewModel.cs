@@ -657,7 +657,7 @@ public sealed class MainViewModel : ObservableObject
         var modeText = mode == AccountConfigurationMode.Unified ? "统一配置（继承第一个账号）" : "各账号独立配置";
         if (MessageBox.Show(
                 $"将串行运行 {selected.Count} 个星铁账号：\n" + string.Join("\n", selected.Select((r, i) => $"{i + 1}. {r.Name}（{r.MaskedPhone}）")) +
-                $"\n\n模式：{modeText}\n切换账号时会自动操作登录界面，首次需要一次管理员授权（UAC）。\n不会读取或复制登录令牌。确认开始？",
+                $"\n\n模式：{modeText}\n切换账号时会自动退出当前账号并在登录界面选择下一个账号，本批次正常只需一次管理员授权（UAC）。\n若拒绝授权、出现验证码/密码或无法确认账号身份，批次会停止，不会反复弹窗，也不会在不确定的账号上执行。\n不会读取或复制登录令牌。确认开始？",
                 "VIvian · 星铁多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
         { BatchStatus = "已取消批次。"; return; }
 

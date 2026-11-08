@@ -55,11 +55,13 @@ public sealed class AccountViewModel : ObservableObject
 {
     private readonly LocalDatabase _database;
     private readonly AccountRecognitionService _recognition;
+    private readonly IScanWindowShield _shield;
 
-    public AccountViewModel(LocalDatabase database, AccountRecognitionService recognition)
+    public AccountViewModel(LocalDatabase database, AccountRecognitionService recognition, IScanWindowShield shield)
     {
         _database = database;
         _recognition = recognition;
+        _shield = shield;
         ScanCommand = new(ScanAsync, Error);
         ImportCommand = new(ImportAsync, Error);
         SaveNameCommand = new(SaveNameAsync, Error);
@@ -163,12 +165,19 @@ public sealed class AccountViewModel : ObservableObject
 
     private async Task ScanAsync()
     {
-        Status = "正在识别星铁登录界面（本地 OCR）…";
-        var result = await _recognition.ScanAndRegisterAsync(CancellationToken.None);
+        Status = "正在识别星铁登录界面（本地 OCR）：VIvian 会暂时最小化，截图只在本机处理…";
+        AccountRecognitionService.RegistrationResult result;
+        // VIvian runs unelevated and must not raise the elevated game; it steps aside instead and verifies that the
+        // captured pixels belong to the game window before reading them.
+        await using (await _shield.HideAsync(CancellationToken.None))
+            result = await _recognition.ScanAndRegisterAsync(CancellationToken.None);
         await ReloadAsync();
+        var where = result.View?.Evidence is { } evidence
+            ? $"（游戏窗口 pid {evidence.ProcessId}，{evidence.ClientWidth}x{evidence.ClientHeight}，{(evidence.Check.Method == "print" ? "窗口渲染" : $"屏幕截取 {evidence.Check.SamplesOwnedByGame}/{evidence.Check.Samples} 校验点")}）"
+            : "";
         Status = result.Success
-            ? result.Detail + (result.Warnings.Count > 0 ? " " + string.Join(" ", result.Warnings) : "")
-            : "扫描失败：" + result.Detail;
+            ? result.Detail + where + (result.Warnings.Count > 0 ? " " + string.Join(" ", result.Warnings) : "")
+            : "扫描失败：" + result.Detail + where;
     }
 
     private async Task ImportAsync()

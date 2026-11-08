@@ -8,6 +8,9 @@ public sealed record LoginScreenView(LoginScanResult Result, CapturedFrame? Fram
     /// <summary>All OCR lines with their client-area boxes, so the controller can locate buttons by text.</summary>
     public IReadOnlyList<RecognizedText> Lines { get; init; } = Array.Empty<RecognizedText>();
 
+    /// <summary>Window identity, capture method, ownership check and OCR boxes for this frame (masked).</summary>
+    public ScanEvidence? Evidence { get; init; }
+
     public bool LoginDialogVisible => Panel is not null ||
         (Result.Success && Result.Observation is { LoginDialogVisible: true });
 }
@@ -22,21 +25,42 @@ public interface ILoginScreenSource
     Task<LoginScreenView> CaptureAsync(CancellationToken cancellationToken);
 }
 
-public sealed class LoginScreenReader : ILoginScreenSource
+public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILoginScreenSource
 {
+    private readonly IGameWindowLocator _locator = locator ?? StarRailWindowLocator.Instance;
+
+    /// <summary>
+    /// Reads the game exactly as it is. This never raises, restores or makes the game topmost; a frame whose
+    /// pixels cannot be proven to belong to the game window is rejected with an actionable reason.
+    /// </summary>
     public async Task<LoginScreenView> ScanAsync(CancellationToken cancellationToken)
     {
-        var window = StarRailWindow.Find();
+        var (failure, frame, window, check) = Capture();
+        if (failure is not null) return failure;
+        var view = await AnalyzeAsync(frame!, window, cancellationToken).ConfigureAwait(false);
+        return view.Evidence is null ? view : view with { Evidence = view.Evidence with { Check = check! } };
+    }
+
+    private (LoginScreenView? Failure, CapturedFrame? Frame, StarRailWindowInfo? Window, CaptureCheck? Check) Capture()
+    {
+        var window = _locator.Find();
         if (window is null)
-            return new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.WindowNotFound,
-                "没有找到星铁游戏窗口。"), null, null, null);
-        StarRailWindow.BringToFront(window.Handle);
-        await Task.Delay(250, cancellationToken).ConfigureAwait(false);
-        var frame = ScreenCapture.CaptureClient(window.Handle);
-        if (frame is null)
-            return new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.CaptureFailed,
-                "游戏窗口存在，但屏幕捕获失败。"), null, window, null);
-        return await AnalyzeAsync(frame, window, cancellationToken).ConfigureAwait(false);
+        {
+            var detail = _locator.IsProcessRunning()
+                ? "星铁进程存在，但还没有可用的游戏窗口（可能仍在启动）。"
+                : "没有找到星铁游戏窗口。请先启动游戏并停在登录界面。";
+            return (new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.WindowNotFound, detail), null, null, null),
+                null, null, null);
+        }
+        var (frame, check) = ScreenCapture.CaptureChecked(window);
+        var verdict = CaptureVerdict.Evaluate(check);
+        var evidence = new ScanEvidence(window.Handle.ToInt64(), window.ProcessId, StarRailWindow.ProcessName,
+            window.ClientWidth, window.ClientHeight, DateTimeOffset.UtcNow, check, []);
+        if (!verdict.Accept || frame is null)
+            return (new LoginScreenView(LoginScanResult.Fail(verdict.Failure == LoginScanFailure.None
+                    ? LoginScanFailure.CaptureFailed : verdict.Failure, verdict.Detail), null, window, null)
+                { Evidence = evidence }, null, window, check);
+        return (null, frame, window, check);
     }
 
     public async Task<LoginScreenView> ImportAsync(string path, CancellationToken cancellationToken)
@@ -48,20 +72,14 @@ public sealed class LoginScreenReader : ILoginScreenSource
         return await AnalyzeAsync(frame, null, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<LoginScreenView> CaptureAsync(CancellationToken cancellationToken)
+    public Task<LoginScreenView> CaptureAsync(CancellationToken cancellationToken)
     {
-        var window = StarRailWindow.Find();
-        if (window is null)
-            return new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.WindowNotFound,
-                "没有找到星铁游戏窗口。"), null, null, null);
-        StarRailWindow.BringToFront(window.Handle);
-        await Task.Delay(250, cancellationToken).ConfigureAwait(false);
-        var frame = ScreenCapture.CaptureClient(window.Handle);
-        return frame is null
-            ? new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.CaptureFailed,
-                "游戏窗口存在，但屏幕捕获失败。"), null, window, null)
-            : new LoginScreenView(new LoginScanResult(true, LoginScanFailure.None, "", null, Array.Empty<string>()),
-                frame, window, LoginPanelDetector.Detect(frame));
+        cancellationToken.ThrowIfCancellationRequested();
+        var (failure, frame, window, _) = Capture();
+        if (failure is not null) return Task.FromResult(failure);
+        return Task.FromResult(new LoginScreenView(
+            new LoginScanResult(true, LoginScanFailure.None, "", null, Array.Empty<string>()),
+            frame, window, LoginPanelDetector.Detect(frame!)));
     }
 
     public async Task<LoginScreenView> AnalyzeAsync(CapturedFrame frame, StarRailWindowInfo? window,
@@ -89,7 +107,11 @@ public sealed class LoginScreenReader : ILoginScreenSource
             result = LoginScanResult.Fail(LoginScanFailure.NoAccountList,
                 "登录对话框可见，但没有识别到可用的脱敏手机号。", result.OcrLines);
         }
-        return new LoginScreenView(result, frame, window, panel) { Lines = lines };
+        var evidence = window is null ? null : new ScanEvidence(window.Handle.ToInt64(), window.ProcessId,
+            StarRailWindow.ProcessName, frame.Width, frame.Height, DateTimeOffset.UtcNow,
+            new CaptureCheck(true, true, false, frame.Source == "window-print" ? "print" : "bitblt", 0, 0, false),
+            result.Observation?.Accounts ?? []);
+        return new LoginScreenView(result, frame, window, panel) { Lines = lines, Evidence = evidence };
     }
 
     private static bool LooksLikeLogin(IReadOnlyList<RecognizedText> lines)

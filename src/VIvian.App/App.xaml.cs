@@ -123,13 +123,18 @@ public partial class App : Application
                 services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<LoginScreenReader>();
                 services.AddSingleton<AccountRecognitionService>();
-                services.AddSingleton<IInputHost, ElevatedInputHost>();
+                // One host object serves input and the per-batch UAC session, so a batch prompts at most once.
+                services.AddSingleton<ElevatedInputHost>();
+                services.AddSingleton<IInputHost>(sp => sp.GetRequiredService<ElevatedInputHost>());
+                services.AddSingleton<IInputHostSession>(sp => sp.GetRequiredService<ElevatedInputHost>());
                 services.AddSingleton<IGameSessionVerifier, StarRailSessionVerifier>();
                 services.AddSingleton<GamePathProvider>();
                 services.AddSingleton<ILoginSwitchDriver>(sp => new StarRailLoginDriver(
                     sp.GetRequiredService<LoginScreenReader>(), sp.GetRequiredService<IGameSessionVerifier>(),
                     sp.GetRequiredService<IInputHost>(), sp.GetRequiredService<GamePathProvider>().Get));
-                services.AddSingleton<MultiAccountOrchestrator>();
+                services.AddSingleton(sp => new MultiAccountOrchestrator(sp.GetRequiredService<LocalDatabase>(),
+                    sp.GetRequiredService<ILoginSwitchDriver>(), sp.GetRequiredService<IInputHostSession>()));
+                services.AddSingleton<IScanWindowShield, MainWindowScanShield>();
                 services.AddSingleton<AccountViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();

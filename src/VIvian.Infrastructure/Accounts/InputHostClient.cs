@@ -6,13 +6,11 @@ using System.Text.Json;
 
 namespace VIvian.Infrastructure.Accounts;
 
-public sealed class InputHostUnavailableException(string message) : Exception(message);
-
 /// <summary>
 /// Starts one elevated, headless VIvian instance and talks to it over a per-launch named pipe. The UAC prompt
 /// appears once per batch, not once per click.
 /// </summary>
-public sealed class InputHostClient : IAsyncDisposable
+public sealed class InputHostClient : IInputChannel
 {
     private readonly NamedPipeServerStream _pipe;
     private readonly StreamReader _reader;
@@ -55,7 +53,7 @@ public sealed class InputHostClient : IAsyncDisposable
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
             await pipe.DisposeAsync().ConfigureAwait(false);
-            throw new InputHostUnavailableException("已取消管理员授权，无法操作以管理员运行的游戏登录界面。");
+            throw new InputHostUnavailableException("已取消管理员授权，无法操作以管理员运行的游戏登录界面。", InputHostFailureKind.Refused);
         }
         catch (Win32Exception ex)
         {
@@ -76,7 +74,7 @@ public sealed class InputHostClient : IAsyncDisposable
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             await pipe.DisposeAsync().ConfigureAwait(false);
-            throw new InputHostUnavailableException("等待管理员输入宿主超时（45 秒）。");
+            throw new InputHostUnavailableException("等待管理员输入宿主超时（45 秒）。", InputHostFailureKind.Timeout);
         }
         catch (UnauthorizedAccessException ex)
         {
@@ -94,11 +92,52 @@ public sealed class InputHostClient : IAsyncDisposable
             var line = JsonSerializer.Serialize(request, InputHostProtocol.Json);
             await _writer.WriteLineAsync(line).ConfigureAwait(false);
             var responseLine = await _reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-            if (responseLine is null) throw new InputHostUnavailableException("管理员输入宿主已断开连接。");
+            if (responseLine is null) throw new InputHostUnavailableException("管理员输入宿主已断开连接。", InputHostFailureKind.Lost);
             return JsonSerializer.Deserialize<InputResponse>(responseLine, InputHostProtocol.Json)
                 ?? throw new InputHostUnavailableException("管理员输入宿主返回了空响应。");
         }
         finally { _gate.Release(); }
+    }
+
+    public bool IsAlive
+    {
+        get
+        {
+            if (_disposed || !_pipe.IsConnected) return false;
+            try { return _process is null || !_process.HasExited; }
+            catch { return false; }
+        }
+    }
+
+    /// <summary>
+    /// Asks the host to exit, waits for the exact process VIvian started (the handle from the launch, not a PID or
+    /// a name), and terminates only that handle if it does not exit. Returns true only when exit is confirmed.
+    /// </summary>
+    public async Task<bool> ShutdownAsync(CancellationToken cancellationToken)
+    {
+        if (_disposed) return _process is null || SafeHasExited(_process);
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(2));
+            await SendAsync(new InputRequest("shutdown"), timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch { }
+        if (_process is null) return false;
+        try
+        {
+            if (!_process.HasExited && !_process.WaitForExit(3000))
+                Processes.WindowsProcessSupervisor.TerminateOwnedProcess(_process);
+            return SafeHasExited(_process);
+        }
+        catch { return false; }
+    }
+
+    private static bool SafeHasExited(Process process)
+    {
+        try { return process.HasExited; }
+        catch { return false; }
     }
 
     public async ValueTask DisposeAsync()

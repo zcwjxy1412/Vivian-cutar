@@ -23,7 +23,7 @@ if (args.Length > 0 && args[0] == "--stop")
     var window = StarRailWindow.Find();
     if (window is null) { Console.WriteLine("star-rail-window-not-found"); return 2; }
     await using var input = new ElevatedInputHost(host);
-    var response = await input.KillAsync(window.ProcessId, CancellationToken.None);
+    var response = await input.KillAsync(window, CancellationToken.None);
     Console.WriteLine($"stop ok={response.Ok} error={response.Error} detail={response.Detail}");
     return response.Ok ? 0 : 5;
 }

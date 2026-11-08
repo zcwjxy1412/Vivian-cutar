@@ -68,11 +68,20 @@ public sealed class ElevatedInputHost : IInputHost, IInputHostSession
     }
 
     public ElevatedInputHost(string? hostExecutable)
-        : this(async ct => await InputHostClient.StartAsync(hostExecutable, ct).ConfigureAwait(false))
+        : this(async ct => await InputHostClient.StartAsync(hostExecutable, ct).ConfigureAwait(false),
+            !(OperatingSystem.IsWindows() && Processes.WindowsProcessSupervisor.IsCurrentProcessElevated()))
     {
     }
 
-    public ElevatedInputHost(Func<CancellationToken, Task<IInputChannel>> launch) => _launch = launch;
+    /// <param name="launchPromptsUser">False when VIvian is already elevated: starting the host shows no UAC prompt,
+    /// so it is not counted as an authorization request.</param>
+    public ElevatedInputHost(Func<CancellationToken, Task<IInputChannel>> launch, bool launchPromptsUser = true)
+    {
+        _launch = launch;
+        _launchPromptsUser = launchPromptsUser;
+    }
+
+    private readonly bool _launchPromptsUser;
 
     public InputHostState State { get; private set; } = InputHostState.Idle;
     public int LaunchCount { get; private set; }
@@ -179,7 +188,7 @@ public sealed class ElevatedInputHost : IInputHost, IInputHostSession
                         $"管理员输入宿主不可用（{_lastError}）；需要开始新的批次才会再次请求授权。", InputHostFailureKind.Failed);
             }
 
-            LaunchCount++;
+            if (_launchPromptsUser) LaunchCount++;
             try
             {
                 _channel = await _launch(cancellationToken).ConfigureAwait(false);

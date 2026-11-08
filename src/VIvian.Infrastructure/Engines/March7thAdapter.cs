@@ -125,7 +125,20 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
             var exit = await _group.WaitForRootExitAsync(CancellationToken.None).ConfigureAwait(false);
             await reader.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             string? id; string output; bool truncated;
-            lock (_output) { id = _upstreamRunId; output = string.Join('\n', _output); truncated = _outputTruncated; }
+            bool conflict;
+            lock (_output) { id = _upstreamRunId; output = string.Join('\n', _output); truncated = _outputTruncated; conflict = _runIdConflict; }
+            if (id is null && !conflict)
+            {
+                // Elevated VIvian: the task ran in our own root process (no hand-off line). Claim the final record
+                // only when it names that exact process.
+                id = March7thTaskContract.CaptureInProcessRunId(output, _task, _group.RootProcessId, _group.RootStartTime);
+                if (id is not null)
+                {
+                    lock (_output) _upstreamRunId = id;
+                    _events.Writer.TryWrite(new RunEvent(RunId, DateTimeOffset.UtcNow, RunEventKind.Evidence,
+                        "[VIvian] 星铁助手在 VIvian 的管理员进程内直接执行（未另起提权进程），运行编号 " + id + "。"));
+                }
+            }
             if (id is null) return Unknown("上游运行编号缺失或冲突。");
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");

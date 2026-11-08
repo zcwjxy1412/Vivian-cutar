@@ -93,3 +93,51 @@ public sealed class OneClickBatchSupportTests
         public void Dispose() => action();
     }
 }
+
+/// <summary>Elevated-VIvian claim of March7thAssistant's in-process run record.</summary>
+public sealed class InProcessRunClaimTests
+{
+    private static readonly DateTimeOffset Root = DateTimeOffset.FromUnixTimeMilliseconds(1794120000123);
+
+    private static string Record(int pid, double created, string task = "daily", string id = "20261108-101500-ab12") =>
+        "[INFO] 开始\n" +
+        $"{{\"run_id\": \"{id}\", \"status\": \"success\", \"task\": \"{task}\", \"pid\": {pid}, \"pid_create_time\": {created.ToString(System.Globalization.CultureInfo.InvariantCulture)}, \"lock\": \"acquired\", \"ended_at\": \"2026-11-08T10:30:00-05:00\"}}";
+
+    [Fact]
+    public void RecordOfOurOwnRootProcessIsClaimed() =>
+        Assert.Equal("20261108-101500-ab12",
+            VIvian.Infrastructure.Engines.Cli.March7thTaskContract.CaptureInProcessRunId(Record(4242, 1794120000.2), "daily", 4242, Root));
+
+    [Theory]
+    [InlineData(4243, 1794120000.2, "daily")]   // another process (e.g. an elevated worker)
+    [InlineData(4242, 1794119990.0, "daily")]   // same PID, different process (reused PID)
+    [InlineData(4242, 1794120000.2, "routine")] // another task
+    public void AnythingElseIsNotClaimed(int pid, double created, string task) =>
+        Assert.Null(VIvian.Infrastructure.Engines.Cli.March7thTaskContract.CaptureInProcessRunId(Record(pid, created, task), "daily", 4242, Root));
+
+    [Fact]
+    public void MalformedOrMissingRecordsAreNotClaimed()
+    {
+        Assert.Null(VIvian.Infrastructure.Engines.Cli.March7thTaskContract.CaptureInProcessRunId("no json", "daily", 4242, Root));
+        Assert.Null(VIvian.Infrastructure.Engines.Cli.March7thTaskContract.CaptureInProcessRunId(Record(4242, 1794120000.2, id: "../x"), "daily", 4242, Root));
+        Assert.Null(VIvian.Infrastructure.Engines.Cli.March7thTaskContract.CaptureInProcessRunId("{broken", "daily", 4242, Root));
+    }
+
+    [Fact]
+    public async Task HostLaunchFromAnElevatedVivianIsNotCountedAsAPrompt()
+    {
+        await using var host = new ElevatedInputHost(_ => Task.FromResult<IInputChannel>(new NullChannel()), launchPromptsUser: false);
+        host.BeginBatch();
+        await host.ClickAsync(new StarRailWindowInfo(new IntPtr(1), 1, "", 10, 10, 0, 0), 1, 1, CancellationToken.None);
+        Assert.Equal(0, host.LaunchCount);
+        Assert.Equal(InputHostState.Connected, host.State);
+    }
+
+    private sealed class NullChannel : IInputChannel
+    {
+        public bool IsAlive => true;
+        public Task<InputResponse> SendAsync(InputRequest request, CancellationToken cancellationToken) => Task.FromResult(InputResponse.Success());
+        public Task<bool> ShutdownAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+}

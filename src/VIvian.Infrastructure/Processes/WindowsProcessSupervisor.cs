@@ -62,6 +62,30 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
             ?? throw new System.ComponentModel.Win32Exception("StartProcess returned no process.");
     }
 
+    /// <summary>True when VIvian itself runs with an elevated (administrator) token.</summary>
+    public static bool IsCurrentProcessElevated()
+    {
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Starts VIvian's own input host as a direct child of an already elevated VIvian: it inherits the token the user
+    /// approved when VIvian was opened, so no further UAC prompt is involved.
+    /// </summary>
+    public static System.Diagnostics.Process StartInheritedProcess(string fileName, string arguments, string workingDirectory) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fileName, arguments)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = workingDirectory,
+        }) ?? throw new System.ComponentModel.Win32Exception("StartProcess returned no process.");
+
     /// <summary>Terminates only the exact process handle VIvian started, never a process found by name.</summary>
     public static bool TerminateOwnedProcess(System.Diagnostics.Process process)
     {

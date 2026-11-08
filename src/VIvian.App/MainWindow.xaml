@@ -177,7 +177,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Grid Margin="0,2,0,8"><TextBlock Text="任务引擎"/><TextBlock Text="{Binding RunStateText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
 <Grid Margin="0,0,0,8"><TextBlock Text="配置同步"/><TextBlock Text="{Binding ConfigSyncText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
 <Grid Margin="0,0,0,8"><TextBlock Text="游戏检测"/><TextBlock Text="{Binding InstalledText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
-<Grid><TextBlock Text="运行权限"/><TextBlock Text="普通用户 · UAC 由你确认" Foreground="{StaticResource Muted}" FontSize="13" HorizontalAlignment="Right"/></Grid>
+<Grid><TextBlock Text="运行权限"/><TextBlock Text="{Binding PrivilegeText}" Foreground="{StaticResource Muted}" FontSize="13" HorizontalAlignment="Right"/></Grid>
 </StackPanel></Border></StackPanel></ScrollViewer>
 
 <!-- Tip bar with the small assistant -->

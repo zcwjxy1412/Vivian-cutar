@@ -47,8 +47,13 @@ public sealed class InputHostClient : IInputChannel
         Process? process;
         try
         {
-            process = Processes.WindowsProcessSupervisor.StartElevatedProcess(executable,
-                $"{InputHostProtocol.Argument} {pipeName}", AppContext.BaseDirectory);
+            // Already elevated (VIvian was opened with administrator rights): the host inherits that approval.
+            // Otherwise the shell shows the UAC prompt and the user decides.
+            process = Processes.WindowsProcessSupervisor.IsCurrentProcessElevated()
+                ? Processes.WindowsProcessSupervisor.StartInheritedProcess(executable,
+                    $"{InputHostProtocol.Argument} {pipeName}", AppContext.BaseDirectory)
+                : Processes.WindowsProcessSupervisor.StartElevatedProcess(executable,
+                    $"{InputHostProtocol.Argument} {pipeName}", AppContext.BaseDirectory);
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {

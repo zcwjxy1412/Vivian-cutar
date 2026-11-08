@@ -29,6 +29,34 @@ public static partial class March7thTaskContract
         return ids.Count == 1 ? ids[0] : null;
     }
 
+    /// <summary>
+    /// When VIvian itself runs elevated, m7a.exe does not hand the task to a separate elevated worker and prints no
+    /// "[m7a] … 运行编号" launch line; the task runs inside the very process VIvian started (inside VIvian's Job).
+    /// Its final JSON record is then claimed only if it names exactly that root process: same PID and a creation
+    /// time within one second of the root's. A record from any other process is never claimed.
+    /// </summary>
+    public static string? CaptureInProcessRunId(string output, string task, int rootProcessId, DateTimeOffset rootStartTime)
+    {
+        var last = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(x => x.Trim()).LastOrDefault(x => x.StartsWith('{'));
+        if (last is null || rootProcessId <= 0) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(last, new System.Text.Json.JsonDocumentOptions { MaxDepth = 16 });
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
+            if (!root.TryGetProperty("run_id", out var idValue) || idValue.ValueKind != System.Text.Json.JsonValueKind.String) return null;
+            var id = idValue.GetString();
+            if (!IsRunId(id)) return null;
+            if (!root.TryGetProperty("task", out var t) || t.ValueKind != System.Text.Json.JsonValueKind.String || t.GetString() != task) return null;
+            if (!root.TryGetProperty("pid", out var pidValue) || !pidValue.TryGetInt32(out var pid) || pid != rootProcessId) return null;
+            if (!root.TryGetProperty("pid_create_time", out var created) || !created.TryGetDouble(out var seconds) || !double.IsFinite(seconds)) return null;
+            var rootSeconds = rootStartTime.ToUnixTimeMilliseconds() / 1000.0;
+            return Math.Abs(seconds - rootSeconds) <= 1.0 ? id : null;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
     public static IReadOnlyList<string> StartArguments(string task)
     {
         if (!Tasks.Contains(task)) throw new ArgumentException("任务不在已核对的白名单内。", nameof(task));

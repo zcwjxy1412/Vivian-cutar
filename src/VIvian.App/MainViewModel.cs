@@ -133,6 +133,11 @@ public sealed class MainViewModel : ObservableObject
     public bool CanStopAll => BatchRunning || Queue.IsRunning;
     public RelayCommand StopAllCommand { get; private set; } = null!;
 
+    /// <summary>Actual token of this process, shown on the home page instead of a fixed claim.</summary>
+    public string PrivilegeText { get; } = VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated()
+        ? "管理员 · 打开时已授权，批次内不再弹窗"
+        : "普通用户 · UAC 由你确认";
+
     public void StopAll()
     {
         if (BatchRunning)

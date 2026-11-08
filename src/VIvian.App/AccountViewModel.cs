@@ -183,6 +183,9 @@ public sealed class AccountViewModel : ObservableObject
         Status = result.Success
             ? result.Detail + where + (result.Warnings.Count > 0 ? " " + string.Join(" ", result.Warnings) : "")
             : "扫描失败：" + result.Detail + where;
+        Serilog.Log.Information("Account scan success={Success}, registered={Count}, detail={Detail}",
+            result.Success, result.Registered.Count,
+            VIvian.Infrastructure.Diagnostics.Redactor.ForCurrentUser().Redact(result.Detail));
     }
 
     private async Task ImportAsync()

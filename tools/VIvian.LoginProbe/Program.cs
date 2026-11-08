@@ -5,6 +5,13 @@ using VIvian.Infrastructure.Accounts;
 Console.OutputEncoding = Encoding.UTF8;
 var reader = new LoginScreenReader();
 
+if (args.Length == 2 && args[0] == "--check-game-path")
+{
+    var path = March7thGamePath.Read(args[1]);
+    Console.WriteLine($"game_path_exists={File.Exists(path)} star_rail_executable={Path.GetFileName(path).Equals("StarRail.exe", StringComparison.OrdinalIgnoreCase)}");
+    return File.Exists(path) ? 0 : 2;
+}
+
 if (args.Length == 2 && args[0] == "--reference-flow")
 {
     var files = Directory.GetFiles(args[1], "*.png").OrderBy(p =>

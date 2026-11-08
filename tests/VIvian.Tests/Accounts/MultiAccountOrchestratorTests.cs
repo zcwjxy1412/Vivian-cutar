@@ -12,6 +12,19 @@ public sealed class MultiAccountOrchestratorTests
     private static readonly AccountConfigurationMode Unified = AccountConfigurationMode.Unified;
 
     [Fact]
+    public async Task UnexpectedDriverFailureStillFinalizesBatch()
+    {
+        await using var fixture = await Fixture.CreateAsync("A", "B");
+        var driver = new FakeLoginDriver { ThrowOnSwitch = new IOException("capture disconnected") };
+        var outcome = await new MultiAccountOrchestrator(fixture.Database, driver).ExecuteAsync(GameId.StarRail,
+            fixture.Accounts, Unified, fixture.LoadSettingsAsync,
+            (_, _, _) => throw new InvalidOperationException("must not run"), null, CancellationToken.None);
+        Assert.False(outcome.Completed);
+        Assert.Equal("stopped", Assert.Single(await fixture.Database.LoadRecentBatchesAsync()).State);
+        Assert.Contains("capture disconnected", outcome.Detail);
+    }
+
+    [Fact]
     public async Task RunsTwoAccountsAndUsesFirstSnapshotInUnifiedMode()
     {
         await using var fixture = await Fixture.CreateAsync("A", "B");
@@ -33,7 +46,7 @@ public sealed class MultiAccountOrchestratorTests
         Assert.Equal(new[] { "153****57", "139****11" }, driver.Switches.Select(s => s.NormalizedPhone));
         // One restart to reach the list before A, one to log out A before B; none after the last account.
         Assert.Equal(2, driver.Restarts);
-        Assert.Equal(0, driver.Stops);
+        Assert.Equal(1, driver.Stops);
 
         var batch = Assert.Single(await fixture.Database.LoadRecentBatchesAsync());
         Assert.Equal("finished", batch.State);

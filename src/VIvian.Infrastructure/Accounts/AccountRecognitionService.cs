@@ -12,6 +12,14 @@ public sealed class AccountRecognitionService
     private readonly LocalDatabase _database;
     private readonly ILoginScreenSource _source;
     private readonly Func<string, CancellationToken, Task<LoginScreenView>> _import;
+    private readonly IInputHost? _input;
+    private readonly ILoginSwitchDriver? _driver;
+
+    public AccountRecognitionService(LocalDatabase database, LoginScreenReader reader, IInputHost input,
+        ILoginSwitchDriver driver) : this(database, reader, reader.ImportAsync, input)
+    {
+        _driver = driver;
+    }
 
     public AccountRecognitionService(LocalDatabase database, LoginScreenReader reader)
         : this(database, reader, reader.ImportAsync)
@@ -19,11 +27,12 @@ public sealed class AccountRecognitionService
     }
 
     internal AccountRecognitionService(LocalDatabase database, ILoginScreenSource source,
-        Func<string, CancellationToken, Task<LoginScreenView>> import)
+        Func<string, CancellationToken, Task<LoginScreenView>> import, IInputHost? input = null)
     {
         _database = database;
         _source = source;
         _import = import;
+        _input = input;
     }
 
     public sealed record RegistrationResult(bool Success, string Detail, LoginScreenView? View,
@@ -32,7 +41,36 @@ public sealed class AccountRecognitionService
     public async Task<RegistrationResult> ScanAndRegisterAsync(CancellationToken cancellationToken)
     {
         LoginScreenView view;
-        try { view = await _source.ScanAsync(cancellationToken); }
+        try
+        {
+            if (_driver is not null)
+            {
+                if (!Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
+                    return new(false, "请先以管理员身份打开测试版完成授权，再自动扫描。", null, [], []);
+                var ready = await _driver.EnsureLoginAsync(new SwitchPolicy(), cancellationToken);
+                if (!ready.Ok) return new(false, ready.Detail, null, [], []);
+            }
+            view = await _source.ScanAsync(cancellationToken);
+            if (_input is not null && view.Window is { } window &&
+                view.Result.Observation is { AccountListExpanded: false, Accounts.Count: 1 } card)
+            {
+                var row = card.Accounts[0];
+                var clicked = await _input.ClickAsync(window, (int)row.CenterX, (int)row.CenterY, cancellationToken);
+                if (!clicked.Ok) return new(false, "无法展开保存账号列表：" + clicked.Error, view, [], []);
+                for (var attempt = 0; attempt < 5; attempt++)
+                {
+                    await Task.Delay(400, cancellationToken);
+                    view = await _source.ScanAsync(cancellationToken);
+                    if (view.Result.Observation is { AccountListExpanded: true }) break;
+                }
+                if (view.Result.Observation is not { AccountListExpanded: true })
+                    return new(false, "未确认保存账号列表已展开，未把当前卡片当成全部账号。", view, [], []);
+                if (view.Panel is { } panel)
+                    view = view with { Result = LoginScreenAnalyzer.Analyze(view.Result.Observation.WindowWidth,
+                        view.Result.Observation.WindowHeight, view.Lines,
+                        new ScreenRegion(panel.X, panel.Y, panel.Width, panel.Height), row) };
+            }
+        }
         catch (Exception ex) { return new(false, "扫描登录界面失败：" + ex.Message, null, [], []); }
         return await RegisterAsync(view, "live", cancellationToken);
     }

@@ -123,7 +123,7 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
     private static bool NeedsTitleCornerScan(IReadOnlyList<RecognizedText> lines)
     {
         var compact = lines.Select(l => LoginStateClassifier.Compact(l.Text)).ToArray();
-        return compact.Any(t => t.Contains("点击进入", StringComparison.Ordinal)) &&
+        return compact.Any(t => LoginStateClassifier.WorldEntryControls.Any(w => t.Contains(w, StringComparison.Ordinal))) &&
                !compact.Any(t => LoginStateClassifier.LogoutControls.Any(w => t.Contains(w, StringComparison.Ordinal)));
     }
 
@@ -150,6 +150,7 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
     {
         var compact = lines.Select(l => string.Concat(l.Text.Where(c => !char.IsWhiteSpace(c)))).ToArray();
         return compact.Any(t => t.Contains("进入游戏", StringComparison.Ordinal) ||
+                                t.Contains("退出登录", StringComparison.Ordinal) ||
                                 t.Contains("登录其他账号", StringComparison.Ordinal) ||
                                 t.Contains("miHoYo", StringComparison.OrdinalIgnoreCase) ||
                                 t.Contains("米哈游", StringComparison.Ordinal) ||
@@ -192,11 +193,16 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
     public static async Task<string?> SaveEvidenceAsync(LoginScreenView view, string directory, string name,
         CancellationToken cancellationToken)
     {
-        if (view.Frame is null) return null;
         try
         {
-            var path = Path.Combine(directory, name + ".png");
-            await WindowsOcrReader.SavePngAsync(view.Frame, path, cancellationToken).ConfigureAwait(false);
+            // Do not persist game pixels or raw OCR: authentication pages can contain private data.
+            var path = Path.Combine(directory, name + ".json");
+            var state = LoginStateClassifier.Classify(view.Lines);
+            var evidence = new { State = state.State.ToString(), Failure = view.Result.Failure.ToString(),
+                view.Window?.ProcessId, Width = view.Frame?.Width, Height = view.Frame?.Height,
+                CapturedAt = DateTimeOffset.UtcNow, Accounts = state.Accounts.Select(a => a.NormalizedPhone).ToArray() };
+            await File.WriteAllTextAsync(path, System.Text.Json.JsonSerializer.Serialize(evidence), cancellationToken)
+                .ConfigureAwait(false);
             return path;
         }
         catch (OperationCanceledException) { throw; }

@@ -5,6 +5,28 @@ using VIvian.Infrastructure.Accounts;
 Console.OutputEncoding = Encoding.UTF8;
 var reader = new LoginScreenReader();
 
+if (args.Length == 2 && args[0] == "--reference-flow")
+{
+    var files = Directory.GetFiles(args[1], "*.png").OrderBy(p =>
+        System.Text.RegularExpressions.Regex.Replace(Path.GetFileName(p), @"\d+", m => m.Value.PadLeft(12, '0')));
+    LoginAccountObservation? priorCard = null;
+    foreach (var file in files)
+    {
+        var reference = await reader.ImportAsync(file, CancellationToken.None);
+        var selected = reference.Frame is not null && LoginRetentionDetector.IsSelected(reference.Frame, reference.Lines);
+        var region = reference.Panel is { } p ? new ScreenRegion(p.X - 8, p.Y - 8, p.Width + 16, p.Height + 16) : null;
+        var state = LoginStateClassifier.Classify(reference.Lines, reference.Panel is not null, region,
+            preserveLoginSelected: selected);
+        var anchoredRows = LoginScreenAnalyzer.SavedRows(reference.Lines, region, priorCard);
+        if (state.State == LoginScreenState.LoginCard) priorCard = state.Accounts.Single();
+        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { File = Path.GetFileName(file),
+            State = state.State.ToString(), SavedRows = state.State is LoginScreenState.AccountList or LoginScreenState.LoginCard
+                ? anchoredRows.Count : 0,
+            PreserveSelected = selected, Action = state.ActionTarget?.Text }));
+    }
+    return 0;
+}
+
 if (args.Length > 0 && args[0] == "--front")
 {
     var host = args.Length > 1 ? args[1] : null;

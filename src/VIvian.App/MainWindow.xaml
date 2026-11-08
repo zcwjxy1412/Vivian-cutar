@@ -169,7 +169,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Button Content="计划运行" IsEnabled="False" ToolTip="定时执行将在手动运行稳定后开放" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
 <Button Content="{Binding Queue.PauseButtonText}" Command="{Binding Queue.PauseCommand}" IsEnabled="{Binding Queue.CanPause}" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
 <Button Style="{StaticResource DangerButton}" Content="停止" Command="{Binding StopAllCommand}" IsEnabled="{Binding CanStopAll}" Margin="0" Padding="6,9" FontSize="13"/></UniformGrid>
-<TextBlock Text="点“一键日常”会先确认本次运行；在“账号管理”勾选了多个星铁账号时，会依次自动切换账号并全部执行。需要管理员权限时由你在 UAC 中决定（每批一次）。" Style="{StaticResource Small}" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+<TextBlock Text="先完成启动时的管理员授权、账号勾选和配置，再点“一键日常”自动执行选中账号。批次内不再确认；身份验证或清理异常时安全停止。" Style="{StaticResource Small}" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
 <TextBlock Text="{Binding StopKeyText}" Style="{StaticResource Small}" FontSize="12" Margin="0,4,0,0"/>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
@@ -258,7 +258,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="打开星铁登录界面后扫描，VIvian 会按脱敏手机号建立档案；运行时自动选择并登录，不需要填写 UID，也不需要为每个账号安装一份助手。" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="扫描登录账号" Style="{StaticResource H2}"/>
-<TextBlock Text="本地 OCR 只读取当前屏幕上的文字，截图不会上传。首次自动切换账号时会请求一次管理员授权。" Style="{StaticResource Small}"/>
+<TextBlock Text="打开测试版时先完成管理员授权；扫描会自动返回登录界面并展开保存账号。图像只在本机内存处理，不上传或自动保存原图。" Style="{StaticResource Small}"/>
 <WrapPanel Margin="0,12,0,0"><Button Style="{StaticResource Primary}" Content="扫描登录账号" Command="{Binding ScanCommand}" Margin="0,0,8,8"/>
 <Button Content="导入登录截图" Command="{Binding ImportCommand}" Margin="0,0,8,8"/><Button Content="刷新" Command="{Binding ReloadCommand}" Margin="0,0,8,8"/></WrapPanel>
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
@@ -275,7 +275,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding LastResult, StringFormat=上次结果：{0}}" Style="{StaticResource Small}"/></StackPanel>
 <TextBlock Grid.Column="2" Text="{Binding Verification}" Style="{StaticResource Small}" Foreground="{StaticResource Warn}" VerticalAlignment="Top"/></Grid></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
 <WrapPanel Margin="0,8,0,0"><Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
-<Button Content="保存备注" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
+<Button Content="保存账号设置" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
 <TextBlock Text="备注只改 VIvian 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"><StackPanel>

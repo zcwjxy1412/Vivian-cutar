@@ -340,6 +340,12 @@ public sealed class MainViewModel : ObservableObject
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
+        Accounts.ExecuteScan = action => RunAsync(async () =>
+        {
+            if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+            { Status = "任务运行或清理未确认时不能扫描切换账号。"; return; }
+            await action();
+        });
         RunSelectedAccountsCommand = new(() => RunAsync(RunSelectedAccountsAsync), HandleError);
         StopBatchCommand = new(() => { _stopBatch = true; _batchCts?.Cancel(); Queue.EmergencyStop(); BatchStatus = "正在停止批次并等待清理…"; });
         StopAllCommand = new(StopAll);
@@ -678,11 +684,13 @@ public sealed class MainViewModel : ObservableObject
         if (!RealExecutionPolicy.IsM5DailyTest || evidence is null ||
             card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
         { BatchStatus = "请先在“引擎与环境”核对星铁官方发行包与安装身份。"; return; }
-        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
+        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: false))
         { BatchStatus = "当前仍有未保存设置；批次未启动。"; return; }
         var selected = Accounts.SelectedRows;
         if (selected.Count == 0)
         { BatchStatus = "请勾选已绑定登录界面的星铁账号。"; return; }
+        if (!VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
+        { BatchStatus = "请先关闭并以管理员身份打开测试版，完成批次前授权；本次未启动，也不会在批次中请求 UAC。"; return; }
         var mode = Accounts.ConfigurationMode;
         _batchMode = mode;
         IReadOnlyDictionary<string, string> firstSnapshot;
@@ -691,13 +699,6 @@ public sealed class MainViewModel : ObservableObject
         { BatchStatus = "读取星铁助手当前配置失败，批次未启动：" + ex.Message; return; }
         if (firstSnapshot.Count == 0)
         { BatchStatus = "没有可用的任务配置（账号、原有账号和星铁助手当前配置都为空），批次未启动。"; return; }
-        var modeText = mode == AccountConfigurationMode.Unified ? "统一配置（继承第一个账号）" : "各账号独立配置";
-        if (MessageBox.Show(
-                $"将串行运行 {selected.Count} 个星铁账号：\n" + string.Join("\n", selected.Select((r, i) => $"{i + 1}. {r.Name}（{r.MaskedPhone}）")) +
-                $"\n\n模式：{modeText}\n切换账号时会自动退出当前账号并在登录界面选择下一个账号，本批次正常只需一次管理员授权（UAC）。\n若拒绝授权、出现验证码/密码或无法确认账号身份，批次会停止，不会反复弹窗，也不会在不确定的账号上执行。\n不会读取或复制登录令牌。确认开始？",
-                "VIvian · 星铁多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        { BatchStatus = "已取消批次。"; return; }
-
         BatchRunning = true; _stopBatch = false; _batchCts = new CancellationTokenSource();
         try
         {
@@ -732,6 +733,8 @@ public sealed class MainViewModel : ObservableObject
     {
         var own = (await Accounts.Database.LoadAccountSettingsAsync(account.Id, cancellationToken)).Values;
         if (own.Count > 0) return own;
+        if (_batchMode == AccountConfigurationMode.Independent)
+            throw new InvalidOperationException($"账号“{account.Name}”未保存专属配置；请在批次开始前配置，不能代用其他账号设置。");
         if (account.Id != LegacyStarRail)
         {
             var legacy = (await Accounts.Database.LoadAccountSettingsAsync(LegacyStarRail, cancellationToken)).Values;
@@ -775,7 +778,7 @@ public sealed class MainViewModel : ObservableObject
             return new(run?.RunId, success, cleaned, restored, detail);
         }
         catch (OperationCanceledException) { throw; }
-        catch (Exception ex) { return new(null, false, true, true, ex.Message); }
+        catch (Exception ex) { return new(null, false, false, false, "任务异常，清理与配置恢复尚未确认：" + ex.Message); }
     }
 
     public void ReportReconciled(int count)

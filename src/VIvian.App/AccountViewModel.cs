@@ -62,7 +62,7 @@ public sealed class AccountViewModel : ObservableObject
         _database = database;
         _recognition = recognition;
         _shield = shield;
-        ScanCommand = new(ScanAsync, Error);
+        ScanCommand = new(() => ExecuteScan(ScanAsync), Error);
         ImportCommand = new(ImportAsync, Error);
         SaveNameCommand = new(SaveNameAsync, Error);
         DeleteCommand = new(DeleteAsync, Error);
@@ -72,6 +72,7 @@ public sealed class AccountViewModel : ObservableObject
     }
 
     public LocalDatabase Database => _database;
+    public Func<Func<Task>, Task> ExecuteScan { private get; set; } = action => action();
     public ObservableCollection<AccountRowViewModel> Rows { get; } = [];
     public ObservableCollection<AccountBatch> RecentBatches { get; } = [];
     public ObservableCollection<AccountExecutionRecord> BatchResults { get; } = [];
@@ -206,11 +207,11 @@ public sealed class AccountViewModel : ObservableObject
         if (SelectedRow is null) { Status = "请先选择账号。"; return; }
         var name = SelectedRow.Name.Trim();
         if (name.Length is 0 or > 80) { Status = "账号备注须为 1–80 个字符。"; return; }
-        var saved = await _database.SaveAccountAsync(SelectedRow.Account with { Name = name });
+        var saved = await _database.SaveAccountAsync(SelectedRow.Account with { Name = name, AutoRun = SelectedRow.IsSelected });
         var plan = await _database.LoadAccountTaskPlanAsync(saved.Id);
         await _database.SaveAccountTaskPlanAsync(plan with { DailyEnabled = SelectedRow.DailyEnabled });
         await ReloadAsync();
-        Status = "账号备注已保存。";
+        Status = "账号备注、执行勾选与任务计划已保存。";
     }
 
     private async Task DeleteAsync()

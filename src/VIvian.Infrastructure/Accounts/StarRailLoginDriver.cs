@@ -115,6 +115,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         var (observation, view) = await ObserveAsync(cancellationToken).ConfigureAwait(false);
         var trail = new List<string>(login.Trail) { Describe(observation) };
         var confirmed = false;
+        LoginAccountObservation? collapsedHeader = null;
         for (var attempt = 0; attempt < 4 && !confirmed; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -165,13 +166,17 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                 // the second the arrow at the right edge of the same row. Both are bounded by the attempt loop.
                 var row = observation.Accounts.FirstOrDefault();
                 if (row is null) return Fatal(LoginSwitchStage.SelectingAccount, "登录卡片上没有可识别的账号行。");
-                var x = attempt % 2 == 0 || view.Panel is null ? row.CenterX : view.Panel.Right - 72;
+                collapsedHeader = row;
+                var x = row.CenterX;
                 _log?.Invoke($"open-account-list attempt {attempt + 1}");
                 if (!await ClickAsync(window, x, row.CenterY, cancellationToken).ConfigureAwait(false))
                     return Fatal(LoginSwitchStage.SelectingAccount, "无法展开已保存账号列表。");
             }
             await _delay(TimeSpan.FromMilliseconds(800), cancellationToken).ConfigureAwait(false);
             (observation, view) = await ObserveAsync(cancellationToken).ConfigureAwait(false);
+            if (observation.State == LoginScreenState.AccountList && view.Panel is { } panel && collapsedHeader is not null)
+                observation = observation with { Accounts = LoginScreenAnalyzer.SavedRows(view.Lines,
+                    new ScreenRegion(panel.X, panel.Y, panel.Width, panel.Height), collapsedHeader) };
             trail.Add(Describe(observation));
         }
         if (!confirmed)
@@ -192,7 +197,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         evidence = evidence with { EnterPressedAt = _now() };
 
         var world = new LoginFlowSession(LoginGoal.InWorld, _budget);
-        var (entered, titlePassedAt) = await RunFlowAsync(world, policy.LoginScreen, selectedWindow, cancellationToken)
+        var (entered, titlePassedAt) = await RunFlowAsync(world, policy.LoginScreen, selectedWindow, cancellationToken,
+            MaskedPhoneParser.Normalize(target.NormalizedPhone))
             .ConfigureAwait(false);
         trail.AddRange(entered.Trail);
         evidence = evidence with
@@ -275,7 +281,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     }
 
     private async Task<(LoginSwitchOutcome Outcome, DateTimeOffset? TitlePassedAt)> RunFlowAsync(
-        LoginFlowSession session, TimeSpan timeout, StarRailWindowInfo? expectedWindow, CancellationToken cancellationToken)
+        LoginFlowSession session, TimeSpan timeout, StarRailWindowInfo? expectedWindow, CancellationToken cancellationToken,
+        string? expectedIdentity = null)
     {
         var deadline = _now() + timeout;
         var trail = new List<string>();
@@ -289,6 +296,11 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
             last = observation;
             lastView = view;
             trail.Add(Describe(observation));
+            if (expectedWindow is not null && observation.State == LoginScreenState.Title &&
+                observation.Accounts.Count > 0 && expectedIdentity is { } identity &&
+                observation.Accounts.Any(a => a.NormalizedPhone != identity))
+                return (Fatal(LoginSwitchStage.VerifyingSession, "标题页欢迎账号与已选账号不一致，已停止。") with
+                    { Trail = trail }, titlePassed);
             if (expectedWindow is not null && !_locator.IsSameProcessAlive(expectedWindow))
                 return (Fatal(LoginSwitchStage.VerifyingSession, "选择账号后游戏进程已变化或退出，会话与所选账号的关联中断。") with
                     { Trail = trail }, titlePassed);
@@ -372,7 +384,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         var lines = view.Lines.Count > 0 ? view.Lines : [];
         var region = view.Panel is null ? null
             : new ScreenRegion(view.Panel.X - 8, view.Panel.Y - 8, view.Panel.Width + 16, view.Panel.Height + 16);
-        return (LoginStateClassifier.Classify(lines, view.Panel is not null, region), view);
+        return (LoginStateClassifier.Classify(lines, view.Panel is not null, region,
+            view.Frame is not null && LoginRetentionDetector.IsSelected(view.Frame, lines)), view);
     }
 
     /// <summary>Local-only screenshot of the frame that stopped the flow, so the screen can be inspected later.</summary>

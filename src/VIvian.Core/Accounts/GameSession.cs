@@ -46,11 +46,11 @@ public static partial class GameUidParser
     {
         var compact = lines.Select(l => string.Concat(l.Text.Where(c => !char.IsWhiteSpace(c)))).ToArray();
         if (compact.Any(t => t.Contains("点击进入", StringComparison.Ordinal) ||
+                             t.Contains("开始游戏", StringComparison.Ordinal) ||
                              t.Contains("进入游戏", StringComparison.Ordinal) ||
                              t.Contains("登录其他账号", StringComparison.Ordinal))) return false;
         return compact.Any(t => t.Contains("开拓等级", StringComparison.Ordinal) ||
                                 t.Contains("星琼", StringComparison.Ordinal) ||
-                                t.Contains("列车", StringComparison.Ordinal) ||
                                 t.Contains("委托", StringComparison.Ordinal) ||
                                 t.Contains("跃迁", StringComparison.Ordinal) ||
                                 t.Contains("UID", StringComparison.OrdinalIgnoreCase));

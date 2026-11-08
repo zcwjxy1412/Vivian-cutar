@@ -161,7 +161,7 @@ public partial class App : Application
                         var path = await LoginScreenReader.SaveEvidenceAsync(view, dir,
                             $"{DateTime.Now:yyyyMMdd-HHmmss}-{name}", CancellationToken.None);
                         Log.Warning("Login flow stopped; screen saved to {Path}", path);
-                        foreach (var old in new DirectoryInfo(dir).GetFiles("*.png").OrderByDescending(f => f.CreationTimeUtc).Skip(30))
+                        foreach (var old in new DirectoryInfo(dir).GetFiles("*.json").OrderByDescending(f => f.CreationTimeUtc).Skip(30))
                             old.Delete();
                     }));
                 services.AddSingleton(sp => new MultiAccountOrchestrator(sp.GetRequiredService<LocalDatabase>(),

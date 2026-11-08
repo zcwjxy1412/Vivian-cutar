@@ -54,12 +54,6 @@ public sealed class MultiAccountOrchestrator
         var policy = _policy;
         var batch = await _database.BeginBatchAsync(game, mode == AccountConfigurationMode.Unified
             ? "unified" : "independent", cancellationToken);
-        var firstSettings = await settings(accounts[0], cancellationToken);
-        if (mode == AccountConfigurationMode.Unified && firstSettings.Count == 0)
-            throw new InvalidOperationException("第一个账号没有已保存的配置快照，无法作为统一配置。");
-        var profiles = (await _database.LoadLoginProfilesAsync(game, cancellationToken))
-            .ToDictionary(p => p.AccountId);
-
         _host?.BeginBatch();
         var succeeded = 0;
         var failed = 0;
@@ -71,6 +65,17 @@ public sealed class MultiAccountOrchestrator
         string? previousMasked = null;
         try
         {
+            var firstSettings = await settings(accounts[0], cancellationToken);
+            if (mode == AccountConfigurationMode.Unified && firstSettings.Count == 0)
+                throw new InvalidOperationException("第一个账号没有已保存的配置快照，无法作为统一配置。");
+            var profiles = (await _database.LoadLoginProfilesAsync(game, cancellationToken)).ToDictionary(p => p.AccountId);
+            var snapshots = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
+            foreach (var account in accounts)
+                snapshots[account.Id] = BatchConfigurationResolver.Resolve(firstSettings,
+                    mode == AccountConfigurationMode.Unified ? firstSettings : await settings(account, cancellationToken), mode);
+            var identities = accounts.Where(a => profiles.ContainsKey(a.Id)).Select(a => profiles[a.Id].NormalizedPhone).ToArray();
+            if (identities.Any(string.IsNullOrWhiteSpace) || identities.Distinct(StringComparer.Ordinal).Count() != identities.Length)
+                throw new InvalidOperationException("执行队列包含无效或重复的登录标识，未启动游戏。");
             // Start from the saved-account list. A game left in-world by the user or an interrupted batch is restarted
             // and logged out; the account currently logged in is never assumed to be the first target.
             var prepared = await _driver.RestartToLoginAsync(policy, cancellationToken);
@@ -86,10 +91,7 @@ public sealed class MultiAccountOrchestrator
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var account = accounts[index];
-                var resolved = mode == AccountConfigurationMode.Unified
-                    ? BatchConfigurationResolver.Resolve(firstSettings, firstSettings, AccountConfigurationMode.Unified)
-                    : BatchConfigurationResolver.Resolve(firstSettings,
-                        await settings(account, cancellationToken), AccountConfigurationMode.Independent);
+                var resolved = snapshots[account.Id];
 
                 if (!profiles.TryGetValue(account.Id, out var profile))
                 {
@@ -205,6 +207,11 @@ public sealed class MultiAccountOrchestrator
                     }
                 }
             }
+            if (!aborted)
+            {
+                var stopped = await _driver.StopGameAsync(cancellationToken);
+                if (!stopped.Ok) { aborted = true; stopReason = "批次末尾游戏清理未确认：" + stopped.Detail; }
+            }
         }
         catch (InputHostUnavailableException ex)
         {
@@ -219,6 +226,13 @@ public sealed class MultiAccountOrchestrator
         {
             cancelled = true;
             try { await _driver.StopGameAsync(CancellationToken.None); } catch { /* user stop must still finish */ }
+        }
+        catch (Exception ex)
+        {
+            aborted = true;
+            stopReason = "批次异常，未继续操作游戏：" + ex.Message;
+            var current = accounts.FirstOrDefault(a => a.Id == batch.CurrentAccountId) ?? accounts[0];
+            await RecordAsync(batch, current, "batch_exception", stopReason, CancellationToken.None);
         }
 
         var completed = !aborted && !cancelled;

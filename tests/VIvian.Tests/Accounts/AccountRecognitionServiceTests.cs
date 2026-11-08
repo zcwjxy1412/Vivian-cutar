@@ -10,6 +10,20 @@ namespace VIvian.Tests.Accounts;
 public sealed class AccountRecognitionServiceTests
 {
     [Fact]
+    public async Task LiveScanOpensCollapsedCardAndRegistersAllSavedRows()
+    {
+        await using var fixture = await Fixture.CreateAsync(SampleView(("153*****57", "153****57", 0)));
+        var game = LoginDriverSimulationTests.FakeGame.Standard();
+        game.Screen = "cardA";
+        var service = new AccountRecognitionService(fixture.Database, game,
+            (_, ct) => game.ScanAsync(ct), game);
+        var result = await service.ScanAndRegisterAsync(CancellationToken.None);
+        Assert.True(result.Success, result.Detail);
+        Assert.Equal(2, result.Registered.Count);
+        Assert.DoesNotContain("进入游戏", game.ClickedTexts);
+    }
+
+    [Fact]
     public async Task ScanCreatesProfilesAndSecondScanDoesNotDuplicateThem()
     {
         await using var fixture = await Fixture.CreateAsync(SampleView(

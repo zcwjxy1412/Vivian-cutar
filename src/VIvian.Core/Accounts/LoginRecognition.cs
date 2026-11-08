@@ -209,14 +209,34 @@ public static partial class MaskedPhoneParser
 /// <summary>Interprets OCR output as a login dialog. Absence of the dialogue is a normal, reportable outcome.</summary>
 public static class LoginScreenAnalyzer
 {
+    public static IReadOnlyList<LoginAccountObservation> SavedRows(IReadOnlyList<RecognizedText> lines,
+        ScreenRegion? region = null, LoginAccountObservation? collapsedHeader = null)
+    {
+        var rows = MaskedPhoneParser.FindAll(lines, region);
+        // Screenshot 6: the collapsed combo header remains above the expanded list. Remove only that
+        // header, never deduplicate actual saved rows (equal masked identities are ambiguous).
+        if (collapsedHeader is not null && region is not null && rows.Count > 1 &&
+            rows[0].NormalizedPhone == collapsedHeader.NormalizedPhone &&
+            Math.Abs(rows[0].CenterX - collapsedHeader.CenterX) <= Math.Max(8, collapsedHeader.Height) &&
+            Math.Abs(rows[0].CenterY - collapsedHeader.CenterY) <= Math.Max(8, collapsedHeader.Height) &&
+            rows[0].CenterY >= region.Y + region.Width * .20 &&
+            rows[0].CenterY <= region.Y + region.Width * .30 &&
+            rows[1].CenterY > region.Y + region.Width * .32 &&
+            LoginStateClassifier.FindExact(lines, "进入游戏") is null &&
+            LoginStateClassifier.FindAny(lines, ["登录其他账号"]) is not null &&
+            rows.Skip(1).Any(r => r.NormalizedPhone == rows[0].NormalizedPhone))
+            return rows.Skip(1).Select((r, i) => r with { RowOrder = i }).ToArray();
+        return rows;
+    }
+
     public static LoginScanResult Analyze(int windowWidth, int windowHeight, IReadOnlyList<RecognizedText> lines,
-        ScreenRegion? region = null)
+        ScreenRegion? region = null, LoginAccountObservation? collapsedHeader = null)
     {
         var ocrLines = lines.Select(l => l.Text).Where(t => !string.IsNullOrWhiteSpace(t)).ToArray();
         if (lines.Count == 0)
             return LoginScanResult.Fail(LoginScanFailure.OcrFailed, "本地 OCR 没有返回任何文字。", ocrLines);
 
-        var accounts = MaskedPhoneParser.FindAll(lines, region);
+        var accounts = SavedRows(lines, region, collapsedHeader);
         var compact = lines.Select(l => string.Concat(l.Text.Where(c => !char.IsWhiteSpace(c)))).ToArray();
         var hasEnter = compact.Any(t => t.Contains("进入游戏", StringComparison.Ordinal));
         var hasOther = compact.Any(t => t.Contains("登录其他账号", StringComparison.Ordinal));
@@ -267,10 +287,6 @@ public static class AccountSelectionResolver
             return new AccountSelection(true, candidates[0].RowOrder, candidates[0], AccountSelectionFailure.None,
                 $"已锁定账号“{candidates[0].MaskedPhone}”。");
 
-        var byOrder = candidates.Where(a => a.RowOrder == rowOrder).ToArray();
-        if (byOrder.Length == 1)
-            return new AccountSelection(true, byOrder[0].RowOrder, byOrder[0], AccountSelectionFailure.None,
-                $"脱敏手机号重复，按登记顺序锁定第 {rowOrder + 1} 项。");
         return new AccountSelection(false, -1, null, AccountSelectionFailure.Ambiguous,
             $"登录界面中有 {candidates.Length} 个账号显示为“{identifier}”，无法唯一确定目标；请重新扫描或使用备注区分。");
     }

@@ -126,8 +126,8 @@ public sealed class LoginRecognitionTests
         Assert.Equal(AccountSelectionFailure.Ambiguous, ambiguous.Failure);
 
         var byOrder = AccountSelectionResolver.Resolve(accounts, "153****57", 1);
-        Assert.True(byOrder.Success);
-        Assert.Equal(1, byOrder.Index);
+        Assert.False(byOrder.Success);
+        Assert.Equal(AccountSelectionFailure.Ambiguous, byOrder.Failure);
 
         var missing = AccountSelectionResolver.Resolve(accounts, "139****11", 0);
         Assert.False(missing.Success);

@@ -162,7 +162,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         command.Transaction = tx;
         command.CommandText = "PRAGMA user_version;";
         var version = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
-        if (version > CurrentSchemaVersion) throw new InvalidOperationException("数据库由更新版本创建，当前版本不会覆盖它。");
+        if (version > CurrentSchemaVersion) throw DatabaseVersionTooNew.Create(checked((int)version), CurrentSchemaVersion);
         // Each step upgrades exactly one version inside the same transaction; any failure rolls back everything.
         if (version == 0)
         {
@@ -275,5 +275,30 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         var result = new List<DiagnosticRecord>();
         while (await r.ReadAsync(ct)) result.Add(new(r.GetString(0), DateTimeOffset.Parse(r.GetString(1)), r.GetString(2)));
         return result;
+    }
+}
+
+/// <summary>
+/// The data directory was last used by a newer VIvian. The database is left untouched. The exception type stays
+/// <see cref="InvalidOperationException"/> (an existing contract); the versions travel in <see cref="Exception.Data"/>.
+/// </summary>
+public static class DatabaseVersionTooNew
+{
+    public const string FoundKey = "VIvian.DatabaseVersion.Found";
+    public const string SupportedKey = "VIvian.DatabaseVersion.Supported";
+
+    public static InvalidOperationException Create(int found, int supported)
+    {
+        var ex = new InvalidOperationException($"数据库由更新版本创建（v{found}），当前版本只支持到 v{supported}，不会覆盖它。");
+        ex.Data[FoundKey] = found;
+        ex.Data[SupportedKey] = supported;
+        return ex;
+    }
+
+    public static bool TryRead(Exception ex, out int found, out int supported)
+    {
+        found = ex.Data[FoundKey] is int f ? f : 0;
+        supported = ex.Data[SupportedKey] is int s ? s : 0;
+        return found > 0;
     }
 }

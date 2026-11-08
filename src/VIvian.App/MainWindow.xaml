@@ -149,6 +149,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Border Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="本次运行" Style="{StaticResource RibbonText}"/></StackPanel></Border>
 <TextBlock Text="{Binding Queue.Current}" FontSize="13"/>
 <TextBlock Text="{Binding Queue.Status}" Style="{StaticResource Small}" Margin="0,4,0,0"/>
+<TextBlock Text="{Binding BatchStatus}" Style="{StaticResource Small}" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite"/>
 <TextBlock Text="{Binding ManualTestStateText}" Style="{StaticResource Small}" Margin="0,8,0,0"/></StackPanel></Border></Grid>
 </StackPanel></ScrollViewer>
 

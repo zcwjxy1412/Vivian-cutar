@@ -703,11 +703,17 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             var accounts = selected.Select(r => r.Account).ToArray();
+            var completedAccounts = new HashSet<Guid>();
+            BatchStatus = $"已完成 0/{accounts.Length} · 正在准备批次";
             var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, mode,
                 LoadBatchSettingsAsync,
                 RunAccountTasksAsync,
-                progress => Application.Current.Dispatcher.Invoke(() => BatchStatus =
-                    $"{progress.AccountName} · {BatchProgressText.Describe(progress.State)} · {progress.Detail}"),
+                progress => Application.Current.Dispatcher.Invoke(() =>
+                {
+                    if (progress.State == BatchRunState.Completed) completedAccounts.Add(progress.AccountId);
+                    BatchStatus = $"已完成 {completedAccounts.Count}/{accounts.Length} · {progress.AccountName} · " +
+                        $"{BatchProgressText.Describe(progress.State)} · {progress.Detail}";
+                }),
                 _batchCts.Token);
             BatchStatus = (outcome.Completed ? "批次完成：" : "批次已停止：") + outcome.Detail;
         }

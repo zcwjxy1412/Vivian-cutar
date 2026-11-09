@@ -6,7 +6,14 @@ if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
     throw '请在普通权限的 PowerShell 窗口初始化 M6 桌面锁。'
 }
 
-$directory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'VIvian-M6'
+$oldLock = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'VIvian-M6/desktop-operation.lock'
+$old = Get-Item -LiteralPath $oldLock -Force -ErrorAction SilentlyContinue
+if ($old -and $old.Length -gt 0) {
+    throw '旧位置仍有待清理记录，请先用原档案完成交接。'
+}
+$profile = [Environment]::GetFolderPath('UserProfile')
+if (![IO.Path]::IsPathFullyQualified($profile)) { throw '无法确认 Windows 用户目录。' }
+$directory = Join-Path $profile '.vivian-m6'
 $lockPath = Join-Path $directory 'desktop-operation.lock'
 for ($current = $lockPath; $current; $current = Split-Path -Parent $current) {
     $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue

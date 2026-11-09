@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $previous = (Resolve-Path -LiteralPath $PreviousPackageDirectory).Path
 $candidate = (Resolve-Path -LiteralPath $CandidatePackageDirectory).Path
+$dotnetHost = (Get-Command dotnet -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 if (!(Test-Path -LiteralPath (Join-Path $candidate 'VIvian-UnifiedInstall.marker') -PathType Leaf) -or
     (Test-Path -LiteralPath (Join-Path $previous 'VIvian-UnifiedInstall.marker'))) {
     throw '请提供现有版本及合流安装候选的完整程序目录。'
@@ -44,9 +45,11 @@ function Invoke-TestEntry([string]$Mode, [string]$Profile, [int]$ExpectedExit, [
     $startupMarker = Join-Path $Profile 'startup.ok'
     $previousMarker = if (Test-Path -LiteralPath $startupMarker) { Get-Content -LiteralPath $startupMarker -Raw }
     $env:VIVIAN_SMOKE_DATA = $Profile
-    $arguments = @($Mode, '--smoke-test')
+    # The original M5 apphost elevates before it can read the rehearsal environment.
+    $managedEntry = [IO.Path]::ChangeExtension($link.TargetPath, '.dll')
+    $arguments = @(('"' + $managedEntry + '"'), $Mode, '--smoke-test')
     if (!$EnvironmentOnly) { $arguments += @('--smoke-data', ('"' + $Profile + '"')) }
-    $proc = Start-Process -FilePath $link.TargetPath -WorkingDirectory $install -WindowStyle Hidden -PassThru -ArgumentList $arguments
+    $proc = Start-Process -FilePath $dotnetHost -WorkingDirectory $install -WindowStyle Hidden -PassThru -ArgumentList $arguments
     if (!$proc.WaitForExit(30000)) {
         $proc.Kill()
         throw "演练入口超时。阶段 $Mode"
@@ -55,6 +58,12 @@ function Invoke-TestEntry([string]$Mode, [string]$Profile, [int]$ExpectedExit, [
         $report = Join-Path $install 'VIvian-启动失败报告.txt'
         if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Tail 14 | Write-Host }
         throw "演练入口退出码 $($proc.ExitCode)，预期 $ExpectedExit。阶段 $Mode"
+    }
+    if ($EnvironmentOnly) {
+        $report = Join-Path $install 'VIvian-启动失败报告.txt'
+        if (!(Select-String -LiteralPath $report -Pattern 'Invalid isolated smoke directory' -SimpleMatch -Quiet)) {
+            throw '不安全的环境变量路径未被临时目录检查阻断。'
+        }
     }
     if ($Mode -eq '--startup-check' -and $ExpectedExit -eq 0) {
         if (!(Test-Path -LiteralPath $startupMarker -PathType Leaf) -or
@@ -105,7 +114,7 @@ try {
     Move-TestDirectory $rollback $install
     if ((Get-FileHash -LiteralPath $entry).Hash -ne $oldHash) { throw '回滚后程序哈希不符。' }
     Invoke-TestEntry '--startup-check' $oldProfile 0
-    Write-Output 'Same shortcut target started the old and new builds. Missing prepared DB and unsafe environment override were rejected. Failed replacement and final rollback both restored the old executable and its startup.'
+    Write-Output 'One shortcut target retained across replacement and rollback. Both installed assemblies passed startup checks. Missing prepared DB and unsafe environment override were rejected. Failed replacement and final rollback restored the original executable hash and fresh startup evidence.'
 }
 finally {
     $env:VIVIAN_SMOKE_DATA = $previousSmokeRoot

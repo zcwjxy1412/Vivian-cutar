@@ -8,6 +8,24 @@ namespace VIvian.Tests.Engines.BetterGi;
 public sealed class BetterGiSourceSettingsTests
 {
     [Fact]
+    public async Task ClientPathComesFromBetterGiAndKeepsSpaces()
+    {
+        await using var fixture = new BetterGiFixture();
+        var clientFolder = Path.Combine(fixture.Root, "原神 游戏");
+        Directory.CreateDirectory(clientFolder);
+        var client = Path.Combine(clientFolder, "YuanShen.exe");
+        File.WriteAllBytes(client, []);
+        var config = Path.Combine(fixture.Root, "User", "config.json");
+        var json = new JsonObject { ["genshinStartConfig"] = new JsonObject { ["installPath"] = client } };
+        File.WriteAllText(config, json.ToJsonString());
+        Assert.Equal(client, await BetterGiConfiguration.FindClientExecutableAsync(fixture.Root));
+
+        json["genshinStartConfig"]!["installPath"] = "relative/YuanShen.exe";
+        File.WriteAllText(config, json.ToJsonString());
+        Assert.Null(await BetterGiConfiguration.FindClientExecutableAsync(fixture.Root));
+    }
+
+    [Fact]
     public async Task ConnectCreatesIndependentSourceProfilesFromSavedPlansAndReusesExternalEdits()
     {
         await using var fixture = new BetterGiFixture();

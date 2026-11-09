@@ -61,6 +61,24 @@ public static class BetterGiConfiguration
         }, ReadOnlyFileAccess.QueryTimeout, ct);
     }
 
+    /// <summary>Finds the installed CN game executable already configured in BetterGI.</summary>
+    public static Task<string?> FindClientExecutableAsync(string installRoot, CancellationToken ct = default)
+    {
+        if (!Path.IsPathFullyQualified(installRoot))
+            throw new ArgumentException("BetterGI 安装目录必须是绝对路径。", nameof(installRoot));
+        return ReadOnlyFileAccess.BoundedAsync<string?>(() =>
+        {
+            using var document = ReadJson(Path.Combine(Path.GetFullPath(installRoot), "User", "config.json"));
+            var start = ReadProperty(document.RootElement, "genshinStartConfig", StringComparison.Ordinal);
+            var configured = start is { ValueKind: JsonValueKind.Object } config ? ReadString(config, "installPath") : null;
+            if (configured is null || !Path.IsPathFullyQualified(configured) ||
+                !string.Equals(Path.GetFileName(configured), "YuanShen.exe", StringComparison.OrdinalIgnoreCase))
+                return null;
+            var path = Path.GetFullPath(configured);
+            return File.Exists(path) && ReadOnlyFileAccess.FindReparsePoint(path) is null ? path : null;
+        }, ReadOnlyFileAccess.QueryTimeout, ct);
+    }
+
     internal static Task<BetterGiTaskRequest> ResolveAsync(string installRoot, BetterGiTaskRequest request, CancellationToken ct) =>
         ReadOnlyFileAccess.BoundedAsync(() => Resolve(installRoot, request, ct), ReadOnlyFileAccess.QueryTimeout, ct);
 

@@ -144,6 +144,24 @@ public sealed class BetterGiLaunchGuardTests
     }
 
     [Fact]
+    public async Task ExplicitResinCountsDoNotOpenTheUnverifiedDomainBudgetPath()
+    {
+        await using var fixture = new BetterGiFixture();
+        var user = Path.Combine(fixture.Root, "User");
+        File.WriteAllText(Path.Combine(user, "OneDragon", "默认配置.json"),
+            """{ "Name": "默认配置", "TaskEnabledList": { "自动秘境": true }, "DomainName": "虹灵的净土" }""");
+        File.WriteAllText(Path.Combine(user, "config.json"),
+            """{ "autoDomainConfig": { "specifyResinUse": true, "originalResin20UseCount": 1, "autoArtifactSalvage": false } }""");
+        var adapter = fixture.Adapter(BetterGiArguments.OneDragon("默认配置").Request);
+        var error = await Assert.ThrowsAsync<EngineStartException>(
+            () => adapter.LaunchAsync(fixture.Context, fixture.Supervisor, default));
+
+        Assert.True(error.NothingStarted);
+        Assert.Contains("秘境仅可保存和预览", error.Message);
+        Assert.Equal(0, fixture.Supervisor.Calls);
+    }
+
+    [Fact]
     public async Task AProfileRemovedAfterPreflightIsRecheckedAtLaunch()
     {
         await using var fixture = new BetterGiFixture();

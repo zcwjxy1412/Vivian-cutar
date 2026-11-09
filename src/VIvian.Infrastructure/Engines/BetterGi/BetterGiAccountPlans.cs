@@ -54,7 +54,7 @@ public static class BetterGiAccountPlans
 
         if (values[Domain] == "true")
         {
-            if (values["DomainName"] == NoDomain)
+            if (values["DomainName"] is (NoDomain or "根据提升指南选择秘境"))
                 throw new ArgumentException("启用自动秘境前，请填写 BetterGI 中显示的秘境名称。", nameof(settings));
             if (Count(values, Original20) + Count(values, Original40) + Count(values, Condensed) == 0)
                 throw new ArgumentException("启用自动秘境前，请为至少一种树脂设置明确次数。", nameof(settings));

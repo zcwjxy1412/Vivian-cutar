@@ -329,9 +329,10 @@ public sealed class BetterGiLifecycleTests
     }
 
     [Theory]
-    [InlineData(false, RunOutcome.Indeterminate)]
-    [InlineData(true, RunOutcome.Success)]
-    public async Task DailyRewardsRequireTheirOwnPostTaskVerification(bool observed, RunOutcome expected)
+    [InlineData(null, null, RunOutcome.Indeterminate)]
+    [InlineData("检查每日奖励结果：今日奖励已领取", "BetterGenshinImpact.GameTask.Common.Job.CheckRewardsTask", RunOutcome.Indeterminate)]
+    [InlineData("检查每日奖励结果：\"今日奖励已领取\"", "BetterGenshinImpact.GameTask.Common.TaskControl", RunOutcome.Success)]
+    public async Task DailyRewardsRequireTheirOwnPostTaskVerification(string? message, string? source, RunOutcome expected)
     {
         await using var f = new BetterGiFixture();
         var path = Path.Combine(f.Root, "User", "OneDragon", "日常.json");
@@ -342,9 +343,8 @@ public sealed class BetterGiLifecycleTests
 
         var lines = BgiLog.Record(group.RootProcessId, Own(group), "启用一条龙配置：日常")
             .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙任务执行: 1/1"));
-        if (observed)
-            lines = lines.Concat(BgiLog.Record(group.RootProcessId, Own(group), "检查每日奖励结果：今日奖励已领取",
-                source: "BetterGenshinImpact.GameTask.Common.Job.CheckRewardsTask"));
+        if (message is not null)
+            lines = lines.Concat(BgiLog.Record(group.RootProcessId, Own(group), message, source: source!));
         lines = lines.Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙和配置组任务结束"));
         var verdict = await FinishAsync(f, run, group, lines, 0);
         Assert.Equal(expected, verdict.Outcome);

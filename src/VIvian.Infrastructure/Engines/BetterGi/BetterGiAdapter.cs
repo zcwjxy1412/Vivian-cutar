@@ -256,6 +256,9 @@ public sealed class BetterGiAdapter : IGameAdapter
                 throw new InvalidDataException("BetterGI 自动秘境启用了分解圣遗物，已阻止启动。");
             if (!domain.HasExplicitBudget)
                 throw new InvalidDataException("BetterGI 自动秘境未指定树脂使用次数，已阻止启动。");
+            if (!BetterGiContract.DomainSpendLimitVerified)
+                throw new InvalidDataException("当前 BetterGI 版本无法在所有领奖界面保证树脂次数，秘境仅可保存和预览。");
+            return resolved with { DomainResinPlan = domain };
         }
         return resolved;
     }

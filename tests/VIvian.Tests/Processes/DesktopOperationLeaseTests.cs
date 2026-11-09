@@ -8,6 +8,13 @@ public sealed class DesktopOperationLeaseTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("vivian-desktop-").FullName;
 
     [Fact]
+    public void SharedPathUsesTheUserProfileOutsidePackagedAppData()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        Assert.Equal(Path.Combine(profile, ".vivian-m6", "desktop-operation.lock"), DesktopOperationLease.LockPath);
+    }
+
+    [Fact]
     public void DifferentProfilesCannotOverlapAndCleanHandoffReleasesTheDesktop()
     {
         using (var first = Acquire("ai"))

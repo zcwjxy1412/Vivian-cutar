@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory)][string]$Archive,
     [Parameter(Mandatory)][string]$GameExecutable,
     [string]$GuildCountry = '枫丹',
+    [Guid]$AccountId,
+    [string]$AccountPlanPath,
     [switch]$PlanOnly
 )
 
@@ -39,6 +41,23 @@ $configuration = @{
     scriptConfig = @{ autoUpdateSubscribedScripts = $false; autoUpdateBeforeCommandLineRun = $false }
     notificationConfig = @{ dragonEndSummaryEnabled = $false }
 }
+$usingAccount = $AccountId -ne [Guid]::Empty
+if ($usingAccount -ne (![string]::IsNullOrWhiteSpace($AccountPlanPath))) {
+    throw '使用账号任务设置时，需要同时给出账号档案编号和设置文件。'
+}
+if ($usingAccount) {
+    $planFile = Get-Item -LiteralPath $AccountPlanPath
+    if ($planFile.PSIsContainer -or $planFile.Length -gt 65536 -or ($planFile.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw '已生成的原神任务档案无法读取。'
+    }
+    $files = Get-Content -LiteralPath $planFile.FullName -Raw -Encoding utf8 | ConvertFrom-Json
+    $name = $files.ProfileName
+    if ($name -cne ('VIvian ' + $AccountId.ToString('N'))) { throw '生成的任务档案编号不符。' }
+    $profile = $files.ProfileJson | ConvertFrom-Json -AsHashtable
+    $configuration = $files.SettingsJson | ConvertFrom-Json -AsHashtable
+    if ($configuration.genshinStartConfig.installPath -ine $game.FullName) { throw '生成的任务档案对应其他客户端。' }
+}
+
 $expected = '28D4756E55F32637538BF84427F5F31AFD5B153BF996530C5975BD9C8C0B9343'
 if ($PlanOnly) {
     if ((Get-FileHash -LiteralPath $archiveFile.FullName -Algorithm SHA256).Hash -ne $expected) {
@@ -103,8 +122,18 @@ $rootAcl.SetOwner($admins)
 $user = Join-Path $root 'User'
 $profileDirectory = Join-Path $user 'OneDragon'
 New-Item -ItemType Directory -Path $profileDirectory | Out-Null
-$profile | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $profileDirectory "$name.json") -Encoding utf8
-$configuration | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $user 'config.json') -Encoding utf8
+$profilePath = Join-Path $profileDirectory "$name.json"
+$settingsPath = Join-Path $user 'config.json'
+$profile | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $profilePath -Encoding utf8
+$configuration | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $settingsPath -Encoding utf8
+if ($usingAccount) {
+    @{
+        AccountId = $AccountId.ToString('D')
+        Values = $files.Values
+        ProfileSha256 = (Get-FileHash -LiteralPath $profilePath -Algorithm SHA256).Hash
+        SettingsSha256 = (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash
+    } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'account-plan.json') -Encoding utf8
+}
 
 Set-Content -LiteralPath (Join-Path $stage 'verified-archive.txt') -Value $expected -Encoding ascii
 Write-Output $stage

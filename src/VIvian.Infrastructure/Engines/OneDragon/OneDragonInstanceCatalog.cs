@@ -3,6 +3,8 @@ using System.Text;
 
 namespace VIvian.Infrastructure.Engines.OneDragon;
 
+public enum OneDragonInstanceRunMode { All, CurrentOnly }
+
 public enum OneDragonInstanceStatus { Available, Missing, Empty, Invalid, Unavailable, LinkRejected }
 
 // Index is the upstream script profile ID. These fields cannot identify a logged-in game account.
@@ -10,9 +12,16 @@ public sealed record OneDragonInstance(int Index, bool Active, bool IncludedByDe
 
 public sealed record OneDragonInstanceList(OneDragonInstanceStatus Status, IReadOnlyList<OneDragonInstance> Instances)
 {
-    public bool ContainsExactlyOne(IReadOnlyList<int> requested) =>
-        Status == OneDragonInstanceStatus.Available && requested.Count == 1
-        && Instances.Any(instance => instance.Index == requested[0]);
+    public OneDragonInstanceRunMode RunMode { get; init; }
+
+    public bool ContainsExactlyOne(IReadOnlyList<int> requested)
+    {
+        if (Status != OneDragonInstanceStatus.Available || requested.Count != 1) return false;
+        var target = Instances.FirstOrDefault(instance => instance.Index == requested[0]);
+        // The launcher echoes -i even in current-only mode, where the runtime uses its active profile instead.
+        return target is not null && (RunMode == OneDragonInstanceRunMode.All
+            || (target.Active && Instances.Count(instance => instance.Active) == 1));
+    }
 }
 
 /// <summary>Reads the persisted script profiles in OneDragon v2.6.0 without opening their account files.</summary>
@@ -34,69 +43,44 @@ public static class OneDragonInstanceCatalog
 
     private static OneDragonInstanceList Parse(string yaml)
     {
-        // v2.6.0 writes a block mapping with an indentless sequence and two-space continuation keys.
-        // Reject unsupported syntax so a damaged config cannot silently select the default profile.
-        var lines = OneDragonConfigRead.Lines(yaml);
-        var rootKeys = new HashSet<string>(StringComparer.Ordinal);
+        var parsed = OneDragonConfigRead.ReadSequence(yaml, "instance_list");
+        if (parsed is null) return new(OneDragonInstanceStatus.Invalid, []);
+        var runMode = parsed.Scalars.GetValueOrDefault("instance_run")?.Value;
+        if (runMode is not (null or "全部实例" or "仅运行当前"))
+            return new(OneDragonInstanceStatus.Invalid, []);
+
         var instances = new List<OneDragonInstance>();
         var ids = new HashSet<int>();
-        for (var i = 0; i < lines.Count; i++)
+        foreach (var fields in parsed.Rows)
         {
-            var key = OneDragonConfigRead.KeyOf(lines[i]);
-            if (key is null || !rootKeys.Add(key)) return new(OneDragonInstanceStatus.Invalid, []);
-            if (key != "instance_list")
-            {
-                if (YamlScalarEditor.Locate([lines[i]], key) is null) return new(OneDragonInstanceStatus.Invalid, []);
-                continue;
-            }
-
-            var tail = lines[i][(key.Length + 1)..].Trim();
-            if (tail == "[]") continue;
-            if (tail.Length != 0 && !tail.StartsWith('#')) return new(OneDragonInstanceStatus.Invalid, []);
-            if (i + 1 == lines.Count || !lines[i + 1].StartsWith("- ", StringComparison.Ordinal))
-                return new(OneDragonInstanceStatus.Invalid, []);
-            while (i + 1 < lines.Count && lines[i + 1].StartsWith("- ", StringComparison.Ordinal))
-            {
-                var fields = new List<string> { lines[++i][2..] };
-                while (i + 1 < lines.Count && lines[i + 1].StartsWith("  ", StringComparison.Ordinal))
-                    fields.Add(lines[++i][2..]);
-                var instance = ParseInstance(fields);
-                if (instance is null || !ids.Add(instance.Index)) return new(OneDragonInstanceStatus.Invalid, []);
-                instances.Add(instance);
-            }
+            var instance = ParseInstance(fields);
+            if (instance is null || !ids.Add(instance.Index)) return new(OneDragonInstanceStatus.Invalid, []);
+            instances.Add(instance);
         }
-
-        return instances.Count == 0
-            ? new(OneDragonInstanceStatus.Empty, [])
-            : new(OneDragonInstanceStatus.Available, instances.AsReadOnly());
+        if (instances.Count == 0) return new(OneDragonInstanceStatus.Empty, []);
+        return new(OneDragonInstanceStatus.Available, instances.AsReadOnly())
+        {
+            RunMode = runMode == "仅运行当前" ? OneDragonInstanceRunMode.CurrentOnly : OneDragonInstanceRunMode.All,
+        };
     }
 
-    private static OneDragonInstance? ParseInstance(List<string> fields)
+    private static OneDragonInstance? ParseInstance(Dictionary<string, ScalarLocation> fields)
     {
-        if (fields.Any(line => OneDragonConfigRead.KeyOf(line) is not
-                ("idx" or "name" or "active" or "active_in_od" or "force_login_before_run")))
+        if (fields.Keys.Any(key => key is not ("idx" or "name" or "active" or "active_in_od" or "force_login_before_run")))
             return null;
-
-        var index = YamlScalarEditor.Locate(fields, "idx");
-        var force = YamlScalarEditor.Locate(fields, "force_login_before_run");
-        var forceLogin = ReadBool(force);
+        var index = fields.GetValueOrDefault("idx");
+        var force = fields.GetValueOrDefault("force_login_before_run");
+        var forceLogin = OneDragonConfigRead.ReadBool(force);
         if (index is not { Quote: null } || index.Value.Length is < 1 or > 2
             || !index.Value.All(char.IsAsciiDigit) || index.Value[0] == '0'
-            || YamlScalarEditor.Locate(fields, "name") is null
-            || ReadBool(YamlScalarEditor.Locate(fields, "active")) is not { } active
-            || ReadBool(YamlScalarEditor.Locate(fields, "active_in_od")) is not { } included
-            || (fields.Any(line => line.StartsWith("force_login_before_run:", StringComparison.Ordinal)) && forceLogin is null))
+            || !fields.ContainsKey("name")
+            || OneDragonConfigRead.ReadBool(fields.GetValueOrDefault("active")) is not { } active
+            || OneDragonConfigRead.ReadBool(fields.GetValueOrDefault("active_in_od")) is not { } included
+            || (force is not null && forceLogin is null))
             return null;
 
         return new(int.Parse(index.Value, CultureInfo.InvariantCulture), active, included, forceLogin ?? false);
     }
-
-    private static bool? ReadBool(ScalarLocation? field) => field switch
-    {
-        { Quote: null, Value: "true" } => true,
-        { Quote: null, Value: "false" } => false,
-        _ => null,
-    };
 }
 
 internal sealed class OneDragonConfigLinkException : IOException;
@@ -126,6 +110,58 @@ internal static class OneDragonConfigRead
 
     internal static List<string> Lines(string yaml) =>
         YamlScalarEditor.Lines(yaml).Where(line => !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#')).ToList();
+
+    internal sealed record ParsedSequence(bool HasSequence, Dictionary<string, ScalarLocation> Scalars,
+        List<Dictionary<string, ScalarLocation>> Rows);
+
+    // v2.6.0 uses PyYAML's block mapping with an indentless sequence and two-space continuation keys.
+    internal static ParsedSequence? ReadSequence(string yaml, string sequenceKey)
+    {
+        var lines = Lines(yaml);
+        var scalars = new Dictionary<string, ScalarLocation>(StringComparer.Ordinal);
+        var rows = new List<Dictionary<string, ScalarLocation>>();
+        var hasSequence = false;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var key = KeyOf(lines[i]);
+            if (key != sequenceKey)
+            {
+                if (!TryAddScalar(scalars, lines[i], key)) return null;
+                continue;
+            }
+
+            if (hasSequence) return null;
+            hasSequence = true;
+            var tail = lines[i][(key.Length + 1)..].Trim();
+            if (tail == "[]") continue;
+            if (tail.Length != 0 && !tail.StartsWith('#')) return null;
+            if (i + 1 == lines.Count || !lines[i + 1].StartsWith("- ", StringComparison.Ordinal))
+                return null;
+            while (i + 1 < lines.Count && lines[i + 1].StartsWith("- ", StringComparison.Ordinal))
+            {
+                var fields = new Dictionary<string, ScalarLocation>(StringComparer.Ordinal);
+                var first = lines[++i][2..];
+                if (!TryAddScalar(fields, first, KeyOf(first))) return null;
+                while (i + 1 < lines.Count && lines[i + 1].StartsWith("  ", StringComparison.Ordinal))
+                {
+                    var next = lines[++i][2..];
+                    if (!TryAddScalar(fields, next, KeyOf(next))) return null;
+                }
+                rows.Add(fields);
+            }
+        }
+        return new(hasSequence, scalars, rows);
+    }
+
+    private static bool TryAddScalar(Dictionary<string, ScalarLocation> fields, string line, string? key) =>
+        key is not null && YamlScalarEditor.Locate([line], key) is { } scalar && fields.TryAdd(key, scalar);
+
+    internal static bool? ReadBool(ScalarLocation? field) => field switch
+    {
+        { Quote: null, Value: "true" } => true,
+        { Quote: null, Value: "false" } => false,
+        _ => null,
+    };
 
     internal static string? KeyOf(string line)
     {

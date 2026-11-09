@@ -308,13 +308,14 @@ public partial class App : Application
         floating.Show();
         try
         {
-            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var acceptDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             assistant.TestConnectionCommand.Execute(null);
-            using var stalled = await listener.AcceptTcpClientAsync(deadline.Token);
+            using var stalled = await listener.AcceptTcpClientAsync(acceptDeadline.Token);
             var queue = await SmokeQueueAsync(vm.Queue, database);
             if (!assistant.IsBusy) throw new InvalidOperationException("The AI request did not overlap the queue smoke test.");
+            using var cancelDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             floating.Hide();
-            while (assistant.IsBusy) await Task.Delay(20, deadline.Token);
+            while (assistant.IsBusy) await Task.Delay(20, cancelDeadline.Token);
             if (assistant.StatusLine != "未测试" || !assistant.SettingsStatus.Contains("取消", StringComparison.Ordinal))
                 throw new InvalidOperationException("Hiding the assistant did not cancel its request.");
             return queue + " corrupt AI settings, 401, and closing a stalled AI request isolated.";

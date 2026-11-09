@@ -12,25 +12,26 @@ namespace VIvian.Infrastructure.Assistant;
 /// <summary>Live state the tools may read. Supplied by the app; the assistant never touches files directly.</summary>
 public sealed record EngineStatusView(GameId Game, string Name, string Engine, string Version, string State, bool CanRunForReal);
 
-public sealed record ProposalView(string Id, IReadOnlyList<(string Title, string Path, string Old, string New)> Changes,
-    bool Valid, string Reason);
+public sealed record ProposalView(Guid Id, AccountConfigurationTarget Target, string AccountName,
+    IReadOnlyList<(string Title, string Old, string New)> Changes, string Reason);
 
 /// <summary>
 /// The structured operations the assistant may call. Read-only, except <c>propose_changes</c>, which only
 /// prepares a validated proposal: writing it requires the user to press "确认修改" in the window.
 /// </summary>
-public sealed class AssistantTools(IConfigurationControl configuration, Func<GameId, string> installPath,
-    Func<IReadOnlyList<EngineStatusView>> engines, Func<CancellationToken, Task<IReadOnlyList<RunRecord>>> history,
-    LocalDatabase? accountDatabase = null, Func<Guid?>? selectedStarRailAccount = null)
+public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines,
+    Func<CancellationToken, Task<IReadOnlyList<RunRecord>>> history, LocalDatabase? accountDatabase = null,
+    IEnumerable<IAccountConfigurationProvider>? configurationProviders = null)
 {
+    private readonly Dictionary<GameId, IAccountConfigurationProvider> _configuration =
+        (configurationProviders ?? []).ToDictionary(provider => provider.Game);
     private readonly object _proposalLock = new();
-    private readonly Dictionary<string, PendingProposal> _proposals = [];
-    public IReadOnlyList<ProposalView> NewProposals { get; private set; } = [];
+    private readonly Dictionary<Guid, PendingProposal> _proposals = [];
 
-    internal sealed record PendingProposal(ProposalView View, ConfigurationProposal Proposal, DateTimeOffset Expires);
+    internal sealed record PendingProposal(ProposalView View, AccountConfigurationProposal Proposal, DateTimeOffset Expires);
     internal sealed record ToolResult(string Content, PendingProposal? Proposal = null);
 
-    internal IReadOnlyList<ProposalView> Publish(IEnumerable<PendingProposal> pending)
+    internal IReadOnlyList<ProposalView> Publish(IReadOnlyList<PendingProposal> pending)
     {
         lock (_proposalLock)
         {
@@ -46,20 +47,17 @@ public sealed class AssistantTools(IConfigurationControl configuration, Func<Gam
     [
      {"type":"function","function":{"name":"list_games","description":"列出三款游戏、对应引擎、固定版本、安装状态，以及是否能真实执行。","parameters":{"type":"object","properties":{}}}},
      {"type":"function","function":{"name":"list_tasks","description":"列出某款游戏的任务目录（每日/每周/按需）及当前能否真实执行。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"]}}},
-     {"type":"function","function":{"name":"read_configuration","description":"读取某款游戏引擎的真实配置：每项的中文名、路径、当前值、能否修改、取值规则、可选项与依赖。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"]}}},
-     {"type":"function","function":{"name":"propose_changes","description":"为星铁配置生成修改提案并校验（类型、范围、冲突）。不会写入；用户在界面上确认后才写入。值必须取自 read_configuration 给出的规则或可选项。","parameters":{"type":"object","properties":{"changes":{"type":"object","description":"参数路径 → 新值，例如 {\"instance_type\":\"饰品提取\"}","additionalProperties":{"type":"string"}}},"required":["changes"]}}},
+     {"type":"function","function":{"name":"read_configuration","description":"读取指定游戏和内部账号的登记配置、版本和取值规则。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"}},"required":["game","account_id"],"additionalProperties":false}}},
+     {"type":"function","function":{"name":"propose_changes","description":"用刚读取的同一游戏、账号和 revision 生成提案。只能使用 read_configuration 登记的参数路径和字符串值，写入需本机确认。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"revision":{"type":"string"},"changes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["game","account_id","revision","changes"],"additionalProperties":false}}},
      {"type":"function","function":{"name":"get_run_status","description":"读取最近的运行记录：结果、清理状态、原因代码与时间。","parameters":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":20}}}}}
-     ,{"type":"function","function":{"name":"list_accounts","description":"读取已保存的账号档案、执行顺序、登录核对状态和上次结果；不返回密码。","parameters":{"type":"object","properties":{}}}}
-     ,{"type":"function","function":{"name":"read_account_settings","description":"按内部账号 ID 查询其独立的已登记任务设置。","parameters":{"type":"object","properties":{"account_id":{"type":"string"}},"required":["account_id"]}}}
+     ,{"type":"function","function":{"name":"list_accounts","description":"列出指定游戏的内部账号 ID、顺序和核对状态。目标不明确时先询问用户。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"],"additionalProperties":false}}}
      ,{"type":"function","function":{"name":"get_batch_progress","description":"读取最近多账号批次的进度、状态和失败原因。","parameters":{"type":"object","properties":{}}}}
     ]
     """)!.AsArray();
 
-    public async Task<string> ExecuteAsync(string name, string argumentsJson)
+    public void RevokeProposals()
     {
-        var result = await InvokeAsync(name, argumentsJson, CancellationToken.None).ConfigureAwait(false);
-        NewProposals = result.Proposal is { } proposal ? Publish([proposal]) : [];
-        return result.Content;
+        lock (_proposalLock) _proposals.Clear();
     }
 
     internal async Task<ToolResult> InvokeAsync(string name, string argumentsJson, CancellationToken ct)
@@ -77,21 +75,22 @@ public sealed class AssistantTools(IConfigurationControl configuration, Func<Gam
             if (args.Any(p => !properties.ContainsKey(p.Key) || !MatchesType(p.Value, properties[p.Key]!))
                 || (schema["required"] is JsonArray required && required.Any(p => !args.ContainsKey(p!.GetValue<string>()))))
                 return new(Error("工具参数缺失、类型不符或包含未知字段。"));
-            if (name == "propose_changes") return Propose(args);
+            if (name == "propose_changes") return await ProposeAsync(args, ct).ConfigureAwait(false);
             return new(name switch
             {
                 "list_games" => Serialize(engines().Select(e => new
-                { game = Key(e.Game), e.Name, e.Engine, e.Version, e.State, can_run_for_real = e.CanRunForReal })),
+                { game = Key(e.Game), e.Name, e.Engine, e.Version, e.State, can_run_for_real = e.CanRunForReal,
+                    account_configuration = _configuration.ContainsKey(e.Game), ai_control = false })),
                 "list_tasks" => ListTasks(ParseGame(args)),
-                "read_configuration" => ReadConfiguration(ParseGame(args)),
+                "read_configuration" => await ReadConfigurationAsync(ParseTarget(args), ct).ConfigureAwait(false),
                 "get_run_status" => await RunStatusAsync(args, ct).ConfigureAwait(false),
-                "list_accounts" => await ListAccountsAsync(ct).ConfigureAwait(false),
-                "read_account_settings" => await ReadAccountSettingsAsync(args, ct).ConfigureAwait(false),
+                "list_accounts" => await ListAccountsAsync(ParseGame(args), ct).ConfigureAwait(false),
                 "get_batch_progress" => await BatchProgressAsync(ct).ConfigureAwait(false),
                 _ => Error("没有这个工具。"),
             });
         }
         catch (JsonException) { return new(Error("工具参数或配置不是有效的 JSON。")); }
+        catch (SettingsConflictException) { return new(Error("配置版本已变化，请重新读取指定账号的配置。")); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException
             or UnauthorizedAccessException or KeyNotFoundException or Microsoft.Data.Sqlite.SqliteException)
         { return new(Error("工具无法读取目标或校验参数，请检查游戏、账号及安装配置。")); }
@@ -107,17 +106,16 @@ public sealed class AssistantTools(IConfigurationControl configuration, Func<Gam
         _ => false,
     };
 
-    /// <summary>Writes a proposal the user confirmed in the window. Never called by the model.</summary>
-    public ConfigurationApplyResult ApplyConfirmed(string proposalId, string auditDirectory, bool engineRunning)
+    public async Task<AccountConfigurationApplied> ApplyConfirmedAsync(Guid proposalId,
+        Func<AccountConfigurationTarget, bool> stillAllowed, CancellationToken ct = default)
     {
-        if (selectedStarRailAccount?.Invoke() is { } selectedAccountId
-            && selectedAccountId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
-            throw new InvalidOperationException("当前选中新增账号；这份旧提案指向共享上游配置，已阻止写入。");
         PendingProposal? pending;
         lock (_proposalLock) _proposals.Remove(proposalId, out pending);
         if (pending is null || pending.Expires <= DateTimeOffset.UtcNow)
             throw new InvalidOperationException("这个修改提案已失效，请让助手重新生成。");
-        return configuration.ApplyChanges(pending.Proposal, auditDirectory, engineRunning);
+        var proposal = pending.Proposal;
+        return await _configuration[proposal.Target.Game].ApplyAsync(proposal, () => stillAllowed(proposal.Target), ct)
+            .ConfigureAwait(false);
     }
 
     private string ListTasks(GameId game) => Serialize(EngineCatalog.For(game).Tasks.Select(t => new
@@ -126,43 +124,53 @@ public sealed class AssistantTools(IConfigurationControl configuration, Func<Gam
         t.Note, t.Preconditions,
     }));
 
-    private string ReadConfiguration(GameId game)
+    private async Task<string> ReadConfigurationAsync(AccountConfigurationTarget target, CancellationToken ct)
     {
-        if (game == GameId.StarRail && selectedStarRailAccount?.Invoke() is { } id
-            && id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
-            return Error("当前选中新增账号；请使用 read_account_settings 读取该账号独立设置。");
-        var snapshot = configuration.ReadConfiguration(game, installPath(game));
-        return Serialize(snapshot.Values.Select(v => new
+        if (!_configuration.TryGetValue(target.Game, out var provider)) return UnsupportedConfiguration();
+        var snapshot = await provider.ReadAsync(target, ct).ConfigureAwait(false);
+        return Serialize(new
         {
-            v.Schema.Path, v.Schema.Title, v.Schema.Group, value = v.Value, editable = v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null,
-            rule = ParameterRules.Describe(v.Schema), options = ParameterRules.LabelledOptions(v.Schema).Select(o => o.Value),
-            v.Schema.Description, v.Schema.Dependencies, v.State,
-        }));
+            game = Key(target.Game), account_id = target.AccountId, revision = snapshot.Revision,
+            write_unavailable_reason = snapshot.WriteUnavailableReason,
+            values = snapshot.Values.Select(v => new
+            {
+                v.Schema.Path, v.Schema.Title, value = v.Value,
+                editable = snapshot.WriteUnavailableReason is null && v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null,
+                rule = ParameterRules.Describe(v.Schema), options = ParameterRules.LabelledOptions(v.Schema).Select(o => o.Value),
+                v.Schema.Description, v.Schema.Dependencies,
+            }),
+        });
     }
 
-    private ToolResult Propose(JsonObject args)
+    private async Task<ToolResult> ProposeAsync(JsonObject args, CancellationToken ct)
     {
-        if (selectedStarRailAccount?.Invoke() is { } selectedAccountId
-            && selectedAccountId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
-            return new(Error("当前选中新增账号；此工具不会直接修改共享上游配置，请在游戏管理中修改该账号独立设置。"));
-        if (args["changes"] is not JsonObject changes || changes.Count == 0) return new(Error("changes 不能为空。"));
-        if (changes.Count > 20) return new(Error("一次最多修改 20 项。"));
-        var values = changes.ToDictionary(kv => kv.Key, kv => kv.Value!.GetValue<string>());
-        var snapshot = configuration.ReadConfiguration(GameId.StarRail, installPath(GameId.StarRail));
-        var proposal = configuration.ProposeChanges(snapshot, values);
-        if (proposal.Changes.Count == 0) return new(Serialize(new { valid = false, reason = "这些参数已经是目标值，无需修改。" }));
-        var check = configuration.ValidateChanges(proposal, engineRunning: false);
-        string Title(string p) => snapshot.Values.First(v => v.Schema.Path == p).Schema.Title;
-        var id = Guid.NewGuid().ToString("N");
-        var view = new ProposalView(id, proposal.Changes.Select(c => (Title(c.Path), c.Path, c.OldValue, c.NewValue)).ToList(), check.Valid, check.Reason);
-        var pending = check.Valid || check.Deferred ? new PendingProposal(view, proposal, DateTimeOffset.UtcNow.AddMinutes(10)) : null;
+        var target = ParseTarget(args);
+        if (!_configuration.TryGetValue(target.Game, out var provider)) return new(UnsupportedConfiguration());
+        var revision = args["revision"]!.GetValue<string>();
+        if (revision.Length > 256) return new(Error("配置版本格式无效。"));
+        if (args["changes"] is not JsonObject changes || changes.Count is 0 or > 20)
+            return new(Error("请提供 1 至 20 项修改。"));
+        var snapshot = await provider.ReadAsync(target, ct).ConfigureAwait(false);
+        if (snapshot.Revision != revision) return new(Error("配置版本已变化，请重新读取指定账号的配置。"));
+        if (snapshot.WriteUnavailableReason is { } reason) return new(Error(reason));
+
+        var proposal = await provider.ProposeAsync(target, revision, changes.ToDictionary(p => p.Key, p => p.Value!.GetValue<string>()), ct)
+            .ConfigureAwait(false);
+        if (!proposal.Validation.Valid) return new(Serialize(new { valid = false, reason = proposal.Validation.Reason }));
+        if (proposal.Target != target || proposal.Revision != revision || proposal.Id == Guid.Empty || proposal.Changes.Count == 0)
+            return new(Error("提供者没有返回匹配目标的有效提案。"));
+
+        var view = new ProposalView(proposal.Id, target, snapshot.AccountName, proposal.Changes.Select(c =>
+            (snapshot.Values.Single(v => v.Schema.Path == c.Path).Schema.Title, c.OldValue, c.NewValue)).ToArray(), proposal.Validation.Reason);
         return new(Serialize(new
         {
-            proposal_id = check.Valid || check.Deferred ? id : null, valid = check.Valid, check.Reason,
-            changes = view.Changes.Select(c => new { c.Title, c.Path, from = c.Old, to = c.New }),
-            note = "尚未写入。提案将在本轮成功结束后展示给用户确认。",
-        }), pending);
+            proposal_id = proposal.Id, game = Key(target.Game), account_id = target.AccountId, revision, valid = true,
+            changes = proposal.Changes.Select(c => new { c.Path, from = c.OldValue, to = c.NewValue }),
+            note = "尚未写入。本轮成功结束后才会显示确认卡。",
+        }), new(view, proposal, DateTimeOffset.UtcNow.AddMinutes(10)));
     }
+
+    private static string UnsupportedConfiguration() => Error("此游戏的账号配置提供者尚未验收，当前可查询游戏和任务能力。");
 
     private async Task<string> RunStatusAsync(JsonObject args, CancellationToken ct)
     {
@@ -170,28 +178,22 @@ public sealed class AssistantTools(IConfigurationControl configuration, Func<Gam
         var runs = await history(ct).ConfigureAwait(false);
         return Serialize(runs.Take(limit).Select(r => new
         {
-            game = r.Game.ToString(), outcome = r.Outcome?.ToString() ?? "未结束", cleanup = r.Cleanup.ToString(), reason = r.ReasonCode,
-            simulation = r.IsSimulation, updated = r.UpdatedAt.ToLocalTime().ToString("MM-dd HH:mm"),
+            run_id = r.RunId, game = Key(r.Game), phase = r.Phase.ToString(), outcome = r.Outcome?.ToString(),
+            cleanup = r.Cleanup.ToString(), reason = RunPresentation.Reason(r.ReasonCode),
+            simulation = r.IsSimulation, updated = r.UpdatedAt,
         }));
     }
 
-    private async Task<string> ListAccountsAsync(CancellationToken ct)
+    private async Task<string> ListAccountsAsync(GameId game, CancellationToken ct)
     {
         if (accountDatabase is null) return Error("账号数据尚未连接。");
-        var accounts = await accountDatabase.LoadAccountsAsync(ct: ct).ConfigureAwait(false);
-        return Serialize(accounts.Select(a => new { account_id = a.Id, game = Key(a.Game), a.Name, a.Region,
-            a.Enabled, a.AutoRun, a.Order, a.VerificationState, a.LastResult }));
-    }
-
-    private async Task<string> ReadAccountSettingsAsync(JsonObject args, CancellationToken ct)
-    {
-        if (accountDatabase is null) return Error("账号数据尚未连接。");
-        if (!Guid.TryParse(args["account_id"]?.GetValue<string>(), out var id)) return Error("账号 ID 无效。");
-        var account = (await accountDatabase.LoadAccountsAsync(ct: ct).ConfigureAwait(false)).SingleOrDefault(a => a.Id == id);
-        if (account is null) return Error("账号不存在。");
-        var settings = await accountDatabase.LoadAccountSettingsAsync(id, ct).ConfigureAwait(false);
-        var plan = await accountDatabase.LoadAccountTaskPlanAsync(id, ct).ConfigureAwait(false);
-        return Serialize(new { account_id = id, account.Name, settings.Values, plan.DailyEnabled });
+        var accounts = await accountDatabase.LoadAccountsAsync(game, ct).ConfigureAwait(false);
+        return Serialize(accounts.Take(100).Select(a => new
+        {
+            account_id = a.Id, game = Key(a.Game), slot = a.Order + 1, a.Enabled, a.AutoRun,
+            verification = a.VerificationState is "verified" or "manual_verified" ? "verified" : "unverified",
+            last_result = a.LastResult switch { "success" or "failed" or "needs_user" => a.LastResult, null => null, _ => "other" },
+        }));
     }
 
     private async Task<string> BatchProgressAsync(CancellationToken ct)
@@ -199,7 +201,15 @@ public sealed class AssistantTools(IConfigurationControl configuration, Func<Gam
         if (accountDatabase is null) return Error("账号数据尚未连接。");
         var batches = await accountDatabase.LoadRecentBatchesAsync(5, ct).ConfigureAwait(false);
         return Serialize(batches.Select(b => new { batch_id = b.Id, game = Key(b.Game),
-            current_account_id = b.CurrentAccountId, b.State, b.StartedAt, b.UpdatedAt }));
+            current_account_id = b.CurrentAccountId, state = b.State is "running" or "finished" or "failed" or "stopped" or "interrupted" ? b.State : "unknown",
+            b.StartedAt, b.UpdatedAt }));
+    }
+
+    private static AccountConfigurationTarget ParseTarget(JsonObject args)
+    {
+        if (!Guid.TryParseExact(ChatCompletionsClient.StringValue(args["account_id"]), "D", out var id) || id == Guid.Empty)
+            throw new ArgumentException("内部账号 ID 无效。");
+        return new(ParseGame(args), id);
     }
 
     private static GameId ParseGame(JsonObject args) => (args["game"]?.GetValue<string>() ?? "") switch

@@ -2,7 +2,6 @@ using System.Net;
 using System.Text.Json.Nodes;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Assistant;
-using VIvian.Infrastructure.Engines;
 using Xunit;
 
 namespace VIvian.Tests.Engines;
@@ -58,7 +57,7 @@ public sealed class AssistantToolProtocolTests
 
     private static AssistantSession Session(HttpClient http, Func<CancellationToken, Task<IReadOnlyList<RunRecord>>>? history = null) =>
         new(new ChatCompletionsClient(http),
-            new AssistantTools(new VersionedConfigurationControl(), _ => "", () => [], history ?? (_ => Task.FromResult<IReadOnlyList<RunRecord>>([]))),
+            new AssistantTools(() => [], history ?? (_ => Task.FromResult<IReadOnlyList<RunRecord>>([]))),
             "芙宁娜", toolTimeout: TimeSpan.FromMilliseconds(100));
 
     private static JsonObject Call(string id, string name, string arguments) => new()

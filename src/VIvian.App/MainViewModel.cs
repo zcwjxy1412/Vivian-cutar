@@ -342,12 +342,18 @@ public sealed class MainViewModel : ObservableObject
             card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
             card.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(EngineCard.Compatibility)) RaiseHome(); };
         }
+        bool ConfigurationBlocked() => BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
+        var starRailConfiguration = new VIvian.Infrastructure.Assistant.StarRailAccountConfigurationProvider(
+            accounts.Database, _control, () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath, ConfigurationBlocked);
         Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
-            new VIvian.Infrastructure.Assistant.AssistantTools(_control, game => Engines.Single(e => e.Id == game).InstallPath,
-                () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version, e.Compatibility, e.CanRunForReal)).ToList(),
-                ct => _runs.ReadRecentRunsAsync(20, ct), accounts.Database, () => accounts.SelectedStarRail?.Id),
-            () => BatchRunning || Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
-            () => { _ = Configuration.ReadAsync(); });
+            new VIvian.Infrastructure.Assistant.AssistantTools(
+                () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version,
+                    e.Report?.Compatibility.ToString() ?? "not_checked", e.CanRunForReal)).ToList(),
+                ct => _runs.ReadRecentRunsAsync(20, ct), accounts.Database, [starRailConfiguration]),
+            target => target.Game == GameId.StarRail && accounts.SelectedStarRail?.Id == target.AccountId
+                && !ConfigurationBlocked() && Configuration.PendingCount == 0,
+            paths.DataDirectory, Configuration.ReadAsync);
+        accounts.SelectionChanged += Assistant.InvalidateProposals;
         Configuration.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ConfigurationViewModel.PendingCount)) RaiseHome();

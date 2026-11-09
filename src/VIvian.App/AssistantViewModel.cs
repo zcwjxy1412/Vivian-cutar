@@ -2,7 +2,10 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
+using VIvian.Core.Engines;
+using VIvian.Core.Execution;
 using VIvian.Infrastructure.Assistant;
+using VIvian.Infrastructure.Processes;
 
 namespace VIvian.App;
 
@@ -12,10 +15,12 @@ public sealed class ProposalCard : ObservableObject
     public ProposalCard(ProposalView view, Func<ProposalCard, Task> confirm)
     {
         _view = view;
-        _state = view.Valid ? "等待你确认" : "暂时不能写入：" + view.Reason;
-        ConfirmCommand = new(() => confirm(this), ex => State = ex.Message);
+        _state = "等待你确认";
+        ConfirmCommand = new(() => confirm(this), _ => State = "写入未通过核对，请重新读取配置。");
     }
-    public string Id => _view.Id;
+    public Guid Id => _view.Id;
+    public AccountConfigurationTarget Target => _view.Target;
+    public string TargetText => $"{RunPresentation.GameName(Target.Game)} · {_view.AccountName} · {Target.AccountId:D}";
     public string Lines => string.Join("\n", _view.Changes.Select(c => $"{c.Title}：{c.Old} → {c.New}"));
     public string Reason => _view.Reason;
     private string _state;
@@ -51,9 +56,10 @@ public sealed class AssistantViewModel : ObservableObject
     private int _settingsRevision;
     private readonly AssistantSettingsStore _settings;
     private readonly AssistantTools _tools;
-    private readonly Func<bool> _isRunning;
-    private readonly string _auditDirectory;
-    private readonly Action _afterApply;
+    private readonly Func<AccountConfigurationTarget, bool> _canApply;
+    private readonly string _profileDirectory;
+    private readonly Func<Task> _afterApply;
+    private int _confirmationRevision;
     private AssistantSession _session;
     private AssistantEndpoint _endpoint;
 
@@ -61,7 +67,7 @@ public sealed class AssistantViewModel : ObservableObject
     public ArtSlot Avatar { get; }
     public string Name => Theme.AssistantName;
     public ObservableCollection<ChatItem> Messages { get; } = [];
-    public IReadOnlyList<string> QuickCommands { get; } = ["帮我检查星铁日常的配置", "清体力改成饰品提取", "最近一次运行结果怎样", "三款游戏现在的状态"];
+    public IReadOnlyList<string> QuickCommands { get; } = ["列出星铁账号", "帮我检查星铁日常的配置", "最近一次运行结果怎样", "三款游戏现在的状态"];
 
     private string _input = "";
     public string Input { get => _input; set => Set(ref _input, value); }
@@ -90,11 +96,11 @@ public sealed class AssistantViewModel : ObservableObject
     public RelayCommand CancelRequestCommand { get; }
     public RelayCommand<string> QuickCommand { get; }
 
-    public AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools, Func<bool> isRunning,
-        string auditDirectory, Action afterApply)
+    public AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools,
+        Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply)
     {
         Theme = theme; Avatar = new ArtSlot(theme.Assistant); _settings = settings; _tools = tools;
-        _isRunning = isRunning; _auditDirectory = auditDirectory; _afterApply = afterApply;
+        _canApply = canApply; _profileDirectory = profileDirectory; _afterApply = afterApply;
         _endpoint = settings.Load();
         _baseUrl = _endpoint.BaseUrl; _model = _endpoint.Model;
         _session = new AssistantSession(_client, tools, theme.AssistantName);
@@ -139,19 +145,51 @@ public sealed class AssistantViewModel : ObservableObject
         finally { _request = null; IsBusy = false; }
     }
 
-    private Task ConfirmAsync(ProposalCard card)
+    private async Task ConfirmAsync(ProposalCard card)
     {
-        if (MessageBox.Show("将写入星铁助手的配置：\n\n" + card.Lines + "\n\n写入前自动备份，写入后读回核对。", $"{Name} · 确认修改",
-                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return Task.CompletedTask;
+        if (!card.CanConfirm) return;
+        var revision = Volatile.Read(ref _confirmationRevision);
+        if (!_canApply(card.Target))
+        {
+            card.State = "请先选中卡片上的账号，并确认任务、清理和配置恢复均已结束。";
+            return;
+        }
+        if (MessageBox.Show($"{card.TargetText}\n\n{card.Lines}\n\n确认写入该账号的独立设置？系统会保留备份和审计，并读回核对。",
+                $"{Name} · 确认修改", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+        card.CanConfirm = false;
         try
         {
-            _tools.ApplyConfirmed(card.Id, _auditDirectory, _isRunning());
-            card.State = "已写入并读回核对 ✓"; card.CanConfirm = false;
-            _afterApply();
+            using var desktop = DesktopOperationLease.Acquire(_profileDirectory);
+            var applied = await _tools.ApplyConfirmedAsync(card.Id,
+                target => revision == Volatile.Read(ref _confirmationRevision) && _canApply(target));
+            card.State = $"已写入并读回核对 · 审计 {applied.AuditId:D}";
         }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
-        { card.State = "没有写入：" + ex.Message; }
-        return Task.CompletedTask;
+        catch (VIvian.Core.SettingsConflictException)
+        {
+            card.State = "配置版本已变化，请重新读取并生成提案。";
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
+            or ArgumentException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            card.State = "写入未通过核对。请检查账号、运行与恢复状态，再重新生成提案。";
+            return;
+        }
+        try { await _afterApply(); }
+        catch (Exception) { card.State += " · 游戏管理页刷新失败，请手动重新读取"; }
+    }
+
+    public void InvalidateProposals()
+    {
+        Interlocked.Increment(ref _confirmationRevision);
+        CancelRequest();
+        _tools.RevokeProposals();
+        foreach (var card in Messages.SelectMany(message => message.Proposals).Where(card => card.CanConfirm))
+        {
+            card.CanConfirm = false;
+            card.State = "账号或接口已变更，请重新生成提案。";
+        }
     }
 
     private Task SaveSettingsAsync()
@@ -165,7 +203,10 @@ public sealed class AssistantViewModel : ObservableObject
         }
         _settings.Save(endpoint);
         if (endpoint != _endpoint)
+        {
+            InvalidateProposals();
             _session = new AssistantSession(_client, _tools, Name);
+        }
         _endpoint = endpoint;
         _newApiKey = "";
         Raise(nameof(NewApiKey));

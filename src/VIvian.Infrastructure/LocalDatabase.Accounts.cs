@@ -39,7 +39,7 @@ public sealed partial class LocalDatabase
         return result;
     }
 
-    private static Guid LegacyId(GameId game) => game switch
+    internal static Guid LegacyId(GameId game) => game switch
     {
         GameId.Genshin => Guid.Parse("00000000-0000-4000-8000-000000000001"),
         GameId.StarRail => Guid.Parse("00000000-0000-4000-8000-000000000002"),
@@ -199,11 +199,7 @@ public sealed partial class LocalDatabase
 
     public async Task<AccountSettingsSnapshot> SaveAccountSettingsAsync(AccountSettingsSnapshot settings, CancellationToken ct = default)
     {
-        var allowed = EngineCatalog.March7th.Parameters.Where(p => p.Access == ParameterAccess.VerifiedReadWrite)
-            .ToDictionary(p => p.Path);
-        foreach (var (key, value) in settings.Values)
-            if (!allowed.TryGetValue(key, out var parameter) || !ParameterRules.IsValid(parameter, value))
-                throw new ArgumentException("账号设置包含不支持的字段或值：" + key);
+        ValidateStarRailAccountSettings(settings.Values);
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "UPDATE account_settings SET settings_json=$json,revision=revision+1 WHERE account_id=$id AND revision=$revision;";
@@ -212,6 +208,15 @@ public sealed partial class LocalDatabase
         cmd.Parameters.AddWithValue("$revision", settings.Revision);
         if (await cmd.ExecuteNonQueryAsync(ct) != 1) throw new SettingsConflictException();
         return settings with { Revision = settings.Revision + 1 };
+    }
+
+    private static void ValidateStarRailAccountSettings(IReadOnlyDictionary<string, string> values)
+    {
+        var allowed = EngineCatalog.March7th.Parameters.Where(p => p.Access == ParameterAccess.VerifiedReadWrite)
+            .ToDictionary(p => p.Path);
+        foreach (var (key, value) in values)
+            if (!allowed.TryGetValue(key, out var parameter) || !ParameterRules.IsValid(parameter, value))
+                throw new ArgumentException("账号设置包含不支持的字段或值：" + key);
     }
 
     public async Task<AccountBatch> BeginBatchAsync(GameId game, string mode = "unified", CancellationToken ct = default)

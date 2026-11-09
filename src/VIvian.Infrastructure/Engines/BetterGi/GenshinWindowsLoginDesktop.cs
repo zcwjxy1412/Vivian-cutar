@@ -105,23 +105,23 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         var card = GenshinLoginScreen.Analyze(frame.Width, frame.Height, lines);
         if (card.State == GenshinLoginScreenState.NeedsUser) return View(GenshinView.NeedsUser);
         var caret = Find("caret.png", Region(1045, 440, 225, 115));
-        if (card is { State: GenshinLoginScreenState.SavedAccountCard, Account: { } row })
-            return new(window, GenshinView.Card, [row], card.EnterLabel, caret);
-
         var normalized = lines.Select(line => line with { Text = string.Concat(line.Text.Where(c => !char.IsWhiteSpace(c))) }).ToArray();
         var masks = normalized.Where(line => GenshinLoginScreen.NormalizeExactMask(line.Text).Length != 0).ToArray();
         // An expanded list can cover the original button labels. Require the pinned dropdown caret and brand.
         var brand = Label(normalized, Region(835, 280, 250, 190), t => t.Equals("miHoYo", StringComparison.OrdinalIgnoreCase));
-        var accountList = Region(670, 460, 565, 515);
-        if (brand is not null && caret is not null && masks.Length >= 2 &&
-            masks.All(line => accountList.Contains(line.CenterX, line.CenterY)))
+        var accountList = Region(670, 540, 565, 435);
+        var listRows = masks.Where(line => accountList.Contains(line.CenterX, line.CenterY)).ToArray();
+        if (brand is not null && caret is not null && listRows.Length > 0 &&
+            masks.Length - listRows.Length <= 1)
         {
-            var rows = masks.OrderBy(line => line.CenterY).Select((line, index) => new LoginAccountObservation(
+            var rows = listRows.OrderBy(line => line.CenterY).Select((line, index) => new LoginAccountObservation(
                 line.Text, GenshinLoginScreen.NormalizeExactMask(line.Text), index, line.X, line.Y,
                 line.Width, line.Height, .85, "")).ToArray();
             if (rows.Zip(rows.Skip(1)).All(pair => pair.First.Y + pair.First.Height < pair.Second.Y))
                 return new(window, GenshinView.Dropdown, rows, null);
         }
+        if (card is { State: GenshinLoginScreenState.SavedAccountCard, Account: { } row })
+            return new(window, GenshinView.Card, [row], card.EnterLabel, caret);
         if (brand is not null || masks.Length > 0) return View(GenshinView.Unknown);
 
         var dialog = Region(675, 365, 570, 370);

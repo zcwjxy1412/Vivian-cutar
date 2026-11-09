@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using VIvian.Core;
 using VIvian.Core.Accounts;
 using VIvian.Infrastructure;
@@ -90,6 +91,75 @@ public sealed class GenshinAccountImportTests
         Assert.NotEqual(manual.Id, result.Account!.Id);
         Assert.Contains(manual, await database.LoadAccountsAsync(GameId.Genshin));
         Assert.Equal(result.Account.Id, Assert.Single(await database.LoadLoginProfilesAsync(GameId.Genshin)).AccountId);
+    }
+
+    [Fact]
+    public async Task ExplicitBindingPreservesTasksAndSettingsAndIsIdempotent()
+    {
+        await using var fixture = new BetterGiFixture();
+        var path = Path.Combine(fixture.Root, "import.db");
+        var database = new LocalDatabase(path);
+        await database.InitializeAsync();
+        var selected = await database.AddAccountAsync(GameId.Genshin, "手工档案", "", null);
+        await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = path, Pooling = false }.ToString()))
+        {
+            await connection.OpenAsync();
+            using var seed = connection.CreateCommand();
+            seed.CommandText = "UPDATE account_settings SET settings_json=$settings, revision=2 WHERE account_id=$id;";
+            seed.Parameters.AddWithValue("$settings", """{"dailyRewards":"true"}""");
+            seed.Parameters.AddWithValue("$id", selected.Id.ToString("D"));
+            Assert.Equal(1, await seed.ExecuteNonQueryAsync());
+        }
+        var taskPlan = await database.LoadAccountTaskPlanAsync(selected.Id);
+        var savedPlan = await database.SaveAccountTaskPlanAsync(taskPlan with { DailyEnabled = true });
+        var service = new GenshinAccountImportService(database);
+
+        var bound = await service.RegisterRecognizedAsync(960, 1280, Card(), default, selected.Id);
+        var repeated = await service.RegisterRecognizedAsync(960, 1280, Card("１３８＊＊＊＊９７"), default, selected.Id);
+
+        Assert.True(bound.Success);
+        Assert.False(bound.Created);
+        Assert.Equal(selected.Id, bound.Account!.Id);
+        Assert.Equal("recognized", bound.Account.LoginState);
+        Assert.Equal(selected.Name, bound.Account.Name);
+        Assert.Null(bound.Account.Uid);
+        Assert.True(repeated.Success);
+        Assert.False(repeated.Created);
+        Assert.Equal(bound.Account, repeated.Account);
+        Assert.Equal(selected.Id, Assert.Single(await database.LoadLoginProfilesAsync(GameId.Genshin)).AccountId);
+        var currentSettings = await database.LoadAccountSettingsAsync(selected.Id);
+        Assert.Equal(2, currentSettings.Revision);
+        Assert.Equal("true", currentSettings.Values["dailyRewards"]);
+        Assert.Equal(savedPlan, await database.LoadAccountTaskPlanAsync(selected.Id));
+    }
+
+    [Fact]
+    public async Task ExplicitBindingRefusesConflictsAndIneligibleTargets()
+    {
+        await using var fixture = new BetterGiFixture();
+        var database = new LocalDatabase(Path.Combine(fixture.Root, "import.db"));
+        await database.InitializeAsync();
+        var legacy = Assert.Single(await database.LoadAccountsAsync(GameId.Genshin));
+        var first = await database.AddAccountAsync(GameId.Genshin, "已有绑定", "", null);
+        var other = await database.AddAccountAsync(GameId.Genshin, "待绑定", "", null);
+        var starRail = await database.AddAccountAsync(GameId.StarRail, "星铁档案", "", null);
+        var zenless = await database.AddAccountAsync(GameId.ZenlessZoneZero, "绝区零档案", "", null);
+        var disabled = await database.AddAccountAsync(GameId.Genshin, "停用档案", "", null);
+        await database.SaveAccountAsync(disabled with { Enabled = false });
+        var service = new GenshinAccountImportService(database);
+        await database.SaveLoginProfileAsync(first.Id, "138****97", "138****97", 0, 1, null, "合成测试");
+
+        var usedByAnother = await service.RegisterRecognizedAsync(960, 1280, Card(), default, other.Id);
+        var differentIdentity = await service.RegisterRecognizedAsync(960, 1280, Card("139****61"), default, first.Id);
+        Assert.False(usedByAnother.Success);
+        Assert.False(differentIdentity.Success);
+        foreach (var id in new[] { starRail.Id, zenless.Id, legacy.Id, disabled.Id, Guid.NewGuid(), Guid.Empty })
+            Assert.False((await service.RegisterRecognizedAsync(960, 1280, Card("139****61"), default, id)).Success);
+
+        var profile = Assert.Single(await database.LoadLoginProfilesAsync());
+        Assert.Equal(first.Id, profile.AccountId);
+        Assert.Equal("138****97", profile.NormalizedPhone);
     }
 
     [Fact]

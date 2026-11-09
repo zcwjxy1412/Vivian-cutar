@@ -8,7 +8,13 @@ public sealed record GenshinAccountImportResult(bool Success, string Detail, Gam
 
 public sealed class GenshinAccountImportService(LocalDatabase database)
 {
-    public async Task<GenshinAccountImportResult> ImportAndRegisterAsync(string path, CancellationToken ct = default)
+    public Task<GenshinAccountImportResult> ImportAndRegisterAsync(string path, CancellationToken ct = default) =>
+        ImportAsync(path, null, ct);
+
+    public Task<GenshinAccountImportResult> BindExistingAsync(string path, Guid accountId, CancellationToken ct = default) =>
+        ImportAsync(path, accountId, ct);
+
+    private async Task<GenshinAccountImportResult> ImportAsync(string path, Guid? accountId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         var frame = await WindowsOcrReader.DecodeFileAsync(path, ct).ConfigureAwait(false);
@@ -26,11 +32,11 @@ public sealed class GenshinAccountImportService(LocalDatabase database)
             if (enter is not null && enter.Bottom < frame.Height && enter.Width >= 8 && enter.Height >= 8)
                 lines = [.. lines, .. await ReadPhotoCaptionAsync(frame, enter, ct).ConfigureAwait(false)];
         }
-        return await RegisterRecognizedAsync(frame.Width, frame.Height, lines, ct).ConfigureAwait(false);
+        return await RegisterRecognizedAsync(frame.Width, frame.Height, lines, ct, accountId).ConfigureAwait(false);
     }
 
     internal async Task<GenshinAccountImportResult> RegisterRecognizedAsync(int width, int height,
-        IReadOnlyList<RecognizedText> lines, CancellationToken ct)
+        IReadOnlyList<RecognizedText> lines, CancellationToken ct, Guid? accountId = null)
     {
         ct.ThrowIfCancellationRequested();
         var screen = AnalyzeImport(width, height, lines);
@@ -39,7 +45,11 @@ public sealed class GenshinAccountImportService(LocalDatabase database)
                 ? "请先在游戏中完成登录验证，再导入显示脱敏账号的照片。"
                 : "未识别出唯一的原神脱敏账号，请使用显示完整账号卡片的登录照片。");
 
-        var (saved, created) = await database.RegisterGenshinPhotoAccountAsync(account, ct).ConfigureAwait(false);
+        var (saved, created) = await database.RegisterGenshinPhotoAccountAsync(account, accountId, ct).ConfigureAwait(false);
+        if (accountId.HasValue)
+            return saved is null
+                ? new(false, "无法绑定所选档案。请确认它是已启用的独立原神档案，且双方的登录标识没有冲突。")
+                : new(true, "已核对所选原神档案的登录绑定，原有任务和设置已保留。", saved);
         return saved is null
             ? new(false, "无法唯一确定已登记的原神账号，请检查档案。")
             : new(true, created ? "已新建原神档案。已有手工档案在绑定同一脱敏登录标识后才会复用。" : "此原神账号已登记，已返回现有档案。", saved, created);

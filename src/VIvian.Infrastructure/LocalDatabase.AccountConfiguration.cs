@@ -6,12 +6,26 @@ namespace VIvian.Infrastructure;
 
 public sealed partial class LocalDatabase
 {
-    internal async Task<long> SaveVerifiedAccountConfigurationAsync(GameAccount account, AccountSettingsSnapshot previous,
+    internal Task<long> SaveVerifiedAccountConfigurationAsync(GameAccount account, AccountSettingsSnapshot previous,
         IReadOnlyDictionary<string, string> values, Guid proposalId, Func<bool> stillAllowed, CancellationToken ct)
     {
         if (account.Game != GameId.StarRail || account.Id == LegacyId(GameId.StarRail) || account.Id != previous.AccountId)
             throw new InvalidOperationException("配置写入要求独立星铁账号。");
         ValidateStarRailAccountSettings(values);
+        return WriteVerifiedConfigurationAsync(account, previous, values, proposalId, stillAllowed, ct);
+    }
+
+    internal Task<long> SaveVerifiedGenshinConfigurationAsync(GameAccount account, AccountSettingsSnapshot previous,
+        IReadOnlyDictionary<string, string> validatedValues, Guid proposalId, Func<bool> stillAllowed, CancellationToken ct)
+    {
+        if (account.Game != GameId.Genshin || account.Id != previous.AccountId || proposalId == Guid.Empty)
+            throw new InvalidOperationException("配置写入要求匹配的原神账号档案。");
+        return WriteVerifiedConfigurationAsync(account, previous, validatedValues, proposalId, stillAllowed, ct);
+    }
+
+    private async Task<long> WriteVerifiedConfigurationAsync(GameAccount account, AccountSettingsSnapshot previous,
+        IReadOnlyDictionary<string, string> values, Guid proposalId, Func<bool> stillAllowed, CancellationToken ct)
+    {
         var updated = JsonSerializer.Serialize(values);
         await using var connection = await OpenAsync(ct).ConfigureAwait(false);
         using var transaction = connection.BeginTransaction();

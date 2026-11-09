@@ -202,7 +202,11 @@ public sealed partial class LocalDatabase
         ValidateStarRailAccountSettings(settings.Values);
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "UPDATE account_settings SET settings_json=$json,revision=revision+1 WHERE account_id=$id AND revision=$revision;";
+        cmd.CommandText = """
+            UPDATE account_settings SET settings_json=$json,revision=revision+1 WHERE account_id=$id AND revision=$revision
+            AND EXISTS (SELECT 1 FROM game_accounts a WHERE a.account_id=$id AND a.game=$game);
+            """;
+        cmd.Parameters.AddWithValue("$game", (int)GameId.StarRail);
         cmd.Parameters.AddWithValue("$json", JsonSerializer.Serialize(settings.Values));
         cmd.Parameters.AddWithValue("$id", DatabaseId(settings.AccountId));
         cmd.Parameters.AddWithValue("$revision", settings.Revision);

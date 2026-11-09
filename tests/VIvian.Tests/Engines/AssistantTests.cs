@@ -137,6 +137,38 @@ public sealed class AssistantTests : IDisposable
         Assert.DoesNotContain(a.Name, progress);
     }
 
+    [Fact]
+    public async Task StarRailRunPlansAreOptInReadOnlyAndHaveASingleDurableActionId()
+    {
+        File.AppendAllText(Config, "use_fuel: false\nuse_reserved_trailblaze_power: false\n");
+        var (db, provider, tools, a, _) = await SetupAsync();
+        await db.SaveLoginProfileAsync(a.Id, "123****1234", "123****1234", 0, 1, null, "fixture", Ct);
+        var target = new AccountConfigurationTarget(GameId.StarRail, a.Id);
+        var snapshot = await provider.ReadAsync(target, Ct);
+        var args = new JsonObject
+        {
+            ["game"] = "starrail", ["account_id"] = a.Id.ToString("D"), ["revision"] = snapshot.Revision,
+            ["task_id"] = "routine", ["resource_policy"] = "saved_account_settings",
+        };
+        Assert.DoesNotContain("propose_run", tools.Definitions().ToJsonString());
+        Assert.Null((await tools.InvokeAsync("propose_run", args.ToJsonString(), Ct)).RunPlan);
+
+        tools.ScheduleProposalsEnabled = true;
+        Assert.Contains("propose_run", tools.Definitions().ToJsonString());
+        args["resource_policy"] = "spend_everything";
+        Assert.Null((await tools.InvokeAsync("propose_run", args.ToJsonString(), Ct)).RunPlan);
+        args["resource_policy"] = "saved_account_settings";
+        var result = await tools.InvokeAsync("propose_run", args.ToJsonString(), Ct);
+        var plan = Assert.IsType<AssistantRunPlan>(result.RunPlan);
+        Assert.Equal(target, plan.Target);
+        Assert.Contains("燃料：禁止", plan.Resources);
+        Assert.Empty(await db.LoadRecentBatchesAsync());
+
+        var submitted = await db.BeginBatchAsync(GameId.StarRail, actionId: plan.Id);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => db.BeginBatchAsync(GameId.StarRail, actionId: plan.Id));
+        Assert.Equal(submitted, Assert.Single(await db.LoadRecentBatchesAsync()));
+    }
+
     private async Task<(LocalDatabase Db, StarRailAccountConfigurationProvider Provider, AssistantTools Tools, GameAccount A, GameAccount B)>
         SetupAsync(Func<bool>? busy = null)
     {

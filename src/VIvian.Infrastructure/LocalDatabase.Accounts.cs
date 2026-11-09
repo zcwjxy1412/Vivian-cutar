@@ -219,20 +219,26 @@ public sealed partial class LocalDatabase
                 throw new ArgumentException("账号设置包含不支持的字段或值：" + key);
     }
 
-    public async Task<AccountBatch> BeginBatchAsync(GameId game, string mode = "unified", CancellationToken ct = default)
+    public async Task<AccountBatch> BeginBatchAsync(GameId game, string mode = "unified", CancellationToken ct = default,
+        Guid? actionId = null)
     {
         if (mode is not ("unified" or "independent")) throw new ArgumentOutOfRangeException(nameof(mode));
         var now = DateTimeOffset.UtcNow;
-        var batch = new AccountBatch(Guid.NewGuid(), game, now, now, "running", null, "等待账号登录", mode);
-        await SaveBatchAsync(batch, ct);
+        if (actionId == Guid.Empty) throw new ArgumentException("运行计划标识无效。", nameof(actionId));
+        var batch = new AccountBatch(actionId ?? Guid.NewGuid(), game, now, now, "running", null, "等待账号登录", mode);
+        await WriteBatchAsync(batch, ct, createOnly: actionId.HasValue);
         return batch;
     }
 
-    public async Task SaveBatchAsync(AccountBatch batch, CancellationToken ct = default)
+    public Task SaveBatchAsync(AccountBatch batch, CancellationToken ct = default) => WriteBatchAsync(batch, ct, createOnly: false);
+
+    private async Task WriteBatchAsync(AccountBatch batch, CancellationToken ct, bool createOnly)
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO batch_execution_records(id,game,started_at,updated_at,state,current_account_id,detail,mode) VALUES($id,$game,$start,$update,$state,$account,$detail,$mode) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,state=excluded.state,current_account_id=excluded.current_account_id,detail=excluded.detail,mode=excluded.mode;";
+        const string insert = "INSERT INTO batch_execution_records(id,game,started_at,updated_at,state,current_account_id,detail,mode) VALUES($id,$game,$start,$update,$state,$account,$detail,$mode)";
+        cmd.CommandText = insert + (createOnly ? " ON CONFLICT(id) DO NOTHING;" :
+            " ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,state=excluded.state,current_account_id=excluded.current_account_id,detail=excluded.detail,mode=excluded.mode;");
         cmd.Parameters.AddWithValue("$id", batch.Id.ToString("D"));
         cmd.Parameters.AddWithValue("$game", (int)batch.Game);
         cmd.Parameters.AddWithValue("$start", batch.StartedAt.ToString("O"));
@@ -241,7 +247,8 @@ public sealed partial class LocalDatabase
         cmd.Parameters.AddWithValue("$account", batch.CurrentAccountId is null ? DBNull.Value : (object)DatabaseId(batch.CurrentAccountId.Value));
         cmd.Parameters.AddWithValue("$detail", batch.Detail);
         cmd.Parameters.AddWithValue("$mode", batch.Mode);
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) != 1)
+            throw new InvalidOperationException("此运行计划已经提交，请查看批次记录。");
     }
 
     public async Task RecordAccountResultAsync(Guid batchId, Guid accountId, Guid? runId, string result,

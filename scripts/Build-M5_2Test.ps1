@@ -15,9 +15,11 @@ if (-not (Test-Path "$Target/VIvian.exe") -or -not (Test-Path "$Target/coreclr.d
 'VIvian M5 daily test; isolated data; elevation before batch' | Set-Content "$Target/VIvian-M5-DailyTest.marker" -Encoding ascii
 Copy-Item 'docs/M5_2_DELIVERY.md' "$Target/使用说明-M5.2.md"
 Copy-Item 'docs/M5_2_ACCEPTANCE.md' "$Target/验收状态-M5.2.md"
+Copy-Item 'docs/parallel/ai-status.md' "$Target/M6-AI验收说明.md"
+Copy-Item 'scripts/Initialize-M6DesktopLock.ps1' "$Target/Initialize-M6DesktopLock.ps1"
 Copy-Item 'docs/M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md' "$Target/账号切换截图流程.md"
 @(
-  "VIvian M5.2 自动账号切换实测版"
+  "VIvian M6 星铁隔离测试版"
   "版本: 0.5.2-dev+$commit"
   "源码提交: $commit"
   "构建时间(UTC): $((Get-Date).ToUniversalTime().ToString('o'))"

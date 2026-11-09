@@ -39,6 +39,7 @@ ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei
 <Button Style="{StaticResource Primary}" Content="保存" Command="{Binding SaveSettingsCommand}"/>
 <Button Content="测试连接" Command="{Binding TestConnectionCommand}" Margin="6,0,0,0"/>
 </WrapPanel>
+<CheckBox Content="允许芙宁娜生成待确认的星铁运行计划" IsChecked="{Binding EnableScheduleProposals}" Visibility="{Binding ScheduleSettingsVisibility}" Margin="0,8,0,0"/>
 <TextBlock Text="{Binding SettingsStatus}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/></StackPanel></Border>
 
 <!-- Conversation -->
@@ -55,11 +56,11 @@ ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei
 <DataTrigger Binding="{Binding FromUser}" Value="True"><Setter Property="Foreground" Value="White"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
 <ItemsControl ItemsSource="{Binding Proposals}"><ItemsControl.ItemTemplate><DataTemplate>
 <Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,10" Margin="0,10,0,0"><StackPanel>
-<TextBlock Text="修改预览" FontWeight="Bold" FontSize="13"/>
+<TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13"/>
 <TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" Margin="0,0,0,4"/>
 <TextBlock Text="{Binding Lines}" FontSize="13" Margin="0,4,0,0"/>
 <TextBlock Text="{Binding State}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0"/>
-<Button Style="{StaticResource Primary}" Content="确认修改" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="16,7"/>
+<Button Style="{StaticResource Primary}" Content="{Binding ButtonText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="16,7"/>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 </StackPanel></Border></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
 

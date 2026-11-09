@@ -11,18 +11,24 @@ namespace VIvian.App;
 
 public sealed class ProposalCard : ObservableObject
 {
-    private readonly ProposalView _view;
-    public ProposalCard(ProposalView view, Func<ProposalCard, Task> confirm)
+    public ProposalCard(Guid id, AccountConfigurationTarget target, string accountName, string lines,
+        string title, string buttonText, Func<ProposalCard, Task> confirm)
     {
-        _view = view;
+        Id = id;
+        Target = target;
+        TargetText = $"{RunPresentation.GameName(target.Game)} · {accountName} · {target.AccountId:D}";
+        Lines = lines;
+        Title = title;
+        ButtonText = buttonText;
         _state = "等待你确认";
-        ConfirmCommand = new(() => confirm(this), _ => State = "写入未通过核对，请重新读取配置。");
+        ConfirmCommand = new(() => confirm(this), _ => State = "本次操作未通过核对，请查看主界面状态。");
     }
-    public Guid Id => _view.Id;
-    public AccountConfigurationTarget Target => _view.Target;
-    public string TargetText => $"{RunPresentation.GameName(Target.Game)} · {_view.AccountName} · {Target.AccountId:D}";
-    public string Lines => string.Join("\n", _view.Changes.Select(c => $"{c.Title}：{c.Old} → {c.New}"));
-    public string Reason => _view.Reason;
+    public Guid Id { get; }
+    public AccountConfigurationTarget Target { get; }
+    public string TargetText { get; }
+    public string Lines { get; }
+    public string Title { get; }
+    public string ButtonText { get; }
     private string _state;
     public string State { get => _state; set => Set(ref _state, value); }
     private bool _canConfirm = true;
@@ -59,6 +65,7 @@ public sealed class AssistantViewModel : ObservableObject
     private readonly Func<AccountConfigurationTarget, bool> _canApply;
     private readonly string _profileDirectory;
     private readonly Func<Task> _afterApply;
+    private readonly Func<AssistantRunPlan, Task<string>> _submitPlan;
     private int _confirmationRevision;
     private AssistantSession _session;
     private AssistantEndpoint _endpoint;
@@ -94,12 +101,25 @@ public sealed class AssistantViewModel : ObservableObject
     public AsyncCommand TestConnectionCommand { get; }
     public RelayCommand CancelRequestCommand { get; }
     public RelayCommand<string> QuickCommand { get; }
+    public Visibility ScheduleSettingsVisibility => RealExecutionPolicy.IsM5DailyTest ? Visibility.Visible : Visibility.Collapsed;
+    public bool EnableScheduleProposals
+    {
+        get => _tools.ScheduleProposalsEnabled;
+        set
+        {
+            if (value == _tools.ScheduleProposalsEnabled || (value && !RealExecutionPolicy.IsM5DailyTest)) return;
+            _tools.ScheduleProposalsEnabled = value;
+            Raise(nameof(EnableScheduleProposals));
+            if (!value) InvalidateProposals();
+        }
+    }
 
     public AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools,
-        Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply)
+        Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply,
+        Func<AssistantRunPlan, Task<string>> submitPlan)
     {
         Theme = theme; Avatar = new ArtSlot(theme.Assistant); _settings = settings; _tools = tools;
-        _canApply = canApply; _profileDirectory = profileDirectory; _afterApply = afterApply;
+        _canApply = canApply; _profileDirectory = profileDirectory; _afterApply = afterApply; _submitPlan = submitPlan;
         _endpoint = settings.Load();
         _baseUrl = _endpoint.BaseUrl; _model = _endpoint.Model;
         _session = new AssistantSession(_client, tools, theme.AssistantName);
@@ -135,7 +155,11 @@ public sealed class AssistantViewModel : ObservableObject
         {
             var reply = await _session.AskAsync(_endpoint, text, request.Token);
             if (request.IsCancellationRequested) return;
-            var cards = _session.LastProposals.Select(p => new ProposalCard(p, ConfirmAsync)).ToList();
+            var cards = _session.LastProposals.Select(p => new ProposalCard(p.Id, p.Target, p.AccountName,
+                string.Join("\n", p.Changes.Select(c => $"{c.Title}：{c.Old} → {c.New}")), "修改预览", "确认修改", ConfirmAsync)).ToList();
+            cards.AddRange(_session.LastRunPlans.Select(plan => new ProposalCard(plan.Id, plan.Target, plan.AccountName,
+                "日常（清体力、每日实训、领奖）\n" + plan.Resources, "运行计划", "确认提交",
+                card => ConfirmRunAsync(card, plan))));
             Add(false, reply, cards);
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
@@ -177,6 +201,34 @@ public sealed class AssistantViewModel : ObservableObject
         }
         try { await _afterApply(); }
         catch (Exception) { card.State += " · 游戏管理页刷新失败，请手动重新读取"; }
+    }
+
+    private async Task ConfirmRunAsync(ProposalCard card, AssistantRunPlan plan)
+    {
+        if (!card.CanConfirm || !EnableScheduleProposals) return;
+        var revision = Volatile.Read(ref _confirmationRevision);
+        if (plan.Expires <= DateTimeOffset.UtcNow)
+        {
+            card.CanConfirm = false;
+            card.State = "运行计划已过期，请重新生成。";
+            return;
+        }
+        if (!_canApply(card.Target))
+        {
+            card.State = "请在账号管理选中目标账号，结束当前任务及恢复后重试。";
+            return;
+        }
+        if (MessageBox.Show($"{card.TargetText}\n\n{card.Lines}\n\n确认提交给现有调度器？",
+                $"{Name} · 确认运行", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+        card.CanConfirm = false;
+        if (revision != Volatile.Read(ref _confirmationRevision) || !EnableScheduleProposals)
+        {
+            card.State = "运行计划已失效，请重新生成。";
+            return;
+        }
+        card.State = "正在核对任务准入，进度与停止见主界面。";
+        card.State = await _submitPlan(plan);
     }
 
     public void InvalidateProposals()

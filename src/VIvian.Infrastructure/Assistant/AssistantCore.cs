@@ -15,6 +15,13 @@ public sealed record EngineStatusView(GameId Game, string Name, string Engine, s
 public sealed record ProposalView(Guid Id, AccountConfigurationTarget Target, string AccountName,
     IReadOnlyList<(string Title, string Old, string New)> Changes, string Reason);
 
+public sealed record AssistantRunPlan(Guid Id, AccountConfigurationTarget Target, string AccountName,
+    string ConfigurationRevision, long TaskPlanRevision, string Resources, DateTimeOffset Expires)
+{
+    public const string TaskId = "routine";
+    public const string ResourcePolicy = "saved_account_settings";
+}
+
 /// <summary>
 /// The structured operations the assistant may call. Read-only, except <c>propose_changes</c>, which only
 /// prepares a validated proposal: writing it requires the user to press "确认修改" in the window.
@@ -29,7 +36,13 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
     private readonly Dictionary<Guid, PendingProposal> _proposals = [];
 
     internal sealed record PendingProposal(ProposalView View, AccountConfigurationProposal Proposal, DateTimeOffset Expires);
-    internal sealed record ToolResult(string Content, PendingProposal? Proposal = null);
+    internal sealed record ToolResult(string Content, PendingProposal? Proposal = null, AssistantRunPlan? RunPlan = null);
+    private volatile bool _scheduleProposalsEnabled;
+    public bool ScheduleProposalsEnabled
+    {
+        get => _scheduleProposalsEnabled;
+        set => _scheduleProposalsEnabled = value;
+    }
 
     internal IReadOnlyList<ProposalView> Publish(IReadOnlyList<PendingProposal> pending)
     {
@@ -43,7 +56,9 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
         }
     }
 
-    public static JsonArray Definitions() => JsonNode.Parse("""
+    public JsonArray Definitions()
+    {
+        var definitions = JsonNode.Parse("""
     [
      {"type":"function","function":{"name":"list_games","description":"列出三款游戏、对应引擎、固定版本、安装状态，以及是否能真实执行。","parameters":{"type":"object","properties":{}}}},
      {"type":"function","function":{"name":"list_tasks","description":"列出某款游戏的任务目录（每日/每周/按需）及当前能否真实执行。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"]}}},
@@ -54,6 +69,16 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
      ,{"type":"function","function":{"name":"get_batch_progress","description":"读取最近多账号批次的进度、状态和失败原因。","parameters":{"type":"object","properties":{}}}}
     ]
     """)!.AsArray();
+        if (ScheduleProposalsEnabled)
+            definitions.Add(JsonNode.Parse("""
+                {"type":"function","function":{"name":"propose_run","description":"为已绑定的单个星铁账号准备日常计划。必须先读取目标配置并用其 revision。计划需用户本机确认。",
+                "parameters":{"type":"object","properties":{"game":{"type":"string","enum":["starrail"]},"account_id":{"type":"string"},
+                "revision":{"type":"string"},"task_id":{"type":"string","enum":["routine"]},
+                "resource_policy":{"type":"string","enum":["saved_account_settings"]}},
+                "required":["game","account_id","revision","task_id","resource_policy"],"additionalProperties":false}}}
+                """));
+        return definitions;
+    }
 
     public void RevokeProposals()
     {
@@ -76,11 +101,13 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
                 || (schema["required"] is JsonArray required && required.Any(p => !args.ContainsKey(p!.GetValue<string>()))))
                 return new(Error("工具参数缺失、类型不符或包含未知字段。"));
             if (name == "propose_changes") return await ProposeAsync(args, ct).ConfigureAwait(false);
+            if (name == "propose_run") return await ProposeRunAsync(args, ct).ConfigureAwait(false);
             return new(name switch
             {
                 "list_games" => Serialize(engines().Select(e => new
                 { game = Key(e.Game), e.Name, e.Engine, e.Version, e.State, can_run_for_real = e.CanRunForReal,
-                    account_configuration = _configuration.ContainsKey(e.Game), ai_control = false })),
+                    account_configuration = _configuration.ContainsKey(e.Game),
+                    ai_run_proposals = e.Game == GameId.StarRail && e.CanRunForReal && ScheduleProposalsEnabled })),
                 "list_tasks" => ListTasks(ParseGame(args)),
                 "read_configuration" => await ReadConfigurationAsync(ParseTarget(args), ct).ConfigureAwait(false),
                 "get_run_status" => await RunStatusAsync(args, ct).ConfigureAwait(false),
@@ -171,6 +198,39 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
     }
 
     private static string UnsupportedConfiguration() => Error("此游戏的账号配置提供者尚未验收，当前可查询游戏和任务能力。");
+
+    private async Task<ToolResult> ProposeRunAsync(JsonObject args, CancellationToken ct)
+    {
+        if (!ScheduleProposalsEnabled || accountDatabase is null || !_configuration.TryGetValue(GameId.StarRail, out var provider)
+            || !engines().Any(e => e.Game == GameId.StarRail && e.CanRunForReal))
+            return new(Error("本机未开放星铁运行计划。"));
+        var target = ParseTarget(args);
+        var snapshot = await provider.ReadAsync(target, ct).ConfigureAwait(false);
+        if (snapshot.Revision != args["revision"]!.GetValue<string>())
+            return new(Error("配置版本已变化，请重新读取。"));
+        if (snapshot.WriteUnavailableReason is not null)
+            return new(Error("只有已登记且可核对的独立星铁账号支持运行计划。"));
+
+        var plan = await accountDatabase.LoadAccountTaskPlanAsync(target.AccountId, ct).ConfigureAwait(false);
+        var profiles = await accountDatabase.LoadLoginProfilesAsync(GameId.StarRail, ct).ConfigureAwait(false);
+        if (!plan.DailyEnabled || !profiles.Any(p => p.AccountId == target.AccountId))
+            return new(Error("目标账号须已绑定登录界面，并启用日常任务。"));
+        string? Value(string path) => snapshot.Values.SingleOrDefault(v => v.Schema.Path == path)?.Value;
+        var fuel = Value("use_fuel");
+        var reserve = Value("use_reserved_trailblaze_power");
+        if (fuel is not ("true" or "false") || reserve is not ("true" or "false"))
+            return new(Error("无法核对燃料或后备开拓力策略，暂不能生成运行计划。"));
+        var resources = $"按账号已保存的副本策略清体力。燃料：{(fuel == "true" ? "允许" : "禁止")}。后备开拓力：{(reserve == "true" ? "允许" : "禁止")}。";
+        var run = new AssistantRunPlan(Guid.NewGuid(), target, snapshot.AccountName, snapshot.Revision,
+            plan.Revision, resources, DateTimeOffset.UtcNow.AddMinutes(5));
+        return new(Serialize(new
+        {
+            action_id = run.Id, game = Key(target.Game), account_id = target.AccountId,
+            task_id = AssistantRunPlan.TaskId, resource_policy = AssistantRunPlan.ResourcePolicy, use_fuel = fuel == "true",
+            use_reserved_trailblaze_power = reserve == "true",
+            note = "计划尚未执行。用户必须查看目标、任务和资源策略，并在本机确认后才能提交。",
+        }), RunPlan: run);
+    }
 
     private async Task<string> RunStatusAsync(JsonObject args, CancellationToken ct)
     {

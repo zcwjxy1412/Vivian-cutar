@@ -63,6 +63,27 @@ public static class BetterGiAccountPlans
         return new BetterGiAccountPlan(values);
     }
 
+    public static BetterGiPlanFiles RenderDailyAcceptance(Guid accountId, BetterGiOneDragonPlan source, string gameExecutable)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.Name != BetterGiAccountPlan.SourceProfileName(accountId))
+            throw new InvalidOperationException("日常验收需要当前账号已绑定的 BetterGI 源档案。");
+        if (!source.EnabledTasks.Contains(BetterGiMarkers.DailyRewardTask, StringComparer.Ordinal))
+            throw new InvalidOperationException("当前 BetterGI 源档案未启用领取每日奖励，无法运行日常验收。");
+        if (!ParameterRules.IsValid(ByPath["AdventurersGuildCountry"], source.AdventurersGuildCountry)
+            || (source.DailyRewardPartyName.Length != 0
+                && !ParameterRules.IsValid(ByPath["DailyRewardPartyName"], source.DailyRewardPartyName)))
+            throw new InvalidOperationException("当前 BetterGI 源档案的领奖地区或队伍设置无效。");
+
+        var dailyOnly = Compile(new Dictionary<string, string>
+        {
+            [Daily] = "true",
+            ["AdventurersGuildCountry"] = source.AdventurersGuildCountry,
+        });
+        // The parsed file's party name is literal. Only a saved VIvian setting interprets “当前队伍” as empty.
+        return dailyOnly.Render(accountId, gameExecutable, source.DailyRewardPartyName);
+    }
+
     internal static int Count(IReadOnlyDictionary<string, string> values, string key) =>
         int.Parse(values[key], NumberStyles.None, CultureInfo.InvariantCulture);
 
@@ -99,7 +120,9 @@ public sealed class BetterGiAccountPlan
     public IReadOnlyDictionary<string, string> Values { get; }
     public IReadOnlyList<EngineTaskDefinition> Tasks { get; }
 
-    public BetterGiPlanFiles Render(Guid accountId, string gameExecutable)
+    public BetterGiPlanFiles Render(Guid accountId, string gameExecutable) => Render(accountId, gameExecutable, null);
+
+    internal BetterGiPlanFiles Render(Guid accountId, string gameExecutable, string? dailyRewardPartyName)
     {
         var name = SourceProfileName(accountId);
         if (!Path.IsPathFullyQualified(gameExecutable) || !ClientNames.Contains(Path.GetFileName(gameExecutable), StringComparer.OrdinalIgnoreCase))
@@ -130,7 +153,7 @@ public sealed class BetterGiAccountPlan
                 autoArtifactSalvage = false, rewardRecognitionEnabled = domain,
             },
         };
-        return new(name, RenderProfile(name, includeDisabled: false), JsonSerializer.Serialize(settings, Json));
+        return new(name, RenderProfile(name, includeDisabled: false, dailyRewardPartyName), JsonSerializer.Serialize(settings, Json));
 
         int CountWhenDomain(string key) => domain ? BetterGiAccountPlans.Count(Values, key) : 0;
     }
@@ -144,7 +167,7 @@ public sealed class BetterGiAccountPlan
 
     internal string RenderSourceProfile(Guid accountId) => RenderProfile(SourceProfileName(accountId), includeDisabled: true);
 
-    private string RenderProfile(string name, bool includeDisabled)
+    private string RenderProfile(string name, bool includeDisabled, string? dailyRewardPartyName = null)
     {
         var tasks = Order.Where(entry => includeDisabled || Enabled(entry.Setting)).ToArray();
         var domainName = Values["DomainName"];
@@ -156,7 +179,7 @@ public sealed class BetterGiAccountPlan
             TaskDefinitions = tasks.ToDictionary(entry => entry.Task,
                 entry => BetterGiTaskCatalog.Tasks.Single(task => task.Id == entry.Task).Title),
             AdventurersGuildCountry = Values["AdventurersGuildCountry"],
-            DailyRewardPartyName = BetterGiAccountPlans.Party(Values["DailyRewardPartyName"]),
+            DailyRewardPartyName = dailyRewardPartyName ?? BetterGiAccountPlans.Party(Values["DailyRewardPartyName"]),
             CraftingBenchCountry = Values["CraftingBenchCountry"],
             MinResinToKeep = BetterGiAccountPlans.Count(Values, "MinResinToKeep"),
             DomainName = (includeDisabled || Enabled(BetterGiAccountPlans.Domain)) &&

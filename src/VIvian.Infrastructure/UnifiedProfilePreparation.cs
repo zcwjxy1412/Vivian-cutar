@@ -78,10 +78,15 @@ public static class UnifiedProfilePreparation
     public static void VerifyPrepared(string directory)
     {
         using var database = OpenExisting(Path.Combine(directory, DatabaseName), SqliteOpenMode.ReadOnly);
+        RequirePreparedDatabase(database);
+        VerifyIntegrity(database, transaction: null);
+    }
+
+    internal static void RequirePreparedDatabase(SqliteConnection database)
+    {
         if (Number(database, "PRAGMA user_version;") != LocalDatabase.CurrentSchemaVersion ||
             Number(database, "PRAGMA application_id;") != PreparedApplicationId)
             throw new InvalidDataException("需要已验证的 VIvian 合流库。请先完成数据准备。");
-        VerifyIntegrity(database, transaction: null);
     }
 
     private static void CopySnapshot(string originalPath, string snapshotPath, int expectedVersion)

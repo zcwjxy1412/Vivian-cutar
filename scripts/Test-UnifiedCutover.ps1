@@ -38,11 +38,14 @@ function Install-TestCandidate([string]$Package) {
     }
 }
 
-function Invoke-TestEntry([string]$Mode, [string]$Profile, [int]$ExpectedExit) {
+function Invoke-TestEntry([string]$Mode, [string]$Profile, [int]$ExpectedExit, [switch]$EnvironmentOnly) {
     $link = $shell.CreateShortcut($shortcutPath)
     if ($link.TargetPath -ne $entry) { throw '演练快捷方式目标发生变化。' }
+    $startupMarker = Join-Path $Profile 'startup.ok'
+    $previousMarker = if (Test-Path -LiteralPath $startupMarker) { Get-Content -LiteralPath $startupMarker -Raw }
     $env:VIVIAN_SMOKE_DATA = $Profile
-    $arguments = @($Mode, '--smoke-test', '--smoke-data', ('"' + $Profile + '"'))
+    $arguments = @($Mode, '--smoke-test')
+    if (!$EnvironmentOnly) { $arguments += @('--smoke-data', ('"' + $Profile + '"')) }
     $proc = Start-Process -FilePath $link.TargetPath -WorkingDirectory $install -WindowStyle Hidden -PassThru -ArgumentList $arguments
     if (!$proc.WaitForExit(30000)) {
         $proc.Kill()
@@ -53,9 +56,11 @@ function Invoke-TestEntry([string]$Mode, [string]$Profile, [int]$ExpectedExit) {
         if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Tail 14 | Write-Host }
         throw "演练入口退出码 $($proc.ExitCode)，预期 $ExpectedExit。阶段 $Mode"
     }
-    if ($Mode -eq '--startup-check' -and $ExpectedExit -eq 0 -and
-        !(Test-Path -LiteralPath (Join-Path $Profile 'startup.ok') -PathType Leaf)) {
-        throw '演练入口未生成启动证据。'
+    if ($Mode -eq '--startup-check' -and $ExpectedExit -eq 0) {
+        if (!(Test-Path -LiteralPath $startupMarker -PathType Leaf) -or
+            (Get-Content -LiteralPath $startupMarker -Raw) -eq $previousMarker) {
+            throw '演练入口未生成新的启动证据。'
+        }
     }
 }
 
@@ -87,12 +92,20 @@ try {
     Invoke-TestEntry '--prepare-unified-profile' $fixture 0
     $prepared = Join-Path $fixture 'vivian-smoke-prepared'
     Invoke-TestEntry '--startup-check' $prepared 0
+    $nonSmokeProfile = (New-Item -ItemType Directory -Path (Join-Path $root 'not-a-smoke-profile')).FullName
+    $nonSmokeDatabase = Join-Path $nonSmokeProfile 'vivian.db'
+    Copy-Item -LiteralPath (Join-Path $fixture 'v6.db') -Destination $nonSmokeDatabase
+    $nonSmokeHash = (Get-FileHash -LiteralPath $nonSmokeDatabase).Hash
+    Invoke-TestEntry '--smoke-test' $nonSmokeProfile 1 -EnvironmentOnly
+    if ((Get-FileHash -LiteralPath $nonSmokeDatabase).Hash -ne $nonSmokeHash) {
+        throw '不安全的环境变量路径更改了原库。'
+    }
 
     Move-TestDirectory $install $staged
     Move-TestDirectory $rollback $install
     if ((Get-FileHash -LiteralPath $entry).Hash -ne $oldHash) { throw '回滚后程序哈希不符。' }
     Invoke-TestEntry '--startup-check' $oldProfile 0
-    Write-Output 'Same shortcut target started the old and new builds. Missing prepared DB was rejected without creating a DB. Failed replacement and final rollback both restored the old executable and its startup.'
+    Write-Output 'Same shortcut target started the old and new builds. Missing prepared DB and unsafe environment override were rejected. Failed replacement and final rollback both restored the old executable and its startup.'
 }
 finally {
     $env:VIVIAN_SMOKE_DATA = $previousSmokeRoot

@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using VIvian.Core;
+using VIvian.Infrastructure.Engines;
 
 namespace VIvian.Infrastructure;
 
@@ -8,20 +9,25 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
 {
     private readonly string _connectionString;
     private readonly string _databasePath;
-    public LocalDatabase(string path, bool createIfMissing = true)
+    private readonly bool _requirePreparedProfile;
+    public LocalDatabase(string path, bool requirePreparedProfile = false)
     {
         _databasePath = Path.GetFullPath(path);
+        _requirePreparedProfile = requirePreparedProfile;
         _connectionString = new SqliteConnectionStringBuilder
-        { DataSource = _databasePath, Mode = createIfMissing ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
+        { DataSource = _databasePath, Mode = requirePreparedProfile ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadWriteCreate,
           DefaultTimeout = 5, Pooling = false }.ToString();
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
+        if (_requirePreparedProfile && ReadOnlyFileAccess.FindReparsePoint(_databasePath) is not null)
+            throw new IOException("合流数据库路径含链接，拒绝打开。");
         var connection = new SqliteConnection(_connectionString);
         try
         {
             await connection.OpenAsync(ct);
+            if (_requirePreparedProfile) UnifiedProfilePreparation.RequirePreparedDatabase(connection);
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;";
             await command.ExecuteNonQueryAsync(ct);
@@ -140,6 +146,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
+        if (_requirePreparedProfile) return;
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = "PRAGMA journal_mode=WAL;";

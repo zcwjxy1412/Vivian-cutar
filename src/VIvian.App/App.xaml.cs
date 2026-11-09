@@ -147,7 +147,7 @@ public partial class App : Application
             if (_instance.Result == InstanceLockResult.AcquiredAfterAbandoned)
                 Log.Warning("Previous instance exited without releasing the instance lock");
             _stage = "打开数据库";
-            var database = new LocalDatabase(Path.Combine(root, "vivian.db"), createIfMissing: !usePreparedProfile);
+            var database = new LocalDatabase(Path.Combine(root, "vivian.db"), requirePreparedProfile: usePreparedProfile);
             _host = Host.CreateDefaultBuilder().UseSerilog().ConfigureServices(services =>
             {
                 services.AddSingleton(database);
@@ -308,13 +308,18 @@ public partial class App : Application
     {
         // UAC can start the real-test package with a fresh environment.
         var index = Array.IndexOf(args, "--smoke-data");
-        if (index < 0) return Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA")
-            ?? throw new InvalidOperationException("Missing smoke directory");
-        if (index + 1 >= args.Length) throw new InvalidOperationException("Missing smoke directory");
-        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[index + 1]));
+        var requested = index < 0 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA")
+            : index + 1 < args.Length ? args[index + 1] : null;
+        if (string.IsNullOrWhiteSpace(requested)) throw new InvalidOperationException("Missing smoke directory");
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(requested));
+        var relative = Path.GetRelativePath(Path.GetTempPath(), directory);
         if (!Path.GetFileName(directory).StartsWith("vivian-smoke-", StringComparison.OrdinalIgnoreCase)
-            || !Directory.Exists(directory) || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+            || !Directory.Exists(directory) || Path.IsPathRooted(relative) || relative is "." or ".."
+            || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new InvalidOperationException("Invalid isolated smoke directory");
+        for (var folder = new DirectoryInfo(directory); folder is not null; folder = folder.Parent)
+            if (folder.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                throw new InvalidOperationException("Smoke directory contains a link");
         return directory;
     }
 

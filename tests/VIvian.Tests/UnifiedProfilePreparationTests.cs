@@ -125,6 +125,32 @@ public sealed class UnifiedProfilePreparationTests : IDisposable
         Assert.Equal(existing.Id, Assert.Single(await target.LoadLoginProfilesAsync(GameId.Genshin)).AccountId);
     }
 
+    [Fact]
+    public async Task SwappingThePreparedDirectoryAfterPreflightDoesNotMigrateTheReplacement()
+    {
+        var official = Path.Combine(_root, "official.db");
+        var incoming = Path.Combine(_root, "incoming.db");
+        var destination = Path.Combine(_root, "prepared");
+        await new LocalDatabase(official).InitializeAsync();
+        using (var old = Open(official))
+            Execute(old, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+        await new LocalDatabase(incoming).InitializeAsync();
+        await UnifiedProfilePreparation.PrepareAsync(official, incoming, destination, CancellationToken.None);
+        UnifiedProfilePreparation.VerifyPrepared(destination);
+        Directory.Move(destination, Path.Combine(_root, "verified"));
+        Directory.CreateDirectory(destination);
+        var replacement = Path.Combine(destination, "vivian.db");
+        using (var old = Open(official))
+        using (var displaced = Open(replacement))
+            old.BackupDatabase(displaced);
+
+        var strict = new LocalDatabase(replacement, requirePreparedProfile: true);
+        await Assert.ThrowsAsync<InvalidDataException>(() => strict.InitializeAsync());
+        using var untouched = Open(replacement);
+        Assert.Equal(6L, Scalar(untouched, "PRAGMA user_version;"));
+        Assert.False(File.Exists(replacement + ".pre-v7.bak"));
+    }
+
     private static async Task<GameAccount> AddGenshinAsync(LocalDatabase database, string name, string maskedPhone)
     {
         var account = await database.AddAccountAsync(GameId.Genshin, name, "", null);

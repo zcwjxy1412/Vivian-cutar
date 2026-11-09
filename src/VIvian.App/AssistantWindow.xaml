@@ -35,7 +35,10 @@ ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei
 <TextBox Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="模型名"/>
 <TextBlock Text="密钥（留空表示不修改已保存的密钥）" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,2"/>
 <PasswordBox x:Name="KeyBox" PasswordChanged="KeyChanged" Padding="10,7" Background="White" Foreground="{StaticResource Text}" BorderBrush="{StaticResource Line}" AutomationProperties.Name="密钥"/>
-<WrapPanel Margin="0,10,0,0"><Button Style="{StaticResource Primary}" Content="保存" Command="{Binding SaveSettingsCommand}"/></WrapPanel>
+<WrapPanel Margin="0,10,0,0">
+<Button Style="{StaticResource Primary}" Content="保存" Command="{Binding SaveSettingsCommand}"/>
+<Button Content="测试连接" Command="{Binding TestConnectionCommand}" Margin="6,0,0,0"/>
+</WrapPanel>
 <TextBlock Text="{Binding SettingsStatus}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/></StackPanel></Border>
 
 <!-- Conversation -->
@@ -67,6 +70,7 @@ ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei
 <!-- Input -->
 <Border Grid.Row="4" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="16" Margin="14,0,14,14" Padding="6">
 <DockPanel><Button DockPanel.Dock="Right" Style="{StaticResource Primary}" Content="➤" Command="{Binding SendCommand}" Padding="14,8" Margin="6,0,0,0" ToolTip="发送（Enter）" AutomationProperties.Name="发送"/>
+<Button DockPanel.Dock="Right" Content="取消请求" IsEnabled="{Binding IsBusy}" Command="{Binding CancelRequestCommand}" Margin="6,0,0,0"/>
 <TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Background="White" AutomationProperties.Name="输入你的问题">
 <TextBox.InputBindings><KeyBinding Key="Enter" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox></DockPanel></Border>
 </Grid></Border></Window>

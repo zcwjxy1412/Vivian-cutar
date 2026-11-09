@@ -1,4 +1,3 @@
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -9,42 +8,6 @@ using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 
 namespace VIvian.Infrastructure.Assistant;
-
-/// <summary>Where the user's model lives. Any OpenAI-compatible chat-completions endpoint (with tool calling).</summary>
-public sealed record AssistantEndpoint(string BaseUrl, string Model, string ApiKey)
-{
-    public bool IsComplete => Uri.TryCreate(BaseUrl, UriKind.Absolute, out var u) && u.Scheme is "https" or "http"
-        && !string.IsNullOrWhiteSpace(Model) && !string.IsNullOrWhiteSpace(ApiKey);
-}
-
-public sealed class AssistantException(string message) : Exception(message);
-
-/// <summary>Minimal OpenAI-compatible client. The API key is only ever placed in the Authorization header.</summary>
-public sealed class ChatCompletionsClient(HttpClient http)
-{
-    public async Task<JsonObject> CompleteAsync(AssistantEndpoint endpoint, JsonArray messages, JsonArray? tools, CancellationToken ct)
-    {
-        if (!endpoint.IsComplete) throw new AssistantException("AI 接口还没有设置完整：需要接口地址、模型名和密钥。");
-        var body = new JsonObject { ["model"] = endpoint.Model, ["messages"] = messages.DeepClone(), ["temperature"] = 0.2 };
-        if (tools is { Count: > 0 }) body["tools"] = tools.DeepClone();
-        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint.BaseUrl.TrimEnd('/') + "/chat/completions")
-        { Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json") };
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.ApiKey);
-        using var response = await http.SendAsync(request, ct).ConfigureAwait(false);
-        var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
-            throw new AssistantException($"AI 接口返回 {(int)response.StatusCode}：{Shorten(text.Replace(endpoint.ApiKey, "***", StringComparison.Ordinal))}");
-        try
-        {
-            var message = JsonNode.Parse(text)?["choices"]?[0]?["message"] as JsonObject
-                ?? throw new AssistantException("AI 接口的回复里没有 choices[0].message。");
-            return message;
-        }
-        catch (JsonException) { throw new AssistantException("AI 接口返回的不是 JSON。"); }
-    }
-
-    private static string Shorten(string s) => s.Length <= 300 ? s : s[..300] + "…";
-}
 
 /// <summary>Live state the tools may read. Supplied by the app; the assistant never touches files directly.</summary>
 public sealed record EngineStatusView(GameId Game, string Name, string Engine, string Version, string State, bool CanRunForReal);
@@ -267,9 +230,9 @@ public sealed class AssistantSettingsStore(string dataDirectory)
             if (s is null) return new("", "", "");
             var key = string.IsNullOrEmpty(s.ProtectedKey) || !OperatingSystem.IsWindows() ? ""
                 : Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(s.ProtectedKey), null, DataProtectionScope.CurrentUser));
-            return new(s.BaseUrl, s.Model, key);
+            return new(s.BaseUrl ?? "", s.Model ?? "", key);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or CryptographicException or FormatException) { return new("", "", ""); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or CryptographicException or FormatException) { return new("", "", ""); }
     }
 
     public void Save(AssistantEndpoint endpoint)

@@ -21,8 +21,16 @@ public sealed partial class LocalDatabase
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT account_id,game,display_name,region,uid,install_path,enabled,auto_run,sort_order,login_state,verification_state,last_run_at,last_result,revision FROM game_accounts WHERE ($game IS NULL OR game=$game) ORDER BY game,sort_order,account_id;";
+        cmd.CommandText = """
+            SELECT a.account_id,a.game,a.display_name,a.region,a.uid,a.install_path,a.enabled,a.auto_run,a.sort_order,
+                a.login_state,a.verification_state,a.last_run_at,a.last_result,a.revision,p.masked_phone
+            FROM game_accounts a LEFT JOIN account_login_profiles p ON a.game=$genshin
+                AND a.account_id=p.account_id AND p.detail=$importSource
+            WHERE ($game IS NULL OR a.game=$game) ORDER BY a.game,a.sort_order,a.account_id;
+            """;
         cmd.Parameters.AddWithValue("$game", game is null ? DBNull.Value : (object)(int)game);
+        cmd.Parameters.AddWithValue("$genshin", (int)GameId.Genshin);
+        cmd.Parameters.AddWithValue("$importSource", GenshinPhotoImportSource);
         var result = new List<GameAccount>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
@@ -30,7 +38,8 @@ public sealed partial class LocalDatabase
             var idText = reader.GetString(0);
             // Stable IDs from the legacy migration are not GUIDs; map them deterministically without using names.
             var id = Guid.TryParse(idText, out var parsed) ? parsed : LegacyId((GameId)reader.GetInt32(1));
-            result.Add(new(id, (GameId)reader.GetInt32(1), reader.GetString(2), reader.GetString(3),
+            var name = DisplayImportedGenshinName(reader.GetString(2), reader.IsDBNull(14) ? null : reader.GetString(14));
+            result.Add(new(id, (GameId)reader.GetInt32(1), name, reader.GetString(3),
                 reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetInt32(6) != 0, reader.GetInt32(7) != 0,
                 reader.GetInt32(8), reader.GetString(9), reader.GetString(10),
                 reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),

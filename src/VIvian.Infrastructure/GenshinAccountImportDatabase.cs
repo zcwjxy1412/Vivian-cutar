@@ -1,11 +1,26 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using VIvian.Core;
 using VIvian.Core.Accounts;
+using VIvian.Infrastructure.Engines.BetterGi;
 
 namespace VIvian.Infrastructure;
 
 public sealed partial class LocalDatabase
 {
+    private const string GenshinPhotoImportSource = "导入原神登录照片";
+
+    private static string NameImportedGenshinAccount(string maskedPhone) => "原神 " + maskedPhone;
+
+    private static string DisplayImportedGenshinName(string storedName, string? maskedPhone)
+    {
+        const string legacyPrefix = "原神账号 ";
+        return maskedPhone is not null && storedName.StartsWith(legacyPrefix, StringComparison.Ordinal) &&
+            int.TryParse(storedName.AsSpan(legacyPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var slot) &&
+            slot > 0 && GenshinLoginScreen.NormalizeExactMask(maskedPhone).Length > 0
+                ? NameImportedGenshinAccount(maskedPhone) : storedName;
+    }
+
     internal async Task<IReadOnlyList<(GameAccount? Account, bool Created)>> RegisterGenshinPhotoAccountsAsync(
         IReadOnlyList<LoginAccountObservation> accounts, Guid? targetAccountId, CancellationToken ct)
     {
@@ -81,7 +96,7 @@ public sealed partial class LocalDatabase
             insert.Transaction = transaction;
             var accountChanges = created ? """
                 INSERT INTO game_accounts(account_id, game, display_name, sort_order, login_state)
-                    SELECT $id, $game, '原神账号 ' || next_order, next_order, 'recognized'
+                    SELECT $id, $game, $name, next_order, 'recognized'
                     FROM (SELECT MAX(1, COALESCE(MAX(sort_order), 0) + 1) AS next_order FROM game_accounts WHERE game = $game);
                 INSERT INTO account_settings(account_id) VALUES($id);
                 INSERT INTO account_task_plans(account_id) VALUES($id);
@@ -89,15 +104,17 @@ public sealed partial class LocalDatabase
                 : "UPDATE game_accounts SET login_state='recognized', revision=revision+1 WHERE account_id=$id AND game=$game;";
             insert.CommandText = accountChanges + """
                 INSERT INTO account_login_profiles(account_id, masked_phone, normalized_phone, row_order,
-                    confidence, last_scan_at, detail) VALUES($id, $mask, $identity, $row, $confidence, $at, '导入原神登录照片');
+                    confidence, last_scan_at, detail) VALUES($id, $mask, $identity, $row, $confidence, $at, $source);
                 """;
             insert.Parameters.AddWithValue("$id", DatabaseId(id));
             insert.Parameters.AddWithValue("$game", (int)GameId.Genshin);
+            if (created) insert.Parameters.AddWithValue("$name", NameImportedGenshinAccount(account.MaskedPhone));
             insert.Parameters.AddWithValue("$mask", account.MaskedPhone);
             insert.Parameters.AddWithValue("$identity", account.NormalizedPhone);
             insert.Parameters.AddWithValue("$row", account.RowOrder);
             insert.Parameters.AddWithValue("$confidence", account.Confidence);
             insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+            insert.Parameters.AddWithValue("$source", GenshinPhotoImportSource);
             await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
         return (id, created);

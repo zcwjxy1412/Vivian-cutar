@@ -140,7 +140,7 @@ public sealed class AssistantTests : IDisposable
     [Fact]
     public async Task StarRailRunPlansAreOptInReadOnlyAndHaveASingleDurableActionId()
     {
-        File.AppendAllText(Config, "use_fuel: false\nuse_reserved_trailblaze_power: false\n");
+        File.AppendAllText(Config, "use_fuel: false\nuse_reserved_trailblaze_power: false\nbreak_down_level_four_relicset: false\n");
         var (db, provider, tools, a, _) = await SetupAsync();
         await db.SaveLoginProfileAsync(a.Id, "123****1234", "123****1234", 0, 1, null, "fixture", Ct);
         var target = new AccountConfigurationTarget(GameId.StarRail, a.Id);
@@ -167,6 +167,17 @@ public sealed class AssistantTests : IDisposable
         var submitted = await db.BeginBatchAsync(GameId.StarRail, actionId: plan.Id);
         await Assert.ThrowsAsync<InvalidOperationException>(() => db.BeginBatchAsync(GameId.StarRail, actionId: plan.Id));
         Assert.Equal(submitted, Assert.Single(await db.LoadRecentBatchesAsync()));
+
+        foreach (var replacement in new[] { "break_down_level_four_relicset: true", "# absent" })
+        {
+            var original = File.ReadAllText(Config);
+            File.WriteAllText(Config, original.Replace("break_down_level_four_relicset: false", replacement));
+            args["revision"] = (await provider.ReadAsync(target, Ct)).Revision;
+            var blocked = await tools.InvokeAsync("propose_run", args.ToJsonString(), Ct);
+            Assert.Null(blocked.RunPlan);
+            Assert.Contains("分解遗器", blocked.Content);
+            File.WriteAllText(Config, original);
+        }
     }
 
     private async Task<(LocalDatabase Db, StarRailAccountConfigurationProvider Provider, AssistantTools Tools, GameAccount A, GameAccount B)>

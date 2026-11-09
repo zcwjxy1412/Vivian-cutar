@@ -218,9 +218,11 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
         string? Value(string path) => snapshot.Values.SingleOrDefault(v => v.Schema.Path == path)?.Value;
         var fuel = Value("use_fuel");
         var reserve = Value("use_reserved_trailblaze_power");
+        if (Value("break_down_level_four_relicset") != "false")
+            return new(Error("需确认每周分解遗器已关闭，才能生成 AI 运行计划。"));
         if (fuel is not ("true" or "false") || reserve is not ("true" or "false"))
             return new(Error("无法核对燃料或后备开拓力策略，暂不能生成运行计划。"));
-        var resources = $"按账号已保存的副本策略清体力。燃料：{(fuel == "true" ? "允许" : "禁止")}。后备开拓力：{(reserve == "true" ? "允许" : "禁止")}。";
+        var resources = $"按账号已保存的副本策略清体力。燃料：{(fuel == "true" ? "允许" : "禁止")}。后备开拓力：{(reserve == "true" ? "允许" : "禁止")}。每周分解遗器：关闭。";
         var run = new AssistantRunPlan(Guid.NewGuid(), target, snapshot.AccountName, snapshot.Revision,
             plan.Revision, resources, DateTimeOffset.UtcNow.AddMinutes(5));
         return new(Serialize(new

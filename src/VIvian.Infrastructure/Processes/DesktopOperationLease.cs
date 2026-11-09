@@ -6,8 +6,17 @@ namespace VIvian.Infrastructure.Processes;
 /// <summary>Serializes real desktop work across VIvian profiles and leaves a durable recovery marker.</summary>
 public sealed class DesktopOperationLease : IDisposable
 {
-    public static string LockPath => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VIvian-M6", "desktop-operation.lock");
+    public static string LockPath
+    {
+        get
+        {
+            // Packaged Windows hosts can redirect AppData to a per-package cache. Use the common profile root.
+            var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            if (!Path.IsPathFullyQualified(profile))
+                throw new InvalidOperationException("无法确认 Windows 用户目录，拒绝访问桌面互斥文件。");
+            return Path.Combine(profile, ".vivian-m6", "desktop-operation.lock");
+        }
+    }
 
     private readonly FileStream _file;
     private readonly byte[] _owner;

@@ -76,9 +76,9 @@ public sealed class MultiAccountOrchestrator
             var identities = accounts.Where(a => profiles.ContainsKey(a.Id)).Select(a => profiles[a.Id].NormalizedPhone).ToArray();
             if (identities.Any(string.IsNullOrWhiteSpace) || identities.Distinct(StringComparer.Ordinal).Count() != identities.Length)
                 throw new InvalidOperationException("执行队列包含无效或重复的登录标识，未启动游戏。");
-            // Start from the saved-account list. A game left in-world by the user or an interrupted batch is restarted
-            // and logged out; the account currently logged in is never assumed to be the first target.
-            var prepared = await _driver.RestartToLoginAsync(policy, cancellationToken);
+            // Reuse a client already at login, including one that is still starting.
+            // The driver still verifies the saved-account screen before the first account can run.
+            var prepared = await _driver.EnsureLoginAsync(policy, cancellationToken);
             if (!prepared.Ok)
             {
                 await RecordAsync(batch, accounts[0], prepared.NeedsUser ? "needs_user" : "login_screen_failed",

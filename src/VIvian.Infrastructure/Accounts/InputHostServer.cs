@@ -139,8 +139,10 @@ public static class InputHostServer
             return InputResponse.Failure("拒绝启动：路径不是 StarRail.exe。");
         try
         {
-            var process = Processes.WindowsProcessSupervisor.StartUserProcess(path, Path.GetDirectoryName(path)!);
-            return InputResponse.Success(process is null ? "already-running" : $"started {process.Id}");
+            if (StarRailWindow.IsProcessRunning()) return InputResponse.Success("already-running");
+            using var process = Processes.WindowsProcessSupervisor.StartUserProcess(path, Path.GetDirectoryName(path)!);
+            return process is null ? InputResponse.Failure("Windows 未返回已启动的星铁进程。")
+                : InputResponse.Success($"started {process.Id}");
         }
         catch (Exception ex) { return InputResponse.Failure("启动星铁失败：" + ex.Message); }
     }

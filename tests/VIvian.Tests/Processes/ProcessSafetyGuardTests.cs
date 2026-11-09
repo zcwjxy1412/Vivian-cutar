@@ -63,7 +63,11 @@ public sealed class ProcessSafetyGuardTests
     {
         // GetProcessesByName may only feed the foreign-process preflight check, which never acts on the result.
         var hits = Lines().Where(l => l.Text.Contains("GetProcessesByName", StringComparison.Ordinal)).ToList();
-        Assert.All(hits, h => Assert.Equal("VIvian.Infrastructure/Simulation/FakeEngineAdapter.cs", h.File));
+        Assert.All(hits, h => Assert.Contains(h.File, new[]
+        {
+            "VIvian.Infrastructure/Simulation/FakeEngineAdapter.cs",
+            "VIvian.Infrastructure/Accounts/StarRailWindow.cs",
+        }));
     }
 
     [Fact]

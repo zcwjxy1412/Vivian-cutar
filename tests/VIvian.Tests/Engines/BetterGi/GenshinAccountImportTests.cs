@@ -25,8 +25,32 @@ public sealed class GenshinAccountImportTests
         Assert.True(second.Success, second.Detail);
         Assert.False(second.Created);
         Assert.Equal(first.Account!.Id, second.Account!.Id);
+        Assert.Equal("原神 138******97", first.Account.Name);
         Assert.Equal(["138****97", "139****61"],
             (await database.LoadLoginProfilesAsync(GameId.Genshin)).Select(profile => profile.NormalizedPhone));
+    }
+
+    [Fact]
+    public async Task OldGeneratedNameShowsTheMaskedIdentityWithoutChangingTheAccount()
+    {
+        await using var fixture = new BetterGiFixture();
+        var database = new LocalDatabase(Path.Combine(fixture.Root, "import.db"));
+        await database.InitializeAsync();
+        var old = await database.AddAccountAsync(GameId.Genshin, "原神账号 2", "", null);
+        var custom = await database.AddAccountAsync(GameId.Genshin, "留着刷素材的小号", "", null);
+        await database.SaveLoginProfileAsync(old.Id, "138******97", "138****97", 0, .9, null, "导入原神登录照片");
+        await database.SaveLoginProfileAsync(custom.Id, "139******61", "139****61", 1, .9, null, "导入原神登录照片");
+        var settings = await database.LoadAccountSettingsAsync(old.Id);
+
+        var accounts = await database.LoadAccountsAsync(GameId.Genshin);
+
+        var displayed = Assert.Single(accounts, row => row.Id == old.Id);
+        Assert.Equal("原神 138******97", displayed.Name);
+        Assert.Equal(old.Revision + 1, displayed.Revision);
+        Assert.Equal(custom.Name, Assert.Single(accounts, row => row.Id == custom.Id).Name);
+        var reread = await database.LoadAccountSettingsAsync(old.Id);
+        Assert.Equal(settings.Revision, reread.Revision);
+        Assert.Equal(settings.Values, reread.Values);
     }
 
     [Theory]

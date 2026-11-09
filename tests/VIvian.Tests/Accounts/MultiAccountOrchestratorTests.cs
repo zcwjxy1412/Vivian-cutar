@@ -35,6 +35,8 @@ public sealed class MultiAccountOrchestratorTests
         var outcome = await orchestrator.ExecuteAsync(GameId.StarRail, [fixture.Accounts[0], fixture.Accounts[1]],
             Unified, fixture.LoadSettingsAsync, (account, settings, _) =>
             {
+                Assert.Equal(calls.Count, driver.Restarts);
+                Assert.Equal(calls.Count + 1, driver.Switches.Count);
                 calls.Add((account.Name, settings["borrow_enable"]));
                 return Task.FromResult(new BatchTaskResult(Guid.NewGuid(), true, true, true, "日常完成"));
             }, null, CancellationToken.None);
@@ -44,8 +46,8 @@ public sealed class MultiAccountOrchestratorTests
         Assert.Equal(0, outcome.Failed);
         Assert.Equal(new[] { ("A", "true"), ("B", "true") }, calls);
         Assert.Equal(new[] { "153****57", "139****11" }, driver.Switches.Select(s => s.NormalizedPhone));
-        // One restart to reach the list before A, one to log out A before B; none after the last account.
-        Assert.Equal(2, driver.Restarts);
+        // Reuse the login screen before A, then restart only after A's task and cleanup finish.
+        Assert.Equal(1, driver.Restarts);
         Assert.Equal(1, driver.Stops);
 
         var batch = Assert.Single(await fixture.Database.LoadRecentBatchesAsync());
@@ -142,12 +144,12 @@ public sealed class MultiAccountOrchestratorTests
     }
 
     [Fact]
-    public async Task FailedRestartToLoginStopsBeforeAnyAccountIsTouched()
+    public async Task FailedInitialLoginPreparationStopsBeforeAnyAccountIsTouched()
     {
         await using var fixture = await Fixture.CreateAsync("A", "B");
         var driver = new FakeLoginDriver
         {
-            RestartResult = LoginSwitchOutcome.Fail(LoginSwitchStage.ReturningToLogin, "游戏启动失败"),
+            EnsureResult = LoginSwitchOutcome.Fail(LoginSwitchStage.FindingWindow, "游戏启动失败"),
         };
         var orchestrator = new MultiAccountOrchestrator(fixture.Database, driver);
         var ran = false;
@@ -362,15 +364,15 @@ public sealed class MultiAccountOrchestratorTests
         public List<LoginTarget> Switches { get; } = [];
         public int Restarts { get; private set; }
         public int Stops { get; private set; }
-        public LoginSwitchOutcome RestartResult { get; init; } =
-            LoginSwitchOutcome.Success(LoginSwitchStage.ReturningToLogin, "已返回登录界面");
+        public LoginSwitchOutcome EnsureResult { get; init; } =
+            LoginSwitchOutcome.Success(LoginSwitchStage.WaitingForLogin, "登录界面就绪");
         public Func<LoginTarget, LoginSwitchOutcome>? SwitchResult { get; init; }
         public Exception? ThrowOnSwitch { get; init; }
 
         public Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(LoginSwitchOutcome.Success(LoginSwitchStage.WaitingForLogin, "登录界面就绪"));
+            return Task.FromResult(EnsureResult);
         }
 
         public Task<LoginSwitchOutcome> SwitchAsync(LoginTarget target, SwitchPolicy policy,
@@ -396,7 +398,7 @@ public sealed class MultiAccountOrchestratorTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Restarts++;
-            return Task.FromResult(RestartResult);
+            return Task.FromResult(LoginSwitchOutcome.Success(LoginSwitchStage.ReturningToLogin, "已返回登录界面"));
         }
 
         public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken)

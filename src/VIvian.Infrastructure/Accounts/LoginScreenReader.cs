@@ -93,16 +93,19 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
 
         var panel = LoginPanelDetector.Detect(frame);
         var lines = ocr.Lines;
-        if (panel is not null && panel.Width >= 240 && panel.Height >= 140 && LooksLikeLogin(ocr.Lines))
+        var region = panel is null
+            ? null
+            : new ScreenRegion(panel.X - 8, panel.Y - 8, panel.Width + 16, panel.Height + 16);
+        var state = LoginStateClassifier.Classify(lines, panel is not null, region).State;
+        if (panel is not null && panel.Width >= 240 && panel.Height >= 140 &&
+            (state == LoginScreenState.Unknown || LooksLikeLogin(lines)))
         {
             var panelLines = await ReadPanelAsync(frame, panel, cancellationToken).ConfigureAwait(false);
             lines = MergeLines(ocr.Lines, panelLines);
         }
-        if (NeedsTitleCornerScan(lines))
-            lines = MergeLines(lines, await ReadCornersAsync(frame, cancellationToken).ConfigureAwait(false));
-        var region = panel is null
-            ? null
-            : new ScreenRegion(panel.X - 8, panel.Y - 8, panel.Width + 16, panel.Height + 16);
+        state = LoginStateClassifier.Classify(lines, panel is not null, region).State;
+        if (state == LoginScreenState.Unknown || (state == LoginScreenState.Title && !HasLogout(lines)))
+            lines = MergeLines(lines, await ReadTitleRegionsAsync(frame, cancellationToken).ConfigureAwait(false));
         var result = LoginScreenAnalyzer.Analyze(frame.Width, frame.Height, lines, region);
         if (!result.Success && panel is not null && panel.Width >= 240 && panel.Height >= 140)
         {
@@ -118,24 +121,22 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
 
     /// <summary>
     /// The title screen's account controls are small icons with tiny captions that full-frame OCR often misses.
-    /// When "点击进入" is visible but no logout caption was read, the four corners are read again at 3x.
+    /// Re-read the lower-centre title text and right-hand controls at higher scale.
     /// </summary>
-    private static bool NeedsTitleCornerScan(IReadOnlyList<RecognizedText> lines)
-    {
-        var compact = lines.Select(l => LoginStateClassifier.Compact(l.Text)).ToArray();
-        return compact.Any(t => LoginStateClassifier.WorldEntryControls.Any(w => t.Contains(w, StringComparison.Ordinal))) &&
-               !compact.Any(t => LoginStateClassifier.LogoutControls.Any(w => t.Contains(w, StringComparison.Ordinal)));
-    }
+    private static bool HasLogout(IReadOnlyList<RecognizedText> lines) =>
+        LoginStateClassifier.FindTitleLogout(lines) is not null;
 
-    private static async Task<IReadOnlyList<RecognizedText>> ReadCornersAsync(CapturedFrame frame,
+    private static async Task<IReadOnlyList<RecognizedText>> ReadTitleRegionsAsync(CapturedFrame frame,
         CancellationToken cancellationToken)
     {
         var result = new List<RecognizedText>();
-        var w = frame.Width * 32 / 100;
-        var h = frame.Height * 30 / 100;
-        foreach (var (x, y) in new[] { (frame.Width - w, 0), (0, 0), (frame.Width - w, frame.Height - h), (0, frame.Height - h) })
+        foreach (var (left, top, width, height) in new[] { (28, 64, 44, 32), (84, 4, 16, 54) })
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var x = frame.Width * left / 100;
+            var y = frame.Height * top / 100;
+            var w = Math.Max(1, frame.Width * width / 100);
+            var h = Math.Max(1, frame.Height * height / 100);
             const int factor = 3;
             var crop = frame.Crop(x, y, w, h);
             var ocr = await WindowsOcrReader.ReadAsync(crop.Scale(factor), cancellationToken).ConfigureAwait(false);
@@ -182,7 +183,8 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
         {
             var compact = Compact(line.Text);
             if (compact.Length == 0) continue;
-            if (merged.Any(m => Compact(m.Text) == compact && Math.Abs(m.CenterY - line.CenterY) < 12)) continue;
+            if (merged.Any(m => Compact(m.Text) == compact && Math.Abs(m.CenterY - line.CenterY) < 12 &&
+                                Math.Abs(m.CenterX - line.CenterX) < 12)) continue;
             merged.Add(line);
         }
         return merged;
@@ -199,7 +201,8 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
             var path = Path.Combine(directory, name + ".json");
             var state = LoginStateClassifier.Classify(view.Lines);
             var evidence = new { State = state.State.ToString(), Failure = view.Result.Failure.ToString(),
-                view.Window?.ProcessId, Width = view.Frame?.Width, Height = view.Frame?.Height,
+                view.Window?.ProcessId, Width = view.Window?.ClientWidth, Height = view.Window?.ClientHeight,
+                CaptureMethod = view.Evidence?.Check.Method, OcrLineCount = view.Lines.Count,
                 CapturedAt = DateTimeOffset.UtcNow, Accounts = state.Accounts.Select(a => a.NormalizedPhone).ToArray() };
             await File.WriteAllTextAsync(path, System.Text.Json.JsonSerializer.Serialize(evidence), cancellationToken)
                 .ConfigureAwait(false);

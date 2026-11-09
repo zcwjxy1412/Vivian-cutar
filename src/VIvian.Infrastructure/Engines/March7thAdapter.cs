@@ -57,6 +57,8 @@ public sealed class March7thAdapter(string installDirectory, March7thReleaseEvid
 
 internal sealed class March7thRun : IEngineRun, IPausableEngineRun
 {
+    private const int ResolutionCircuit = 1;
+    private const int StartupCircuit = 2;
     private readonly ISupervisedProcessGroup _group;
     private readonly IProcessSupervisor _supervisor;
     private readonly string _cli;
@@ -72,7 +74,6 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
     private bool _outputTruncated;
     private int _resolutionErrors;
     private int _circuitTripped;
-    private readonly DateTimeOffset _startedAt = DateTimeOffset.Now.AddSeconds(-5);
     /// <summary>How long a stopped worker may take to reach its next checkpoint; upstream force-exits after 60 s.</summary>
     internal static TimeSpan WorkerExitWait { get; set; } = TimeSpan.FromSeconds(65);
     internal static TimeSpan StopAcknowledgeWait { get; set; } = TimeSpan.FromSeconds(5);
@@ -139,11 +140,15 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
                         "[VIvian] 星铁助手在 VIvian 的管理员进程内直接执行（未另起提权进程），运行编号 " + id + "。"));
                 }
             }
+            var circuit = Volatile.Read(ref _circuitTripped);
+            if (circuit == StartupCircuit)
+                return new RunVerdict(RunOutcome.Indeterminate, ReasonCodes.StartFailed,
+                    [new Evidence(RunId, EvidenceKind.Note, "启动超时，未能及时确认本次星铁助手运行编号。", DateTimeOffset.UtcNow)]);
             if (id is null) return Unknown("上游运行编号缺失或冲突。");
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
-            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates);
-            if (Volatile.Read(ref _circuitTripped) != 0)
+            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates, _directory);
+            if (circuit == ResolutionCircuit)
                 return new RunVerdict(RunOutcome.Failed, ReasonCodes.ResolutionCircuitOpen,
                     [new Evidence(RunId, EvidenceKind.FailureReported, "上游日志连续报告游戏分辨率获取失败；已发送本次任务的停止命令。", DateTimeOffset.UtcNow)]);
             // The verdict's reason is part of the run's own record (UI log, database events, diagnostic export).
@@ -201,10 +206,10 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 { Note(RunEventKind.Warning, "[VIvian] 无法读取本次上游日志：" + ex.Message); }
             }
-            if (DateTimeOffset.UtcNow - started > _circuitOptions.MaxStartupWait && id is null)
+            if (DateTimeOffset.UtcNow - started > _circuitOptions.MaxStartupWait && id is null && !_verdict.IsCompleted &&
+                Interlocked.CompareExchange(ref _circuitTripped, StartupCircuit, 0) == 0)
             {
-                Note(RunEventKind.Warning, "[VIvian 熔断] 启动等待超时且未取得上游运行编号；正在结束本次拥有的进程。上游清理将保持未确认。");
-                Interlocked.Exchange(ref _circuitTripped, 1);
+                Note(RunEventKind.Warning, "[VIvian 熔断] 启动等待超时且未取得上游运行编号；正在结束本次拥有的进程，随后核对清理状态。");
                 _stopRequested = true;
                 await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), CancellationToken.None).ConfigureAwait(false);
                 return;
@@ -215,7 +220,7 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
 
     private async Task TripCircuitAsync(string id, string logPath)
     {
-        if (Interlocked.Exchange(ref _circuitTripped, 1) != 0) return;
+        if (Interlocked.CompareExchange(ref _circuitTripped, ResolutionCircuit, 0) != 0) return;
         Note(RunEventKind.Warning, "[VIvian 熔断] 连续两次游戏分辨率获取失败；正在停止当前任务。请检查游戏窗口与显示模式。日志：" + logPath);
         try { await RequestStopAsync(StopMode.Emergency, CancellationToken.None).ConfigureAwait(false); }
         catch (Exception ex) { Note(RunEventKind.Warning, "[VIvian 熔断] 停止命令异常：" + ex.Message); }
@@ -319,6 +324,7 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
         try { await _verdict.WaitAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false); }
         catch (TimeoutException) { /* the entry may linger; checked below */ }
         var own = await _group.TerminateAllAsync(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+        id = UpstreamRunId();
         string output;
         lock (_output) output = string.Join('\n', _output);
         if (own != CleanupState.Confirmed || id is null) return CleanupState.Unconfirmed;
@@ -337,8 +343,23 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
         {
             if (_upstreamRunId is not null || _runIdConflict) return _upstreamRunId;
         }
-        // The launch line was not captured (yet): the lock holder for this task that started after us is ours.
-        return March7thUpstreamActivity.ActiveRunStartedSince(_directory, _task, _startedAt);
+        var owned = March7thUpstreamActivity.ActiveRunOwnedBy(_directory, _task, _group.RootProcessId, _group.RootStartTime);
+        if (owned is null) return null;
+        lock (_output)
+        {
+            if (_runIdConflict) return null;
+            if (_upstreamRunId is null)
+            {
+                _upstreamRunId = owned;
+                Note(RunEventKind.Evidence, "[VIvian] 已从本次进程的上游记录确认运行编号 " + owned + "。");
+            }
+            else if (_upstreamRunId != owned)
+            {
+                _upstreamRunId = null;
+                _runIdConflict = true;
+            }
+            return _upstreamRunId;
+        }
     }
 
     private void Note(RunEventKind kind, string message) =>

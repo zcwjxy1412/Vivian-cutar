@@ -20,8 +20,8 @@ if (args.Length == 2 && args[0] == "--reference-flow")
     foreach (var file in files)
     {
         var reference = await reader.ImportAsync(file, CancellationToken.None);
-        var selected = reference.Frame is not null && LoginRetentionDetector.IsSelected(reference.Frame, reference.Lines);
         var region = reference.Panel is { } p ? new ScreenRegion(p.X - 8, p.Y - 8, p.Width + 16, p.Height + 16) : null;
+        var selected = reference.Frame is not null && LoginRetentionDetector.IsSelected(reference.Frame, reference.Lines, region);
         var state = LoginStateClassifier.Classify(reference.Lines, reference.Panel is not null, region,
             preserveLoginSelected: selected);
         var anchoredRows = LoginScreenAnalyzer.SavedRows(reference.Lines, region, priorCard);

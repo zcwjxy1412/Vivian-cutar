@@ -53,12 +53,90 @@ public sealed class ScreenshotFlowRegressionTests
         Assert.Equal("退出并保留登录记录", new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Target?.Text);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Screenshot4IgnoresBackgroundExitEvenWhenCancelOcrIsMissing(bool readCancel)
+    {
+        var exit = T("退出", 1090, 725, 45);
+        var lines = new List<RecognizedText>
+        {
+            T("退出登录", 960, 450), T("退出并清除登录记录", 900, 520),
+            T("退出并保留登录记录", 900, 615), exit, T("退出", 1830, 450, 45),
+        };
+        if (readCancel) lines.Add(T("取消", 810, 725, 45));
+        var o = LoginStateClassifier.Classify(lines, true, new ScreenRegion(632, 377, 666, 410),
+            preserveLoginSelected: true);
+
+        Assert.Equal(exit, new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Target);
+    }
+
+    [Fact]
+    public void VerifiedRetentionWithOnlyBackgroundExitWaitsWithoutReclickingRetention()
+    {
+        var o = LoginStateClassifier.Classify([T("退出登录", 960, 450), T("退出并清除登录记录", 900, 520),
+            T("退出并保留登录记录", 900, 615), T("取消", 810, 725), T("退出", 1830, 450, 45)],
+            true, new ScreenRegion(632, 377, 666, 410), preserveLoginSelected: true);
+
+        Assert.Equal(LoginScreenState.LogoutConfirm, o.State);
+        Assert.Equal(LoginActionKind.Wait, new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Kind);
+    }
+
     [Fact]
     public void Screenshot8WelcomeBannerIsTitleNotLoginCard()
     {
         var o = LoginStateClassifier.Classify([T("152******39，欢迎进入游戏", 960, 230, 400),
-            T("开始游戏", 960, 880), T("登出", 1830, 350)], true);
+            T("开始游戏", 960, 880), T("登出", 1830, 350),
+            T("867", 220, 1060, 25), T("679", 300, 1060, 25)], true);
         Assert.Equal(LoginScreenState.Title, o.State);
+        Assert.Equal("152****39", Assert.Single(o.Accounts).NormalizedPhone);
+    }
+
+    [Fact]
+    public void TitleBuildFooterCannotInventAWelcomeAccount()
+    {
+        var o = LoginStateClassifier.Classify([T("点击进入", 960, 1014), T("登出", 1830, 400),
+            T("867", 220, 1060, 25), T("679", 300, 1060, 25)]);
+        Assert.Equal(LoginScreenState.Title, o.State);
+        Assert.Empty(o.Accounts);
+    }
+
+    [Fact]
+    public void TitleLogoutIgnoresCandidateAboveSettings()
+    {
+        var correct = T("登出", 1830, 400, 45);
+        var o = LoginStateClassifier.Classify([T("点击进入", 960, 1014),
+            T("登出", 1800, 262, 60), T("设置", 1830, 305, 45), correct, T("退出", 1830, 495, 45)]);
+
+        Assert.Equal(LoginScreenState.Title, o.State);
+        Assert.Equal(correct, o.ActionTarget);
+    }
+
+    [Fact]
+    public void TrainSupplyIsHandledOnlyAfterChoosingTheTargetAccount()
+    {
+        var o = LoginStateClassifier.Classify([T("列车补给", 960, 430),
+            T("点击领取今日补给", 960, 930), T("剩余：146 天", 960, 520)]);
+
+        Assert.Equal(LoginScreenState.DailySupply, o.State);
+        Assert.Equal(LoginActionKind.RestartGame, new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Kind);
+        var world = new LoginFlowSession(LoginGoal.InWorld);
+        var close = LoginStateClassifier.Classify([T("点击空白处关闭", 960, 930)]);
+        Assert.Equal(LoginActionKind.Wait, world.Decide(close).Kind);
+        Assert.Equal("点击领取今日补给", world.Decide(o).Target?.Text);
+        Assert.Equal("点击空白处关闭", world.Decide(close).Target?.Text);
+    }
+
+    [Fact]
+    public void LiveSecondAccountHudConfirmsWorldWithoutReadingTheUid()
+    {
+        var effects = T("状 态 效 果 U", 1800, 240, 110);
+        var chat = T("寰 ？ Enter", 88, 970, 95);
+        Assert.Equal(LoginScreenState.InGame, LoginStateClassifier.Classify([effects, chat]).State);
+        Assert.Equal(LoginScreenState.Unknown, LoginStateClassifier.Classify([effects]).State);
+        Assert.Equal(LoginScreenState.Unknown, LoginStateClassifier.Classify([chat]).State);
+        Assert.Equal(LoginScreenState.AuthChallenge,
+            LoginStateClassifier.Classify([effects, chat, T("请完成安全验证", 960, 520)]).State);
     }
 
     [Fact]

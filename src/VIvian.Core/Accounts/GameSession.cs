@@ -44,15 +44,25 @@ public static partial class GameUidParser
 
     public static bool LooksInGame(IEnumerable<RecognizedText> lines)
     {
-        var compact = lines.Select(l => string.Concat(l.Text.Where(c => !char.IsWhiteSpace(c)))).ToArray();
+        var hud = lines.Select(l => l with { Text = LoginStateClassifier.Compact(l.Text) }).ToArray();
+        var compact = hud.Select(l => l.Text).ToArray();
         if (compact.Any(t => t.Contains("点击进入", StringComparison.Ordinal) ||
                              t.Contains("开始游戏", StringComparison.Ordinal) ||
                              t.Contains("进入游戏", StringComparison.Ordinal) ||
                              t.Contains("登录其他账号", StringComparison.Ordinal))) return false;
-        return compact.Any(t => t.Contains("开拓等级", StringComparison.Ordinal) ||
-                                t.Contains("星琼", StringComparison.Ordinal) ||
-                                t.Contains("委托", StringComparison.Ordinal) ||
-                                t.Contains("跃迁", StringComparison.Ordinal) ||
-                                t.Contains("UID", StringComparison.OrdinalIgnoreCase));
+        // The version footer can contain a UID before the world has loaded.
+        return compact.Any(t => t.StartsWith("开拓等级", StringComparison.Ordinal) ||
+                                t is "查看短信" or "阅读短信") ||
+               compact.Count(t => t is "委托" or "跃迁" or "编队" or "背包" or "任务") >= 2 ||
+               HasWorldHud(hud);
+    }
+
+    private static bool HasWorldHud(IReadOnlyList<RecognizedText> lines)
+    {
+        // Normal exploration shows status effects by the party and the chat shortcut across the HUD.
+        // The loading footer shows neither pair, even when it already displays a UID.
+        var effects = lines.FirstOrDefault(l => l.Text is "状态效果" or "状态效果U");
+        return effects is not null && lines.Any(chat => chat.Text.EndsWith("Enter", StringComparison.OrdinalIgnoreCase) &&
+            chat.CenterX < effects.CenterX - 4 * effects.Width && chat.CenterY > effects.CenterY + 4 * effects.Height);
     }
 }

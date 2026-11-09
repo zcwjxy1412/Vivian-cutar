@@ -29,6 +29,7 @@ public enum LoginScreenState
     AgreementRequired,
     /// <summary>A plain notice with an explicit acknowledge button ("我知道了").</summary>
     Notice,
+    DailySupply,
     InGame,
 }
 
@@ -46,6 +47,8 @@ public sealed record LoginStateObservation(
 /// <summary>Turns OCR lines into a <see cref="LoginScreenState"/>. Pure function; no clicks, no I/O.</summary>
 public static class LoginStateClassifier
 {
+    private const string RetainLogin = "退出并保留登录记录";
+    private const string ClearLogin = "退出并清除登录记录";
     // Texts are compared after removing whitespace. Keep lists short and specific: a broad keyword would make an
     // unrelated in-game panel look like a login screen.
     /// <summary>Labels of the title-screen control that signs the current account out (never "退出游戏").</summary>
@@ -83,16 +86,8 @@ public static class LoginStateClassifier
         var logoutLine = FindAny(lines.Where(l => !Compact(l.Text).Contains("退出游戏", StringComparison.Ordinal)).ToArray(),
             LogoutControls);
         var confirm = FindAny(lines, ConfirmButtons);
-        var preserve = FindExact(lines, "退出并保留登录记录");
-        if (Has("退出登录") && Has("登录记录") && (Has("取消") || Has("退出并清除登录记录")))
-        {
-            var exit = FindExact(lines, "退出");
-            // Both controls must be in the modal, below its heading. Never use the background exit icon.
-            var action = preserve is null ? null : preserveLoginSelected && exit is not null &&
-                exit.CenterY > preserve.CenterY ? exit : preserve;
-            return new(LoginScreenState.LogoutConfirm, lines, [], action,
-                preserveLoginSelected ? "已核实保留登录记录，可退出登录。" : "先选择并核实保留登录记录。");
-        }
+        if (Has(RetainLogin) || Has(ClearLogin) || (Has("退出登录") && Has("登录记录") && Has("取消")))
+            return ClassifyRetentionDialog(lines, panel, preserveLoginSelected);
         // The confirmation dialog is drawn over the dimmed title screen, so "点击进入" may still be readable behind
         // it; the dialog (confirm + cancel + a logout phrase) takes precedence over the title.
         if (confirm is not null && Has("取消") && (logoutLine is not null || Has("退出当前")))
@@ -101,8 +96,16 @@ public static class LoginStateClassifier
         var title = FindAny(lines, WorldEntryControls);
         if (title is not null && !HasAny(LauncherWords) &&
             (Has("点击进入") || logoutLine is not null || Has("星穹列车")))
-            return new(LoginScreenState.Title, lines, MaskedPhoneParser.FindAll(lines), logoutLine,
-                logoutLine is null ? "标题界面（未识别到退出登录按钮）。" : "标题界面（可退出登录）。");
+        {
+            var titleLogout = FindTitleLogout(lines);
+            var welcome = FindAny(lines, ["欢迎进入游戏"]);
+            // The title footer also contains split version digits. Only the welcome row can identify the account.
+            var welcomeAccounts = welcome is null ? [] : MaskedPhoneParser.FindAll(lines.Where(line =>
+                Math.Abs(line.CenterY - welcome.CenterY) <= welcome.Height &&
+                Math.Abs(line.CenterX - welcome.CenterX) <= 2 * welcome.Width).ToArray());
+            return new(LoginScreenState.Title, lines, welcomeAccounts, titleLogout,
+                titleLogout is null ? "标题界面（等待定位登出按钮）。" : "标题界面（可退出登录）。");
+        }
 
         var enterGame = FindExact(lines, "进入游戏");
         if (accounts.Count > 0 && (enterGame is not null || Has("登录其他账号") || loginPanelDetected))
@@ -117,6 +120,10 @@ public static class LoginStateClassifier
             return new(LoginScreenState.AuthChallenge, lines, accounts, null,
                 "登录界面没有已保存账号，需要用户本人登录。");
 
+        var supply = FindExact(lines, "点击领取今日补给");
+        if (Has("列车补给") && supply is not null)
+            return new(LoginScreenState.DailySupply, lines, accounts, supply, "领取已登录账号的今日列车补给。");
+
         var notice = FindAny(lines, ["我知道了"]);
         if (notice is not null) return new(LoginScreenState.Notice, lines, accounts, notice, "提示框。");
 
@@ -130,6 +137,47 @@ public static class LoginStateClassifier
             return new(LoginScreenState.Loading, lines, accounts, null, "加载中。");
 
         return new(LoginScreenState.Unknown, lines, accounts, null, "无法识别当前画面。");
+    }
+
+    public static RecognizedText? FindTitleLogout(IReadOnlyList<RecognizedText> lines)
+    {
+        var settings = FindExact(lines, "设置");
+        var exit = FindExact(lines, "退出");
+        var matches = lines.Where(line => LogoutControls.Contains(Compact(line.Text), StringComparer.Ordinal) &&
+            (settings is null || !SameMenuColumn(settings, line) || line.CenterY > settings.Bottom) &&
+            (exit is null || !SameMenuColumn(exit, line) || line.Bottom < exit.Y)).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    private static bool SameMenuColumn(RecognizedText left, RecognizedText right) =>
+        Math.Abs(left.CenterX - right.CenterX) <= Math.Max(left.Width, right.Width);
+
+    private static LoginStateObservation ClassifyRetentionDialog(IReadOnlyList<RecognizedText> lines,
+        ScreenRegion? panel, bool preserveLoginSelected)
+    {
+        var modal = panel is { } region ? lines.Where(l => region.Contains(l.CenterX, l.CenterY)).ToArray() : lines;
+        var preserve = FindExact(modal, RetainLogin);
+        if (preserve is null)
+            return new(LoginScreenState.LogoutConfirm, lines, [], null, "等待识别弹窗内的保留登录记录选项。");
+        if (!preserveLoginSelected)
+        {
+            // The radio itself sits just left of its label. Use the live text height to locate it.
+            var radio = preserve with { X = preserve.X - preserve.Height * 1.4, Width = preserve.Height };
+            if (panel is { } bounds && !bounds.Contains(radio.CenterX, radio.CenterY))
+                return new(LoginScreenState.LogoutConfirm, lines, [], null, "等待定位弹窗内的保留登录记录单选按钮。");
+            return new(LoginScreenState.LogoutConfirm, lines, [], radio, "选中保留登录记录，等待下一帧核验。");
+        }
+
+        var cancel = FindExact(modal.Where(l => l.CenterY > preserve.Bottom).ToArray(), "取消");
+        var footer = modal.Where(l => l.CenterY > preserve.Bottom &&
+            (cancel is not null
+                ? l.CenterX > cancel.CenterX && Math.Abs(l.CenterY - cancel.CenterY) <= Math.Max(l.Height, cancel.Height)
+                : panel is { } bounds && l.CenterX > bounds.X + bounds.Width / 2 &&
+                    l.CenterY > bounds.Y + bounds.Height * .65)).ToArray();
+        var exit = FindExact(footer, "退出");
+        return new(LoginScreenState.LogoutConfirm, lines, [], exit, exit is null
+            ? "已核实保留登录记录，等待唯一的弹窗退出按钮。"
+            : "已核实保留登录记录，点击弹窗内的退出。");
     }
 
     public static RecognizedText? FindAny(IReadOnlyList<RecognizedText> lines, IEnumerable<string> words)
@@ -185,11 +233,12 @@ public sealed record LoginFlowBudget(int MaxClicksPerState = 3, int MaxUnknownSt
 public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = null)
 {
     private readonly LoginFlowBudget _budget = budget ?? LoginFlowBudget.Default;
-    private readonly Dictionary<LoginScreenState, int> _clicks = [];
+    private readonly Dictionary<(LoginScreenState State, string Action), int> _clicks = [];
     private readonly List<(LoginScreenState State, DateTimeOffset At)> _trail = [];
     private int _unknownStreak;
     private int _steps;
     private int _restarts;
+    private bool _supplyClaimStarted;
 
     public LoginGoal Goal => goal;
     public IReadOnlyList<(LoginScreenState State, DateTimeOffset At)> Trail => _trail;
@@ -197,6 +246,9 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
 
     public LoginAction Decide(LoginStateObservation observation, DateTimeOffset? at = null)
     {
+        if (Goal == LoginGoal.InWorld && _supplyClaimStarted && observation.State == LoginScreenState.Unknown &&
+            LoginStateClassifier.FindExact(observation.Lines, "点击空白处关闭") is { } closeSupply)
+            observation = observation with { State = LoginScreenState.DailySupply, ActionTarget = closeSupply, Detail = "关闭今日列车补给结果。" };
         _steps++;
         _trail.Add((observation.State, at ?? DateTimeOffset.UtcNow));
         if (_steps > _budget.MaxSteps)
@@ -219,10 +271,12 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
         var action = goal == LoginGoal.AccountSelectable ? ForAccountSelection(observation) : ForWorld(observation);
         if (action.Kind == LoginActionKind.Click)
         {
-            var count = _clicks.GetValueOrDefault(observation.State) + 1;
-            _clicks[observation.State] = count;
+            var key = (observation.State, action.Reason);
+            var count = _clicks.GetValueOrDefault(key) + 1;
+            _clicks[key] = count;
             if (count > _budget.MaxClicksPerState)
-                return LoginAction.Fail($"在“{Describe(observation.State)}”画面已点击 {count - 1} 次仍未变化，已停止。");
+                return LoginAction.Fail($"在“{Describe(observation.State)}”画面已点击 {count - 1} 次仍未变化，已停止。最后动作：{action.Reason}");
+            if (observation.State == LoginScreenState.DailySupply) _supplyClaimStarted = true;
         }
         if (action.Kind == LoginActionKind.RestartGame)
         {
@@ -237,10 +291,10 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
         LoginScreenState.LoginCard or LoginScreenState.AccountList => LoginAction.Done(o.Detail),
         // Never press "点击进入" here: after auto-login it would enter the world as the previous account.
         LoginScreenState.Title when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, "退出当前自动登录的账号。"),
-        LoginScreenState.Title => LoginAction.Fail("标题界面没有识别到“退出登录”按钮，无法安全回到账号列表；不会点击“点击进入”。"),
-        LoginScreenState.LogoutConfirm when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, "确认退出登录。"),
-        LoginScreenState.LogoutConfirm => LoginAction.Fail("退出登录确认框没有可识别的确定按钮。"),
-        LoginScreenState.InGame => LoginAction.Restart("游戏仍在世界内，需要重启后从标题界面退出登录。"),
+        LoginScreenState.Title => LoginAction.Wait(o.Detail),
+        LoginScreenState.LogoutConfirm when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, o.Detail),
+        LoginScreenState.LogoutConfirm => LoginAction.Wait(o.Detail),
+        LoginScreenState.InGame or LoginScreenState.DailySupply => LoginAction.Restart("游戏仍在世界内，需要重启后从标题界面退出登录。"),
         LoginScreenState.Notice when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, "关闭提示框。"),
         LoginScreenState.AuthChallenge or LoginScreenState.AgreementRequired => LoginAction.NeedUser(o.Detail),
         LoginScreenState.Launcher => LoginAction.Fail(o.Detail),
@@ -251,6 +305,7 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
     private static LoginAction ForWorld(LoginStateObservation o) => o.State switch
     {
         LoginScreenState.InGame => LoginAction.Done(o.Detail),
+        LoginScreenState.DailySupply when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, o.Detail),
         LoginScreenState.Title when LoginStateClassifier.FindAny(o.Lines, LoginStateClassifier.WorldEntryControls) is { } enter =>
             LoginAction.Click(enter, "已登录所选账号，点击进入。"),
         // The card may stay for a moment after "进入游戏"; waiting is safe, clicking again is not.
@@ -276,6 +331,7 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
         LoginScreenState.AuthChallenge => "认证挑战",
         LoginScreenState.AgreementRequired => "协议确认",
         LoginScreenState.Notice => "提示框",
+        LoginScreenState.DailySupply => "列车补给",
         LoginScreenState.InGame => "游戏世界",
         _ => state.ToString(),
     };

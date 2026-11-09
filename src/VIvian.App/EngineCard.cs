@@ -28,10 +28,6 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     /// <summary>True only when this build may run the engine for real and its installation is verified.</summary>
     public bool CanRunForReal => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified;
     public string RunHint => CanRunForReal ? "可以执行" : Id == GameId.StarRail ? "待安装核验" : "接入中";
-    private bool _include = id == GameId.StarRail;
-    /// <summary>Part of the one-click run. Only games that can run for real can be included.</summary>
-    public bool IncludeInOneClick { get => _include && CanRunForReal; set => Set(ref _include, value); }
-    public bool CanToggle => CanRunForReal;
     /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
     public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
     public string BannerTo => Id switch { GameId.Genshin => "#2B4C9A", GameId.StarRail => "#2A2F7A", _ => "#3A2A10" };
@@ -89,7 +85,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public void Show(EngineReadinessReport report)
     {
         Report = report;
-        foreach (var name in new[] { nameof(CanRunForReal), nameof(IncludeInOneClick), nameof(CanToggle), nameof(RunHint) }) Raise(name);
+        foreach (var name in new[] { nameof(CanRunForReal), nameof(RunHint) }) Raise(name);
         var (state, brush) = report.Compatibility switch
         {
             CompatibilityClass.NotConfigured => ("未设置路径", StateColors.Neutral),

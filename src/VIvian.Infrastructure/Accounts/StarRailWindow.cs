@@ -65,26 +65,19 @@ public static class StarRailWindow
     public static bool IsRunning => Find() is not null;
 
     /// <summary>
-    /// Detection only: true when any top-level window, visible or hidden, belongs to a StarRail process. Processes
-    /// are deliberately not looked up by name (see ProcessSafetyGuardTests); nothing is ever terminated from this.
+    /// Detection only. A starting or exiting client may have no top-level window at all.
     /// </summary>
     public static bool IsProcessRunning()
     {
-        var found = false;
-        WindowsNative.EnumWindows((handle, _) =>
+        var processes = Process.GetProcessesByName(ProcessName);
+        try
         {
-            WindowsNative.GetWindowThreadProcessId(handle, out var processId);
-            try
-            {
-                using var process = Process.GetProcessById((int)processId);
-                if (!string.Equals(process.ProcessName, ProcessName, StringComparison.OrdinalIgnoreCase)) return true;
-                found = true;
-                return false;
-            }
-            catch (ArgumentException) { return true; }
-            catch (InvalidOperationException) { return true; }
-        }, IntPtr.Zero);
-        return found;
+            return processes.Length > 0;
+        }
+        finally
+        {
+            foreach (var process in processes) process.Dispose();
+        }
     }
 
     public static bool IsSameProcessAlive(StarRailWindowInfo window)

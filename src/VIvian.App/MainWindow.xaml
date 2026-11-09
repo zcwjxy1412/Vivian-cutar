@@ -103,7 +103,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding TodayText}" Style="{StaticResource Small}" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel>
 <UniformGrid Columns="4" Margin="0,14,0,0">
 <Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="可运行游戏" Style="{StaticResource Small}"/><TextBlock Text="{Binding RunnableText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
-<Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE787;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="一键日常已选" Style="{StaticResource Small}"/><TextBlock Text="{Binding SelectedGamesText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
+<Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE787;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="已勾选账号" Style="{StaticResource Small}"/><TextBlock Text="{Binding SelectedAccountsText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
 <Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10" Margin="0,0,8,0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE916;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="预计耗时" Style="{StaticResource Small}"/><TextBlock Text="{Binding EstimateText}" FontSize="20" FontWeight="Bold"/></StackPanel></StackPanel></Border>
 <Border Background="{StaticResource Tile}" CornerRadius="14" Padding="14,10"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Icon}" FontSize="22" Foreground="{StaticResource Sakura}" Margin="0,0,10,0"/><StackPanel><TextBlock Text="运行状态" Style="{StaticResource Small}"/><TextBlock Text="{Binding RunStateText}" FontSize="20" FontWeight="Bold" Foreground="{StaticResource Ok}"/></StackPanel></StackPanel></Border>
 </UniformGrid></StackPanel></Border>
@@ -129,7 +129,6 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <ItemsControl ItemsSource="{Binding Chips}" Margin="0,8,0,0"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,2" Margin="0,0,6,4"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
-<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding IncludeInOneClick}" IsEnabled="{Binding CanToggle}" ToolTip="加入一键日常" Margin="0,0,10,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 加入一键日常}"/>
 <Button Content="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Click="OpenGameSettings" Tag="{Binding Id}" ToolTip="配置" Padding="10,8" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 配置}"/>
 <Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.OneClickCommand, RelativeSource={RelativeSource AncestorType=Window}}" IsEnabled="{Binding CanRunForReal}" ToolTip="运行" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
 </StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
@@ -150,7 +149,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding Queue.Current}" FontSize="13"/>
 <TextBlock Text="{Binding Queue.Status}" Style="{StaticResource Small}" Margin="0,4,0,0"/>
 <TextBlock Text="{Binding BatchStatus}" Style="{StaticResource Small}" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite"/>
-<TextBlock Text="{Binding ManualTestStateText}" Style="{StaticResource Small}" Margin="0,8,0,0"/></StackPanel></Border></Grid>
+</StackPanel></Border></Grid>
 </StackPanel></ScrollViewer>
 
 <!-- Right column: automation control + system status -->
@@ -166,11 +165,11 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="一键日常" Foreground="White" FontSize="22" FontWeight="Bold"/></StackPanel></Border></Grid>
 <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
 <Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
-<UniformGrid Columns="3">
-<Button Content="计划运行" IsEnabled="False" ToolTip="定时执行将在手动运行稳定后开放" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
+<UniformGrid Columns="2">
 <Button Content="{Binding Queue.PauseButtonText}" Command="{Binding Queue.PauseCommand}" IsEnabled="{Binding Queue.CanPause}" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
 <Button Style="{StaticResource DangerButton}" Content="停止" Command="{Binding StopAllCommand}" IsEnabled="{Binding CanStopAll}" Margin="0" Padding="6,9" FontSize="13"/></UniformGrid>
-<TextBlock Text="先完成启动时的管理员授权、账号勾选和配置，再点“一键日常”自动执行选中账号。批次内不再确认；身份验证或清理异常时安全停止。" Style="{StaticResource Small}" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+<TextBlock Text="账号管理勾选并排序，游戏管理保存任务设置。完成打开程序时的管理员授权后，在这里启动一次。" Style="{StaticResource Small}" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+<StackPanel Visibility="{Binding PendingRestoreVisibility}" Margin="0,8,0,0"><TextBlock Text="{Binding PendingRestoreText}" Foreground="{StaticResource Warn}"/><Button Content="恢复临时配置" Command="{Binding RestoreConfigurationCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left" Margin="0,6,0,0"/></StackPanel>
 <TextBlock Text="{Binding StopKeyText}" Style="{StaticResource Small}" FontSize="12" Margin="0,4,0,0"/>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}" Padding="18,14"><StackPanel>
@@ -198,13 +197,17 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="游戏管理" Style="{StaticResource H1}"/><TextBlock Text="ゲーム" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="选择星铁账号后修改其任务设置。原有账号与原软件同步；新增账号先保存独立设置，运行前核对实际登录身份。" Style="{StaticResource Lead}" Margin="0,4,0,12"/></StackPanel>
 <TabControl x:Name="GameTabs" Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="0,14,0,0" ItemContainerStyle="{StaticResource PillTab}">
-<TabItem Header="崩坏：星穹铁道"><Border Style="{StaticResource Panel}" Margin="0" Padding="20,6,8,8"><DockPanel DataContext="{Binding Configuration}" Margin="0,14,0,0">
+<TabItem Header="崩坏：星穹铁道"><Border Style="{StaticResource Panel}" IsEnabled="{Binding IsIdle}" Margin="0" Padding="20,6,8,8"><DockPanel DataContext="{Binding Configuration}" Margin="0,14,0,0">
 <StackPanel DockPanel.Dock="Top" Margin="0,0,16,10">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <TextBlock Text="配置" Style="{StaticResource H2}" VerticalAlignment="Center" Margin="0"/>
 <WrapPanel Grid.Column="1"><Button Content="重新读取" Command="{Binding ReadCommand}" Margin="0,0,8,0"/><Button Content="从原项目导入" Command="{Binding ImportUpstreamCommand}" Margin="0,0,8,0" ToolTip="将所选账号原项目中已登记的参数同步到该账号档案"/><Button Style="{StaticResource Primary}" Content="立即保存" Command="{Binding SaveCommand}" Margin="0,0,8,0" ToolTip="修改会自动保存；这里用于重试排队中的修改"/><Button Content="打开原项目详细设置" Command="{Binding OpenUpstreamCommand}" Margin="0,0,8,0" ToolTip="打开星铁助手主界面，随后在原程序中进入支援角色详细设置"/><Button Content="复制设置文件路径" Command="{Binding OpenSettingsCommand}" Margin="0"/></WrapPanel></Grid>
 <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><TextBlock Text="当前账号：" VerticalAlignment="Center"/>
-<ComboBox Width="230" ItemsSource="{Binding DataContext.Accounts.StarRailAccounts, RelativeSource={RelativeSource AncestorType=Window}}" SelectedItem="{Binding DataContext.Accounts.SelectedStarRail, RelativeSource={RelativeSource AncestorType=Window}}" DisplayMemberPath="Name"/>
+<ComboBox Width="230" ItemsSource="{Binding DataContext.Accounts.Rows, RelativeSource={RelativeSource AncestorType=Window}}" SelectedItem="{Binding DataContext.Accounts.ConfigurationRow, RelativeSource={RelativeSource AncestorType=Window}}" DisplayMemberPath="Name"/>
+</StackPanel>
+<StackPanel DataContext="{Binding DataContext.Accounts, RelativeSource={RelativeSource AncestorType=Window}}" Orientation="Horizontal" Margin="0,8,0,0">
+<CheckBox Content="启用此账号的星铁日常" IsChecked="{Binding ConfigurationRow.DailyEnabled}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+<Button Content="保存任务开关" Command="{Binding SaveDailyPlanCommand}" ToolTip="{Binding Status}"/>
 </StackPanel>
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/></StackPanel>
 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
@@ -254,7 +257,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </TabControl></Grid></TabItem>
 
 <!-- ============ 账号管理 ============ -->
-<TabItem Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}"><StackPanel DataContext="{Binding Accounts}" MaxWidth="1050" HorizontalAlignment="Left">
+<TabItem Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}" IsEnabled="{Binding IsIdle}"><StackPanel DataContext="{Binding Accounts}" MaxWidth="1050" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="账号管理" Style="{StaticResource H1}"/><TextBlock Text="アカウント" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="打开星铁登录界面后扫描，VIvian 会按脱敏手机号建立档案；运行时自动选择并登录，不需要填写 UID，也不需要为每个账号安装一份助手。" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
@@ -266,7 +269,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="已识别账号" Style="{StaticResource H2}"/>
-<TextBlock Text="勾选要运行的账号。默认使用第一个选中账号的任务配置；每个账号的游戏体力与任务结果仍独立检测和保存。" Style="{StaticResource Small}"/>
+<TextBlock Text="勾选账号并调整列表顺序。在游戏管理保存各账号任务设置，随后从首页启动。" Style="{StaticResource Small}"/>
 <ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" MinHeight="260" BorderThickness="0" Background="Transparent" Margin="0,10,0,0">
 <ListBox.ItemTemplate><DataTemplate><Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,2,10,0" AutomationProperties.Name="{Binding Name, StringFormat=选择 {0}}"/>
@@ -276,17 +279,8 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding LastResult, StringFormat=上次结果：{0}}" Style="{StaticResource Small}"/></StackPanel>
 <TextBlock Grid.Column="2" Text="{Binding Verification}" Style="{StaticResource Small}" Foreground="{StaticResource Warn}" VerticalAlignment="Top"/></Grid></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
 <WrapPanel Margin="0,8,0,0"><Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
-<Button Content="保存账号设置" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
+<Button Content="保存备注和勾选" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
 <TextBlock Text="备注只改 VIvian 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Panel}" DataContext="{Binding DataContext, RelativeSource={RelativeSource AncestorType=Window}}"><StackPanel>
-<TextBlock Text="运行选中账号" Style="{StaticResource H2}"/>
-<TextBlock Text="账号切换顺序与列表一致。每次切换都会等上一个账号的任务、进程和临时配置全部清理完成。" Style="{StaticResource Small}"/>
-<StackPanel Orientation="Horizontal" Margin="0,10,0,0"><RadioButton GroupName="AccountConfigMode" Content="统一配置（继承第一个账号）" IsChecked="{Binding Accounts.IsUnified, Mode=TwoWay}" Margin="0,0,20,0"/>
-<RadioButton GroupName="AccountConfigMode" Content="各账号独立配置" IsChecked="{Binding Accounts.IsIndependent, Mode=TwoWay}"/></StackPanel>
-<WrapPanel Margin="0,14,0,0"><Button Style="{StaticResource Primary}" Content="运行选中账号" Command="{Binding RunSelectedAccountsCommand}" Margin="0,0,8,0"/>
-<Button Style="{StaticResource DangerButton}" Content="停止全部任务" Command="{Binding StopBatchCommand}" IsEnabled="{Binding BatchRunning}"/></WrapPanel>
-<TextBlock Text="{Binding BatchStatus}" Style="{StaticResource Small}" Margin="0,10,0,0" AutomationProperties.LiveSetting="Polite"/>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}" DataContext="{Binding Accounts}"><StackPanel><TextBlock Text="最近批次" Style="{StaticResource H2}"/>
 <ListBox ItemsSource="{Binding RecentBatches}" SelectedItem="{Binding SelectedBatch}" BorderThickness="0" Background="Transparent"><ListBox.ItemTemplate><DataTemplate>
@@ -299,69 +293,6 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding Result}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Small}"/></StackPanel>
 </DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
-
-<!-- ============ 日常任务 ============ -->
-<TabItem Header="日常任务" Tag="&#xE787;"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="820" HorizontalAlignment="Left">
-<StackPanel Orientation="Horizontal"><TextBlock Text="日常任务" Style="{StaticResource H1}"/><TextBlock Text="にちじょう" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="{Binding Engines[1].Version, StringFormat=崩坏：星穹铁道由 {0} 执行。这里可以单独运行并查看实时过程。}" Style="{StaticResource Lead}"/>
-
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="{Binding March7thTask.Title}" Style="{StaticResource H2}"/>
-<TextBlock Text="按“游戏管理 · 崩坏：星穹铁道”里清体力设置的副本消耗开拓力（需要时借用支援角色），再做每日实训并领取奖励。开拓力不少于 120 才能拿满 500 分。" Style="{StaticResource Small}" Margin="0,0,0,14"/>
-<TextBlock Text="{Binding ManualTestStateText}" Foreground="{StaticResource Warn}" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite"/>
-<TextBlock Text="{Binding LastRealResultText}" Style="{StaticResource Small}" Margin="0,4,0,14" AutomationProperties.LiveSetting="Polite"/>
-<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏任务" AutomationProperties.Name="确认本次星铁真实任务"/>
-<CheckBox IsChecked="{Binding AllowTemporaryConfigurationThisRun}" Content="{Binding TemporaryConfigurationText}" Visibility="{Binding TemporaryConfigurationVisibility}" Margin="0,8,0,0"/>
-<StackPanel Visibility="{Binding PendingRestoreVisibility}" Margin="0,8,0,0"><TextBlock Text="{Binding PendingRestoreText}" Foreground="{StaticResource Warn}"/>
-<Button Content="恢复临时配置" Command="{Binding RestoreConfigurationCommand}" HorizontalAlignment="Left" Margin="0,8,0,0"/></StackPanel>
-<WrapPanel Margin="0,16,0,0"><Button Style="{StaticResource Primary}" Content="{Binding StartButtonText}" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}"/>
-<Button Style="{StaticResource DangerButton}" Content="紧急停止" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}"/></WrapPanel>
-<TextBlock Text="{Binding March7thConsentNote}" Style="{StaticResource Small}" Margin="0,12,0,0"/>
-</StackPanel></Border>
-
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="运行过程" Style="{StaticResource H2}"/>
-<TextBlock Text="{Binding Queue.Current}"/>
-<TextBlock Text="{Binding Queue.Status}" Style="{StaticResource Small}" Margin="0,2,0,10"/>
-<ListBox ItemsSource="{Binding Queue.LogLines}" Height="220" FontFamily="Consolas, Microsoft YaHei UI" FontSize="12" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-<ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" LineHeight="18"/></DataTemplate></ListBox.ItemTemplate></ListBox>
-<WrapPanel Margin="0,12,0,0" IsEnabled="{Binding IsIdle}"><Button Content="导出诊断报告" Command="{Binding ExportDiagnosticsCommand}"/></WrapPanel>
-<TextBlock Text="{Binding ExportStatus}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-</StackPanel></Border>
-
-<Expander><Expander.Header><TextBlock Text="安装核验与安全细节" Foreground="{StaticResource Muted}"/></Expander.Header>
-<StackPanel Margin="0,10,0,0">
-<TextBlock Text="{Binding March7thExecutionBlock}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding Engines[1].InstallPath, StringFormat=安装目录：{0}}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
-<TextBlock Text="{Binding Engines[1].Compatibility, StringFormat=安装检查：{0}}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding ReleaseStatus}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding March7thStopStatus}" Style="{StaticResource Small}"/>
-<TextBlock Text="{Binding VersionText}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
-<TextBlock Text="{Binding DiagnosticSessionText}" Style="{StaticResource Small}"/>
-</StackPanel></Expander>
-
-</StackPanel></ScrollViewer></TabItem>
-
-<!-- ============ 任务计划 ============ -->
-<TabItem Header="任务计划" Tag="&#xE8FD;"><Grid Margin="40,34,40,20">
-<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="任务计划" Style="{StaticResource H1}"/><TextBlock Text="けいかく" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="按游戏勾选要做的任务并排好顺序。计划只记录你的选择；标为“候选”的任务还没核对，不会被执行。" Style="{StaticResource Lead}"/></StackPanel>
-<ComboBox Grid.Row="1" ItemsSource="{Binding TaskPlans}" SelectedItem="{Binding SelectedPlan}" DisplayMemberPath="Name" Width="320" HorizontalAlignment="Left" Margin="0,0,0,12" AutomationProperties.Name="选择游戏"/>
-<Grid Grid.Row="2" DataContext="{Binding SelectedPlan}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Background="{StaticResource Surface}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="任务列表"><ListBox.ItemTemplate><DataTemplate>
-<Grid Margin="10,8"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<CheckBox IsChecked="{Binding Enabled}" VerticalAlignment="Center" AutomationProperties.Name="{Binding Title}"/>
-<StackPanel Grid.Column="1" Margin="4,0,12,0"><TextBlock Text="{Binding Title}" FontSize="15"/><TextBlock Text="{Binding Note}" Style="{StaticResource Small}" FontSize="12"/></StackPanel>
-<TextBlock Grid.Column="2" Text="{Binding Status}" Foreground="{StaticResource Warn}" VerticalAlignment="Center" FontSize="13"/>
-</Grid></DataTemplate></ListBox.ItemTemplate></ListBox>
-<StackPanel Grid.Column="1" Margin="14,0,0,0" MinWidth="120">
-<Button Content="上移" Command="{Binding DataContext.MoveUpCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,8"/>
-<Button Content="下移" Command="{Binding DataContext.MoveDownCommand, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,0,0,8"/></StackPanel></Grid>
-<StackPanel Grid.Row="3" Margin="0,12,0,0">
-<TextBlock Text="{Binding SelectedPlan.Validation}" Foreground="{StaticResource Warn}" Margin="0,0,0,10" AutomationProperties.LiveSetting="Polite"/>
-<WrapPanel IsEnabled="{Binding IsIdle}"><Button Style="{StaticResource Primary}" Content="保存计划" Command="{Binding SaveTasksCommand}"/><Button Content="放弃修改" Command="{Binding ReloadTasksCommand}"/></WrapPanel></StackPanel>
-</Grid></TabItem>
 
 <!-- ============ 运行日志 ============ -->
 <TabItem Header="运行日志" Tag="&#xE9D2;"><Grid Margin="40,34,40,20" DataContext="{Binding Queue}">
@@ -430,6 +361,15 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <WrapPanel Margin="0,10,0,0"><Button Content="核对发行包" Command="{Binding VerifyReleaseCommand}"/></WrapPanel>
 <TextBlock Text="{Binding ReleaseStatus}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 </StackPanel></Border>
+<Expander Header="旧版星铁画面实测" Visibility="{Binding LegacyRealTestVisibility}"><StackPanel>
+<TextBlock Text="{Binding ManualTestStateText}" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding LastRealResultText}" Style="{StaticResource Small}"/>
+<CheckBox IsChecked="{Binding March7thConfirmedThisRun}" Content="我确认本次真实游戏任务" AutomationProperties.Name="确认本次星铁真实任务"/>
+<CheckBox IsChecked="{Binding AllowTemporaryConfigurationThisRun}" Content="{Binding TemporaryConfigurationText}" Visibility="{Binding TemporaryConfigurationVisibility}" Margin="0,8,0,0"/>
+<WrapPanel Margin="0,16,0,0"><Button Style="{StaticResource Primary}" Content="{Binding StartButtonText}" Command="{Binding StartMarch7thCommand}" IsEnabled="{Binding CanStartMarch7th}"/>
+<Button Style="{StaticResource DangerButton}" Content="紧急停止" Command="{Binding Queue.StopCommand}" IsEnabled="{Binding Queue.IsRunning}"/></WrapPanel>
+<TextBlock Text="{Binding March7thConsentNote}" Style="{StaticResource Small}" Margin="0,12,0,0"/>
+</StackPanel></Expander>
 </StackPanel></ScrollViewer></TabItem>
 
 <!-- ============ 资源与更新 ============ -->

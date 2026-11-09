@@ -36,6 +36,56 @@ public sealed class LoginDriverSimulationTests
     }
 
     [Fact]
+    public async Task VerifiedWorldWithoutReadableUidDoesNotWaitForTheFullDeadline()
+    {
+        var game = FakeGame.Standard();
+        game.WorldUid = null;
+
+        var outcome = await game.Driver().SwitchAsync(B(), Fast, CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Null(outcome.Uid);
+        Assert.Equal(2, game.VerifierCalls);
+    }
+
+    [Fact]
+    public async Task InitialLoginCanRecoverAfterTenUnreadableFrames()
+    {
+        var game = FakeGame.Standard();
+        game.UnreadableScans = 10;
+
+        var outcome = await game.Driver().EnsureLoginAsync(Fast, CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Equal(new[] { "退出登录", "确定" }, game.ClickedTexts);
+    }
+
+    [Fact]
+    public async Task ColdStartupUsesItsTimeBudgetBeyondThePreviousFrameLimit()
+    {
+        var game = FakeGame.Standard();
+        game.UnreadableScans = 65;
+
+        var outcome = await game.Driver().EnsureLoginAsync(new SwitchPolicy(), CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Equal(new[] { "退出登录", "确定" }, game.ClickedTexts);
+    }
+
+    [Fact]
+    public async Task ColdStartupStillTimesOutWithoutClickingAnUnknownScreen()
+    {
+        var game = FakeGame.Standard();
+        game.Screen = "garbage";
+
+        var outcome = await game.Driver().EnsureLoginAsync(Fast, CancellationToken.None);
+
+        Assert.False(outcome.Ok);
+        Assert.Contains("超时", outcome.Detail, StringComparison.Ordinal);
+        Assert.Empty(game.ClickedTexts);
+    }
+
+    [Fact]
     public async Task UnknownScreenProducesNoClicksAndStops()
     {
         var game = FakeGame.Standard();
@@ -146,6 +196,69 @@ public sealed class LoginDriverSimulationTests
         Assert.Empty(game.ClickedTexts);
     }
 
+    [Fact]
+    public async Task ColdStartWaitsForWindowWithoutLaunchingTwice()
+    {
+        var game = FakeGame.Standard();
+        game.Screen = "none";
+        game.WindowVisible = false;
+        game.ProcessRunning = false;
+        game.OnStart = () =>
+        {
+            game.WindowPollsRemaining = 3;
+            game.ProcessPollsRemaining = 2;
+        };
+
+        var outcome = await game.Driver().RestartToLoginAsync(Fast, CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Equal(1, game.Starts);
+    }
+
+    [Fact]
+    public async Task StartupTimeoutNeverRetriesLaunchOrClicks()
+    {
+        var game = FakeGame.Standard();
+        game.Screen = "none";
+        game.ProcessRunning = false;
+        game.OnStart = () => game.WindowPollsRemaining = int.MaxValue;
+
+        var outcome = await game.Driver().RestartToLoginAsync(Fast, CancellationToken.None);
+
+        Assert.False(outcome.Ok);
+        Assert.True(outcome.Fatal);
+        Assert.Contains("等待星铁窗口超时", outcome.Detail, StringComparison.Ordinal);
+        Assert.Equal(1, game.Starts);
+        Assert.Empty(game.ClickedTexts);
+    }
+
+    [Fact]
+    public async Task WindowlessExistingClientIsReusedWhenItsWindowAppears()
+    {
+        var game = FakeGame.Standard();
+        game.WindowPollsRemaining = 3;
+
+        var outcome = await game.Driver().EnsureLoginAsync(Fast, CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Equal(0, game.Starts);
+        Assert.Equal(0, game.Kills);
+    }
+
+    [Fact]
+    public async Task RemainingClientBlocksRestartEvenAfterTargetExits()
+    {
+        var game = FakeGame.Standard();
+        game.ClientRemainsAfterKill = true;
+
+        var outcome = await game.Driver().RestartToLoginAsync(Fast, CancellationToken.None);
+
+        Assert.False(outcome.Ok);
+        Assert.True(outcome.Fatal);
+        Assert.Equal(1, game.Kills);
+        Assert.Equal(0, game.Starts);
+    }
+
     // ---- simulated game ----------------------------------------------------------------------------------------
 
     internal sealed class FakeGame : ILoginScreenSource, IInputHost, IGameWindowLocator, IGameSessionVerifier
@@ -169,20 +282,30 @@ public sealed class LoginDriverSimulationTests
         public int Kills { get; private set; }
         public int Starts { get; private set; }
         public int OccludedScans { get; set; }
+        public int UnreadableScans { get; set; }
+        public string? WorldUid { get; set; } = "100000002";
+        public int VerifierCalls { get; private set; }
         public int ProcessGeneration { get; set; }
         public bool WindowVisible { get; set; } = true;
         public bool ProcessRunning { get; set; } = true;
         public Action? OnEnter { get; set; }
         public Action? OnStart { get; set; }
+        public int WindowPollsRemaining { get; set; }
+        public int ProcessPollsRemaining { get; set; }
+        public bool ClientRemainsAfterKill { get; set; }
 
         public static FakeGame Standard() => new();
 
-        public StarRailLoginDriver Driver(LoginFlowBudget? budget = null) =>
-            new(this, this, this, () => @"C:\Game\StarRail.exe", null, this, (_, ct) =>
+        public StarRailLoginDriver Driver(LoginFlowBudget? budget = null)
+        {
+            var now = DateTimeOffset.UnixEpoch;
+            return new(this, this, this, () => @"C:\Game\StarRail.exe", null, this, (delay, ct) =>
             {
                 ct.ThrowIfCancellationRequested();
+                now += delay;
                 return Task.CompletedTask;
-            }, budget);
+            }, budget, () => now);
+        }
 
         private StarRailWindowInfo Window => new(new IntPtr(42), 1000 + ProcessGeneration, "崩坏：星穹铁道", 1920, 1080, 0, 0,
             new DateTimeOffset(2026, 11, 7, 0, 0, ProcessGeneration, TimeSpan.Zero));
@@ -190,7 +313,7 @@ public sealed class LoginDriverSimulationTests
         public Task<LoginScreenView> ScanAsync(CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (!WindowVisible || Screen == "none")
+            if (Find() is null)
                 return Task.FromResult(new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.WindowNotFound, "无窗口"), null, null, null));
             if (OccludedScans > 0)
             {
@@ -198,7 +321,8 @@ public sealed class LoginDriverSimulationTests
                 return Task.FromResult(new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.WindowOccluded, "被遮挡"),
                     null, Window, null));
             }
-            var lines = Screens[Screen];
+            var lines = UnreadableScans > 0 ? Screens["garbage"] : Screens[Screen];
+            if (UnreadableScans > 0) UnreadableScans--;
             var frame = new CapturedFrame(new byte[16], 2, 2, "test");
             var result = LoginScreenAnalyzer.Analyze(1920, 1080, lines);
             return Task.FromResult(new LoginScreenView(result, frame, Window, null) { Lines = lines });
@@ -231,7 +355,7 @@ public sealed class LoginDriverSimulationTests
         {
             Kills++;
             Screen = "none";
-            ProcessRunning = false;
+            ProcessRunning = ClientRemainsAfterKill;
             ProcessGeneration++;
             return Task.FromResult(InputResponse.Success("killed"));
         }
@@ -246,15 +370,34 @@ public sealed class LoginDriverSimulationTests
             return Task.FromResult(InputResponse.Success("started"));
         }
 
-        public StarRailWindowInfo? Find() => WindowVisible && Screen != "none" ? Window : null;
-        public bool IsProcessRunning() => ProcessRunning;
+        public StarRailWindowInfo? Find()
+        {
+            if (WindowPollsRemaining > 0)
+            {
+                WindowPollsRemaining--;
+                return null;
+            }
+            return WindowVisible && Screen != "none" ? Window : null;
+        }
+        public bool IsProcessRunning()
+        {
+            if (ProcessPollsRemaining > 0)
+            {
+                ProcessPollsRemaining--;
+                return false;
+            }
+            return ProcessRunning;
+        }
         public bool IsSameProcessAlive(StarRailWindowInfo window) =>
             Screen != "none" && window.ProcessStartedAt == Window.ProcessStartedAt;
 
-        public Task<SessionVerification> VerifyAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(Screen == "world"
-                ? new SessionVerification(true, "100000002", 0.95, "已进入游戏")
+        public Task<SessionVerification> VerifyAsync(CancellationToken cancellationToken)
+        {
+            VerifierCalls++;
+            return Task.FromResult(Screen == "world"
+                ? new SessionVerification(true, WorldUid, 0.95, "已进入游戏")
                 : new SessionVerification(false, null, 0.2, "未进入"));
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

@@ -60,6 +60,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     private readonly IGameWindowLocator _locator;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly LoginFlowBudget _budget;
+    private readonly LoginFlowBudget? _loginBudget;
     private readonly Func<DateTimeOffset> _now;
     private readonly Func<IDisposable?>? _prepareLaunch;
     private readonly Func<LoginScreenView, string, Task>? _saveEvidence;
@@ -82,22 +83,40 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         _locator = locator ?? StarRailWindowLocator.Instance;
         _delay = delay ?? Task.Delay;
         _budget = budget ?? LoginFlowBudget.Default;
+        _loginBudget = budget;
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
 
     public async Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
     {
         _log?.Invoke("ensure-account-selectable");
-        if (_locator.Find() is null && !_locator.IsProcessRunning())
+        if (_locator.Find() is null)
         {
-            _log?.Invoke("game-not-running; starting");
-            var started = await LaunchGameAsync(cancellationToken).ConfigureAwait(false);
-            if (!started.Ok)
-                return Fatal(LoginSwitchStage.FindingWindow, started.Error ?? "无法启动星铁。");
+            var ready = _locator.IsProcessRunning()
+                ? await WaitForWindowAsync(policy.GameStart, cancellationToken).ConfigureAwait(false)
+                : await LaunchGameAsync(policy.GameStart, cancellationToken).ConfigureAwait(false);
+            if (!ready.Ok)
+                return Fatal(LoginSwitchStage.FindingWindow, ready.Error ?? "无法找到星铁窗口。");
         }
-        var session = new LoginFlowSession(LoginGoal.AccountSelectable, _budget);
+        return await ReadLoginAsync(policy, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<LoginSwitchOutcome> ReadLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
+    {
+        var session = new LoginFlowSession(LoginGoal.AccountSelectable, BudgetForWait(policy.GameStart));
         var (outcome, _) = await RunFlowAsync(session, policy.GameStart, null, cancellationToken).ConfigureAwait(false);
         return outcome with { Stage = outcome.Ok ? LoginSwitchStage.WaitingForLogin : outcome.Stage };
+    }
+
+    private LoginFlowBudget BudgetForWait(TimeSpan timeout)
+    {
+        // Cold startup and world loading can stay dark much longer than a normal transition.
+        var pollLimit = (int)Math.Ceiling(timeout / Poll) + 1;
+        return _loginBudget ?? _budget with
+        {
+            MaxSteps = Math.Max(_budget.MaxSteps, pollLimit),
+            MaxUnknownStreak = pollLimit,
+        };
     }
 
     public async Task<LoginSwitchOutcome> SwitchAsync(LoginTarget target, SwitchPolicy policy,
@@ -196,8 +215,9 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                 { Evidence = Judge(evidence, trail), Trail = trail };
         evidence = evidence with { EnterPressedAt = _now() };
 
-        var world = new LoginFlowSession(LoginGoal.InWorld, _budget);
-        var (entered, titlePassedAt) = await RunFlowAsync(world, policy.LoginScreen, selectedWindow, cancellationToken,
+        var worldTimeout = policy.LoginScreen >= policy.GameStart ? policy.LoginScreen : policy.GameStart;
+        var world = new LoginFlowSession(LoginGoal.InWorld, BudgetForWait(worldTimeout));
+        var (entered, titlePassedAt) = await RunFlowAsync(world, worldTimeout, selectedWindow, cancellationToken,
             MaskedPhoneParser.Normalize(target.NormalizedPhone))
             .ConfigureAwait(false);
         trail.AddRange(entered.Trail);
@@ -213,10 +233,12 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         // ---- verify the session belongs to the selected account ----
         SessionVerification verify = new(false, null, 0, "尚未校验。");
         var deadline = _now() + policy.InGame;
+        var consecutiveWorldFrames = 0;
         while (_now() < deadline)
         {
             verify = await _verifier.VerifyAsync(cancellationToken).ConfigureAwait(false);
-            if (verify.InGame && verify.Uid is not null) break;
+            consecutiveWorldFrames = verify.InGame ? consecutiveWorldFrames + 1 : 0;
+            if (verify.InGame && (verify.Uid is not null || consecutiveWorldFrames >= 2)) break;
             if (verify.InGame && _now() + Poll >= deadline) break;
             await _delay(Poll, cancellationToken).ConfigureAwait(false);
         }
@@ -237,29 +259,31 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     {
         var stop = await StopGameAsync(cancellationToken).ConfigureAwait(false);
         if (!stop.Ok) return stop with { Fatal = true };
-        var started = await LaunchGameAsync(cancellationToken).ConfigureAwait(false);
+        var started = await LaunchGameAsync(policy.GameStart, cancellationToken).ConfigureAwait(false);
         if (!started.Ok) return Fatal(LoginSwitchStage.FindingWindow, started.Error ?? "无法重启星铁。");
-        return await EnsureLoginAsync(policy, cancellationToken).ConfigureAwait(false);
+        return await ReadLoginAsync(policy, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken)
     {
         var window = _locator.Find();
-        if (window is null)
+        if (window is not null)
         {
-            if (!_locator.IsProcessRunning()) return LoginSwitchOutcome.Success(LoginSwitchStage.Done, "游戏未运行。");
-            return Fatal(LoginSwitchStage.Failed, "星铁进程存在但没有可识别的窗口，无法证明进程身份，未结束它。");
+            if (window.ProcessStartedAt is null)
+                return Fatal(LoginSwitchStage.Failed, "无法核对星铁进程启动时间，未结束进程。");
+            var kill = await _input.KillAsync(window, cancellationToken).ConfigureAwait(false);
+            if (!kill.Ok) return Fatal(LoginSwitchStage.Failed, kill.Error ?? "结束游戏进程失败。");
         }
-        var kill = await _input.KillAsync(window, cancellationToken).ConfigureAwait(false);
-        if (!kill.Ok) return Fatal(LoginSwitchStage.Failed, kill.Error ?? "结束游戏进程失败。");
         var deadline = _now() + TimeSpan.FromSeconds(12);
         while (_now() < deadline)
         {
-            if (!_locator.IsSameProcessAlive(window))
-                return LoginSwitchOutcome.Success(LoginSwitchStage.Done, "游戏进程已退出（按进程号与启动时间核实）。");
+            cancellationToken.ThrowIfCancellationRequested();
+            if ((window is null || !_locator.IsSameProcessAlive(window)) && !_locator.IsProcessRunning())
+                return LoginSwitchOutcome.Success(LoginSwitchStage.Done, "未检测到残留星铁进程。");
             await _delay(TimeSpan.FromMilliseconds(300), cancellationToken).ConfigureAwait(false);
         }
-        return Fatal(LoginSwitchStage.Failed, "游戏进程在 12 秒内未退出，已停止后续切换。");
+        var detail = window is null ? "星铁进程没有可识别的窗口，无法核对身份。" : "星铁进程尚未全部退出。";
+        return Fatal(LoginSwitchStage.Failed, $"等待星铁退出超过 12 秒。{detail} 已停止后续切换。");
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -268,16 +292,35 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     /// Starts the game the way March7thAssistant would: launch settings applied just before the process starts and
     /// restored ten seconds after its window appears (upstream waits the same), or when the launch fails.
     /// </summary>
-    private async Task<InputResponse> LaunchGameAsync(CancellationToken cancellationToken)
+    private async Task<InputResponse> LaunchGameAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
+        if (_locator.IsProcessRunning())
+            return await WaitForWindowAsync(timeout, cancellationToken).ConfigureAwait(false);
+
+        _log?.Invoke("game-not-running; starting");
         using var prepared = _prepareLaunch?.Invoke();
         var started = await _input.StartGameAsync(_gamePath(), cancellationToken).ConfigureAwait(false);
-        if (!started.Ok || prepared is null) return started;
-        var deadline = _now() + TimeSpan.FromSeconds(120);
-        while (_now() < deadline && _locator.Find() is null)
+        if (!started.Ok) return started;
+        _log?.Invoke($"game-launch: {started.Detail}");
+        var ready = await WaitForWindowAsync(timeout, cancellationToken).ConfigureAwait(false);
+        if (ready.Ok && prepared is not null && started.Detail != "already-running")
+            await _delay(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
+        return ready;
+    }
+
+    private async Task<InputResponse> WaitForWindowAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = _now() + timeout;
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_locator.Find() is not null) return InputResponse.Success("window-ready");
             await _delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
-        await _delay(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false);
-        return started;
+        } while (_now() < deadline);
+
+        var detail = _locator.IsProcessRunning() ? "检测到星铁进程，但未出现可识别的窗口。" : "未检测到运行中的星铁客户端。";
+        _log?.Invoke("game-window-timeout: " + detail);
+        return InputResponse.Failure($"等待星铁窗口超时（{DurationText.Seconds(timeout)}）。{detail} 批次已停止。");
     }
 
     private async Task<(LoginSwitchOutcome Outcome, DateTimeOffset? TitlePassedAt)> RunFlowAsync(
@@ -289,6 +332,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         DateTimeOffset? titlePassed = null;
         LoginStateObservation? last = null;
         LoginScreenView? lastView = null;
+        RecognizedText? previousLogout = null;
+        int? previousLogoutProcess = null;
         while (_now() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -301,9 +346,25 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                 observation.Accounts.Any(a => a.NormalizedPhone != identity))
                 return (Fatal(LoginSwitchStage.VerifyingSession, "标题页欢迎账号与已选账号不一致，已停止。") with
                     { Trail = trail }, titlePassed);
-            if (expectedWindow is not null && !_locator.IsSameProcessAlive(expectedWindow))
+            if (expectedWindow is not null && (!_locator.IsSameProcessAlive(expectedWindow) ||
+                view.Window is { } observedWindow && (observedWindow.ProcessId != expectedWindow.ProcessId ||
+                    observedWindow.ProcessStartedAt != expectedWindow.ProcessStartedAt)))
                 return (Fatal(LoginSwitchStage.VerifyingSession, "选择账号后游戏进程已变化或退出，会话与所选账号的关联中断。") with
                     { Trail = trail }, titlePassed);
+
+            var logout = session.Goal == LoginGoal.AccountSelectable && observation.State == LoginScreenState.Title
+                ? observation.ActionTarget : null;
+            var stableLogout = logout is not null && previousLogout is not null && previousLogoutProcess == view.Window?.ProcessId &&
+                Math.Abs(previousLogout.CenterX - logout.CenterX) <= logout.Width * .5 &&
+                Math.Abs(previousLogout.CenterY - logout.CenterY) <= logout.Height * .5;
+            previousLogout = logout;
+            previousLogoutProcess = view.Window?.ProcessId;
+            if (logout is not null && !stableLogout)
+            {
+                _log?.Invoke("标题界面 -> Wait: 等待下一帧核验登出按钮位置。");
+                await _delay(Poll, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
 
             var action = session.Decide(observation, _now());
             _log?.Invoke($"{LoginFlowSession.Describe(observation.State)} -> {action.Kind}: {action.Reason}");
@@ -334,7 +395,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                 {
                     var stop = await StopGameAsync(cancellationToken).ConfigureAwait(false);
                     if (!stop.Ok) return (stop with { Fatal = true, Trail = trail }, titlePassed);
-                    var started = await LaunchGameAsync(cancellationToken).ConfigureAwait(false);
+                    var started = await LaunchGameAsync(timeout, cancellationToken).ConfigureAwait(false);
                     if (!started.Ok)
                         return (Fatal(LoginSwitchStage.FindingWindow, started.Error ?? "无法重启星铁。") with { Trail = trail },
                             titlePassed);
@@ -385,13 +446,13 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         var region = view.Panel is null ? null
             : new ScreenRegion(view.Panel.X - 8, view.Panel.Y - 8, view.Panel.Width + 16, view.Panel.Height + 16);
         return (LoginStateClassifier.Classify(lines, view.Panel is not null, region,
-            view.Frame is not null && LoginRetentionDetector.IsSelected(view.Frame, lines)), view);
+            view.Frame is not null && LoginRetentionDetector.IsSelected(view.Frame, lines, region)), view);
     }
 
     /// <summary>Local-only screenshot of the frame that stopped the flow, so the screen can be inspected later.</summary>
     private async Task SaveEvidenceAsync(LoginScreenView view, string name)
     {
-        if (_saveEvidence is null || view.Frame is null) return;
+        if (_saveEvidence is null) return;
         try { await _saveEvidence(view, name).ConfigureAwait(false); }
         catch (Exception ex) when (ex is not OperationCanceledException) { _log?.Invoke("evidence not saved: " + ex.GetType().Name); }
     }
@@ -400,7 +461,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     {
         var click = await _input.ClickAsync(window, (int)Math.Round(x), (int)Math.Round(y), cancellationToken)
             .ConfigureAwait(false);
-        if (!click.Ok) _log?.Invoke("click failed: " + click.Error);
+        _log?.Invoke($"click {(click.Ok ? "accepted" : "failed")} client=({x:0},{y:0}) pid={window.ProcessId}"
+            + (click.Ok ? "" : ": " + click.Error));
         return click.Ok;
     }
 

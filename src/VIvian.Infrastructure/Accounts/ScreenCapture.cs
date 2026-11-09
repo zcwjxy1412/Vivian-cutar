@@ -29,8 +29,8 @@ public static class ScreenCapture
     /// <summary>
     /// Captures the game client and proves where the pixels came from. The window is never restored, raised or
     /// made topmost here: a normal-integrity VIvian cannot reliably do that to an elevated game, and trying would
-    /// hide failures. PrintWindow is tried first because it renders the window itself; if that is blank the screen
-    /// is read and nine sample points must all belong to the game window, otherwise the frame is rejected.
+    /// hide failures. The controller reads the displayed frame. Unity can return nonblank stale frames from
+    /// PrintWindow, so require the game to own the sampled desktop region before returning any pixels.
     /// </summary>
     public static (CapturedFrame? Frame, Core.Accounts.CaptureCheck Check) CaptureChecked(StarRailWindowInfo window)
     {
@@ -45,15 +45,16 @@ public static class ScreenCapture
             !WindowsNative.GetClientRect(handle, out var client) || client.Width <= 0 || client.Height <= 0)
             return (null, new(true, true, true, "none", 0, 0, false));
 
-        var printed = CaptureWithPrintWindow(handle, client.Width, client.Height);
-        if (printed is not null && !IsProbablyBlank(printed))
-            return (printed, new(true, true, false, "print", 0, 0, false));
-
         var origin = new WindowsNative.Point(0, 0);
         if (!WindowsNative.ClientToScreen(handle, ref origin))
             return (null, new(true, true, false, "bitblt", 0, 0, false));
         var (samples, owned, occluder) = SampleOwnership(handle, origin, client.Width, client.Height);
+        if (owned != samples)
+            return (null, new(true, true, false, "bitblt", samples, owned, false, occluder));
         var frame = CaptureRegion(origin.X, origin.Y, client.Width, client.Height, "window");
+        (samples, owned, occluder) = SampleOwnership(handle, origin, client.Width, client.Height);
+        if (owned != samples)
+            return (null, new(true, true, false, "bitblt", samples, owned, false, occluder));
         var blank = frame is null || IsProbablyBlank(frame);
         return (frame, new(true, true, false, "bitblt", samples, owned, blank, occluder));
     }

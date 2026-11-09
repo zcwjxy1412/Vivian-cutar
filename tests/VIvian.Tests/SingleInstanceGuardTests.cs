@@ -45,7 +45,8 @@ public sealed class SingleInstanceGuardTests
         var dir = NewDataDirectory();
         var name = SingleInstanceGuard.NameFor(dir);
         // Simulates a crashed instance: its thread takes the mutex and ends without releasing it.
-        var crashed = new Thread(() => { var m = new Mutex(false, name); m.WaitOne(); GC.KeepAlive(m); });
+        using var mutex = new Mutex(false, name);
+        var crashed = new Thread(() => mutex.WaitOne());
         crashed.Start();
         crashed.Join();
 

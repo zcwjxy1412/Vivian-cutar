@@ -1,4 +1,5 @@
 using VIvian.Core.Accounts;
+using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Engines.BetterGi;
 using Xunit;
 
@@ -219,6 +220,102 @@ public sealed class GenshinLoginTests
         Assert.Equal(GenshinLoginStepKind.NeedsUser, step.Kind);
         Assert.Null(step.ActionRegion);
     }
+
+    [Fact]
+    public void PartialLogoOnTheFourKCardRequiresAnAlignedCaret()
+    {
+        var lines = DoubleSize([
+            new("HO", 935, 377, 59, 43),
+            new(Target, 788, 487, 117, 18),
+            new("进入游戏", 920, 610, 80, 19),
+            new("登录其他账号", 900, 677, 120, 18),
+        ]);
+        var caret = new ScreenRegion(2382, 980, 36, 24);
+
+        Assert.Equal(GenshinLoginScreenState.Unrecognized, GenshinLoginScreen.Analyze(3840, 2160, lines).State);
+        Assert.Equal(GenshinLoginScreenState.Unrecognized,
+            GenshinLoginScreen.Analyze(3840, 2160, lines, caret with { Y = 1250 }).State);
+        var card = GenshinLoginScreen.Analyze(3840, 2160, lines, caret);
+        Assert.Equal(Target, card.Account?.NormalizedPhone);
+        Assert.Equal(new ScreenRegion(1840, 1220, 160, 38), card.EnterLabel);
+    }
+
+    [Fact]
+    public void FourKExpandedListRemovesOnlyTheRepeatedHeaderAndKeepsTheActualRows()
+    {
+        var rows = GenshinLoginScreen.AnalyzeExpandedList(3840, 2160, DoubleSize(Expanded()),
+            new(2382, 980, 36, 24));
+
+        Assert.Equal([Target, "139****74"], rows.Select(row => row.NormalizedPhone));
+        Assert.Equal([1106, 1284], rows.Select(row => row.Y));
+        Assert.Empty(GenshinLoginScreen.AnalyzeExpandedList(3840, 2160, DoubleSize(Expanded()),
+            new(2382, 1260, 36, 24)));
+    }
+
+    [Theory]
+    [InlineData("188******63")]
+    [InlineData("13912345674")]
+    [InlineData("13")]
+    public void AnAmbiguousOrIncompleteExpandedListCannotYieldAnActionableRow(string secondRow)
+    {
+        Assert.Empty(GenshinLoginScreen.AnalyzeExpandedList(3840, 2160, DoubleSize(Expanded(secondRow)),
+            new(2382, 980, 36, 24)));
+    }
+
+    [Theory]
+    [InlineData("输入密码")]
+    [InlineData("确定")]
+    [InlineData("进入游戏")]
+    public void AnOverlayOrTheCollapsedEnterLabelBlocksExpandedListRecognition(string text)
+    {
+        var lines = DoubleSize([.. Expanded(), new(text, 880, 600, 100, 20)]);
+
+        Assert.Empty(GenshinLoginScreen.AnalyzeExpandedList(3840, 2160, lines, new(2382, 980, 36, 24)));
+    }
+
+    [Fact]
+    public void FourKOpenCaretMatchesOnlyTheFlippedTemplate()
+    {
+        const int width = 18;
+        const int height = 12;
+        var icon = new CapturedFrame(new byte[width * height * 4], width, height, "synthetic-caret");
+        var openIcon = icon with { Bgra = new byte[icon.Bgra.Length] };
+        for (var y = 0; y < height; y++)
+        for (var x = 0; x < width; x++)
+        {
+            var strokeY = 9 - Math.Abs(x - 8);
+            var shade = (byte)(x is >= 2 and <= 15 && Math.Abs(strokeY - y) <= 1 ? 170 : 255);
+            var pixel = new byte[] { shade, shade, shade, 255 };
+            pixel.CopyTo(icon.Bgra, (y * width + x) * 4);
+            pixel.CopyTo(openIcon.Bgra, ((height - y - 1) * width + x) * 4);
+        }
+        var scaled = openIcon.Scale(2);
+        var frame = new CapturedFrame(new byte[96 * 2160 * 4], 96, 2160, "synthetic-frame");
+        for (var y = 0; y < scaled.Height; y++)
+            Array.Copy(scaled.Bgra, y * scaled.Width * 4, frame.Bgra,
+                ((920 + y) * frame.Width + 21) * 4, scaled.Width * 4);
+        var search = new ScreenRegion(19, 918, 40, 28);
+
+        Assert.Null(GenshinLoginTemplates.Match(frame, icon, search, default));
+        Assert.Equal(new ScreenRegion(21, 920, 36, 24),
+            GenshinLoginTemplates.Match(frame, icon, search, default, flipVertically: true));
+    }
+
+    private static RecognizedText[] DoubleSize(RecognizedText[] lines) => lines.Select(line => line with
+    {
+        X = line.X * 2, Y = line.Y * 2, Width = line.Width * 2, Height = line.Height * 2,
+    }).ToArray();
+
+    private static RecognizedText[] Expanded(string secondRow = "139******74") =>
+    [
+        new("HO", 935, 377, 59, 43),
+        new(Target, 788, 487, 117, 18),
+        new(Target, 788, 553, 117, 17),
+        new("刚 刚", 820, 594, 32, 15),
+        new(secondRow, 788, 642, 117, 17),
+        new("1 天 前", 818, 682, 42, 16),
+        new("登 录 其 他 账 号", 900, 740, 120, 18),
+    ];
 
     private static GenshinLoginScreen Read(IReadOnlyList<RecognizedText> lines) =>
         GenshinLoginScreen.Analyze(1920, 1080, lines);

@@ -168,38 +168,56 @@ public sealed class BetterGiSourceSettings
             var after = shared ? Snapshot(profile, updated) : Snapshot(updated, global);
 
             ct.ThrowIfCancellationRequested();
-            ReplaceUnchanged(path, target.Revision, bytes);
+            WriteUnchanged(path, target.Revision, bytes);
             return after;
         }, ct);
     }
 
-    private void ReplaceUnchanged(string path, string revision, byte[] bytes)
+    private void WriteUnchanged(string path, string revision, byte[] bytes)
     {
-        var staged = path + ".vivian-sync-" + Guid.NewGuid().ToString("N") + ".tmp";
-        var backup = Path.ChangeExtension(staged, ".backup");
+        EnsureIdle();
+        // Deny both writes and renames until read-back. A path-based replacement after checking
+        // a delete-shareable handle could otherwise overwrite a newer file at the same path.
+        using var current = OpenSource(path, FileShare.None, access: FileAccess.ReadWrite);
+        var original = ReadBytes(current);
+        if (Hash(original) != revision)
+            throw new BetterGiSourceSettingsConflictException(path);
+
+        var backup = path + ".vivian-sync-" + Guid.NewGuid().ToString("N") + ".backup";
+        using (var file = new FileStream(backup, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            file.Write(original);
+            file.Flush(flushToDisk: true);
+        }
         try
         {
-            using (var file = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                file.Write(bytes);
-                file.Flush(flushToDisk: true);
-            }
-
-            EnsureIdle();
-            // BetterGI saves in place. Keep its writers excluded while allowing an atomic Windows replacement.
-            using var current = OpenSource(path, FileShare.Read | FileShare.Delete);
-            if (Hash(ReadBytes(current)) != revision)
-                throw new BetterGiSourceSettingsConflictException(path);
-            File.Replace(staged, path, backup, ignoreMetadataErrors: false);
-
-            if (ReadSource(backup).Revision != revision || ReadSource(path).Revision != Hash(bytes))
-                throw new BetterGiSourceSettingsConflictException(path, backup);
-            File.Delete(backup);
+            WriteAndVerify(current, bytes);
         }
-        finally
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            File.Delete(staged);
+            try
+            {
+                WriteAndVerify(current, original);
+                File.Delete(backup);
+            }
+            catch (Exception restore) when (restore is IOException or UnauthorizedAccessException)
+            {
+                throw new BetterGiSourceSettingsConflictException(path, backup);
+            }
+            throw;
         }
+        File.Delete(backup);
+    }
+
+    private static void WriteAndVerify(FileStream stream, byte[] bytes)
+    {
+        stream.Position = 0;
+        stream.Write(bytes);
+        stream.SetLength(bytes.Length);
+        stream.Flush(flushToDisk: true);
+        stream.Position = 0;
+        if (!ReadBytes(stream).AsSpan().SequenceEqual(bytes))
+            throw new IOException("BetterGI 源设置写后回读未匹配。");
     }
 
     private void EnsureIdle()
@@ -360,11 +378,11 @@ public sealed class BetterGiSourceSettings
         return Parse(ReadBytes(stream));
     }
 
-    private static FileStream OpenSource(string path, FileShare share, bool boundedConfig = true)
+    private static FileStream OpenSource(string path, FileShare share, bool boundedConfig = true, FileAccess access = FileAccess.Read)
     {
         if (ReadOnlyFileAccess.FindReparsePoint(path) is not null)
             throw new InvalidDataException("BetterGI 源设置路径含链接。");
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, share);
+        var stream = new FileStream(path, FileMode.Open, access, share);
         if (ReadOnlyFileAccess.HandlePathMatches(stream.SafeFileHandle, path)
             && (!OperatingSystem.IsWindows() || ReadOnlyFileAccess.LinkCount(stream.SafeFileHandle) == 1)
             && (!boundedConfig || stream.Length <= BetterGiConfiguration.MaxConfigBytes))

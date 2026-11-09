@@ -123,6 +123,24 @@ public sealed class BetterGiSourceSettingsTests
     }
 
     [Fact]
+    public async Task ADeleteShareableExternalHandleStillBlocksSourceWrite()
+    {
+        await using var fixture = new BetterGiFixture();
+        const string original = """{"Name":"默认配置","MinResinToKeep":10}""";
+        var settings = await Bind(fixture, original);
+        var before = await settings.ReadAsync();
+
+        using (File.Open(settings.ProfilePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
+        {
+            await Assert.ThrowsAnyAsync<IOException>(() => settings.UpdateProfileAsync(before.ProfileRevision,
+                new Dictionary<string, string> { ["MinResinToKeep"] = "20" }));
+        }
+
+        Assert.Equal(original, File.ReadAllText(settings.ProfilePath));
+        Assert.Empty(Directory.EnumerateFiles(Path.GetDirectoryName(settings.ProfilePath)!, "*.backup"));
+    }
+
+    [Fact]
     public async Task SharedDomainUpdateIsExplicitAndKeepsUnrelatedSettings()
     {
         await using var fixture = new BetterGiFixture();

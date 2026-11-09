@@ -711,6 +711,7 @@ public sealed class MainViewModel : ObservableObject
             var plan = await Accounts.Database.LoadAccountTaskPlanAsync(approved.Target.AccountId);
             if (current.WriteUnavailableReason is not null || current.Revision != approved.ConfigurationRevision
                 || !plan.DailyEnabled || plan.Revision != approved.TaskPlanRevision
+                || current.Values.SingleOrDefault(v => v.Schema.Path == "break_down_level_four_relicset")?.Value != "false"
                 || Accounts.SelectedStarRail?.Id != approved.Target.AccountId || !Assistant.EnableScheduleProposals
                 || approved.Expires <= DateTimeOffset.UtcNow || card.InstallPath != installPath)
             { BatchStatus = "账号、任务或资源配置已变化，请重新生成运行计划。"; return; }

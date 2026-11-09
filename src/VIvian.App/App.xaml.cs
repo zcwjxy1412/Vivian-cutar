@@ -424,10 +424,32 @@ public partial class App : Application
         await vm.Accounts.SaveDailyPlanAsync();
         if ((await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
             throw new InvalidOperationException("Game task setting was not saved");
+        if (window is not MainWindow main) throw new InvalidOperationException("Missing main window");
+        tabs.SelectedIndex = Array.IndexOf(headers, "游戏管理");
+        main.GameTabs.SelectedIndex = 1;
+        window.UpdateLayout();
+        var genshin = vm.GenshinConfiguration;
+        if (main.SaveGenshinPlanButton.Command != genshin.SaveCommand)
+            throw new InvalidOperationException("Genshin plan editor is not bound");
+        var legacy = genshin.SelectedAccount ?? throw new InvalidOperationException("Missing Genshin account");
+        genshin.NewAccountName = "原神冒烟档案";
+        await genshin.AddAccountAsync();
+        var added = genshin.SelectedAccount ?? throw new InvalidOperationException("Genshin account creation failed");
+        if (added.Id == legacy.Id || genshin.Parameters.Any(p => p.IsBoolean && p.BoolValue))
+            throw new InvalidOperationException("New Genshin profile is not isolated or tasks default to on");
+        genshin.Parameters.Single(p => p.Path == "dailyRewards").BoolValue = true;
+        await genshin.SaveAsync();
+        var saved = await database.LoadAccountSettingsAsync(added.Id);
+        var untouched = await database.LoadAccountSettingsAsync(legacy.Id);
+        if (saved.Values.GetValueOrDefault("dailyRewards") != "true" || untouched.Values.Count != 0
+            || (await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
+            throw new InvalidOperationException("Genshin plan save did not isolate Genshin and Star Rail accounts");
+        main.GameTabs.SelectedIndex = 0;
+
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
-        return "account workflow pages verified; game task setting saved; diagnostic bundle exported.";
+        return "account workflow pages verified; Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
     }
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
     private static string SaveTabScreenshots(Window window, string root)

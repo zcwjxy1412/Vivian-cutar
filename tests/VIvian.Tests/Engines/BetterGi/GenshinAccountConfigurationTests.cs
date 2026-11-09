@@ -13,12 +13,6 @@ public sealed class GenshinAccountConfigurationTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("vivian-genshin-plan-").FullName;
     private string DbPath => Path.Combine(_root, "profiles.db");
     private static readonly CancellationToken Ct = CancellationToken.None;
-    private static readonly EngineParameterDefinition[] Fields =
-    [
-        Field("dailyRewards", "boolean", "", "false"),
-        Field("autoDomain", "boolean", "", "false"),
-        Field("DomainName", "text", "", ""),
-    ];
 
     [Fact]
     public async Task SaveIsAccountScopedAndRecordsTheVerifiedBeforeAndAfter()
@@ -79,22 +73,35 @@ public sealed class GenshinAccountConfigurationTests : IDisposable
         Assert.Null(await AuditAsync(proposal.Id));
     }
 
+    [Fact]
+    public async Task CorruptGenshinPlanIsReportedAtItsOwnBoundary()
+    {
+        var (db, provider, a, b) = await SetupAsync();
+        await using (var connection = new SqliteConnection($"Data Source={DbPath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE account_settings SET settings_json='{' WHERE account_id=$id";
+            command.Parameters.AddWithValue("$id", a.AccountId.ToString("D"));
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.ReadAsync(a, Ct));
+        Assert.Contains("无法读取", error.Message);
+        Assert.Equal("false", Value(await provider.ReadAsync(b, Ct), "dailyRewards"));
+        var starRail = Assert.Single(await db.LoadAccountsAsync(GameId.StarRail));
+        Assert.NotNull(await db.LoadAccountTaskPlanAsync(starRail.Id));
+    }
+
     private async Task<(LocalDatabase Db, GenshinAccountConfigurationProvider Provider, AccountConfigurationTarget A, AccountConfigurationTarget B)> SetupAsync()
     {
         var db = new LocalDatabase(DbPath);
         await db.InitializeAsync();
         var a = await db.AddAccountAsync(GameId.Genshin, "原神 A", "", null);
         var b = await db.AddAccountAsync(GameId.Genshin, "原神 B", "", null);
-        var provider = new GenshinAccountConfigurationProvider(db, Fields, values =>
-        {
-            if (values["autoDomain"] == "true" && values["DomainName"].Length == 0)
-                throw new ArgumentException("请选择秘境。");
-        });
+        var provider = new GenshinAccountConfigurationProvider(db);
         return (db, provider, new(GameId.Genshin, a.Id), new(GameId.Genshin, b.Id));
     }
-
-    private static EngineParameterDefinition Field(string key, string type, string allowed, string @default) =>
-        new(key, key, "", type, allowed, @default, "", "", "", "", ParameterAccess.VerifiedReadWrite, "");
 
     private static string? Value(AccountConfigurationView view, string key) => view.Values.Single(v => v.Schema.Path == key).Value;
 

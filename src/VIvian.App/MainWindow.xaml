@@ -48,6 +48,22 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock x:Name="Label" Text="{TemplateBinding Header}" Foreground="{StaticResource Text}" FontWeight="SemiBold"/></Border>
 <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Pill" Property="Background" Value="{StaticResource Navy}"/><Setter TargetName="Pill" Property="BorderBrush" Value="{StaticResource Gold}"/><Setter TargetName="Label" Property="Foreground" Value="White"/></Trigger></ControlTemplate.Triggers>
 </ControlTemplate></Setter.Value></Setter></Style>
+<DataTemplate x:Key="AccountConfigurationGroup">
+<TextBlock Text="{Binding Name, StringFormat=✦ {0}}" FontSize="16" FontFamily="{StaticResource Round}" Foreground="{StaticResource Sakura}" Margin="0,20,0,6"/>
+</DataTemplate>
+<DataTemplate x:Key="AccountConfigurationField">
+<Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,10,0,12"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions>
+<StackPanel Margin="0,0,18,0" ToolTip="{Binding Dependencies}">
+<TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Description}" Style="{StaticResource Small}" Margin="0,2,0,0"/>
+<TextBlock Text="{Binding State}" Foreground="{StaticResource Warn}" FontSize="12" Margin="0,4,0,0" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></StackPanel>
+<Grid Grid.Column="1" VerticalAlignment="Center">
+<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding BoolValue}" IsEnabled="{Binding Editable}" HorizontalAlignment="Right" Visibility="{Binding IsBoolean, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<ComboBox ItemsSource="{Binding Options}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Current}" IsEnabled="{Binding Editable}" Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" ToolTip="{Binding Rule}" Visibility="{Binding IsTextual, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<TextBlock Text="由原软件管理" Style="{StaticResource Small}" HorizontalAlignment="Right" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></Grid>
+</Grid></Border></DataTemplate>
 </Window.Resources>
 
 <Grid>
@@ -213,34 +229,38 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/></StackPanel>
 <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
 <ScrollViewer.Resources><CollectionViewSource x:Key="Grouped" Source="{Binding Parameters}"><CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions></CollectionViewSource></ScrollViewer.Resources>
-<ItemsControl ItemsSource="{Binding Source={StaticResource Grouped}}">
-<ItemsControl.GroupStyle><GroupStyle><GroupStyle.HeaderTemplate><DataTemplate>
-<TextBlock Text="{Binding Name, StringFormat=✦ {0}}" FontSize="16" FontFamily="{StaticResource Round}" Foreground="{StaticResource Sakura}" Margin="0,20,0,6"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ItemsControl.GroupStyle>
-<ItemsControl.ItemTemplate><DataTemplate>
-<Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,10,0,12"><Grid>
-<Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions>
-<StackPanel Margin="0,0,18,0" ToolTip="{Binding Dependencies}">
-<TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
-<TextBlock Text="{Binding Description}" Style="{StaticResource Small}" Margin="0,2,0,0"/>
-<TextBlock Text="{Binding State}" Foreground="{StaticResource Warn}" FontSize="12" Margin="0,4,0,0" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></StackPanel>
-<Grid Grid.Column="1" VerticalAlignment="Center">
-<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding BoolValue}" IsEnabled="{Binding Editable}" HorizontalAlignment="Right" Visibility="{Binding IsBoolean, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
-<ComboBox ItemsSource="{Binding Options}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Current}" IsEnabled="{Binding Editable}" Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
-<TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" ToolTip="{Binding Rule}" Visibility="{Binding IsTextual, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
-<TextBlock Text="由原软件管理" Style="{StaticResource Small}" HorizontalAlignment="Right" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></Grid>
-</Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></DockPanel></Border></TabItem>
-<TabItem Header="原神"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[0]}">
+<ItemsControl ItemsSource="{Binding Source={StaticResource Grouped}}" ItemTemplate="{StaticResource AccountConfigurationField}">
+<ItemsControl.GroupStyle><GroupStyle HeaderTemplate="{StaticResource AccountConfigurationGroup}"/></ItemsControl.GroupStyle>
+</ItemsControl></ScrollViewer></DockPanel></Border></TabItem>
+<TabItem Header="原神"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="原神" Style="{StaticResource H1}"/><TextBlock Text="げんしん" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="{Binding Version, StringFormat=由 {0} 执行。正在接入：目前只读取安装状态，不会运行它。}" Style="{StaticResource Lead}"/>
-<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="按原神账号分别设置日常、合成树脂和秘境任务。计划保存在 VIvian 本机档案，真实运行入口关闭。" Style="{StaticResource Lead}"/>
+<Border Style="{StaticResource Panel}" DataContext="{Binding Engines[0]}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
 <TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="接下来会做到" Style="{StaticResource H2}"/>
-<TextBlock Text="读取 BetterGI 已有的一条龙方案与配置组，在这里选择今天要跑哪一套。" Style="{StaticResource Small}"/>
-<TextBlock Text="对任务开关等已核对的参数提供修改与双向同步；复杂脚本仍在原软件中编辑。" Style="{StaticResource Small}" Margin="0,4,0,0"/>
-<TextBlock Text="确认启动、提权、日志对应和进程清理之后，再开放真实执行。" Style="{StaticResource Small}" Margin="0,4,0,0"/></StackPanel></Border>
+<Border Style="{StaticResource Panel}" IsEnabled="{Binding IsIdle}"><StackPanel DataContext="{Binding GenshinConfiguration}">
+<TextBlock Text="账号任务计划" Style="{StaticResource H2}"/>
+<WrapPanel Margin="0,4,0,8" IsEnabled="{Binding IsIdle}">
+<TextBlock Text="原神账号" VerticalAlignment="Center" Margin="0,0,8,0"/>
+<ComboBox Width="230" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}" DisplayMemberPath="Name" AutomationProperties.Name="原神账号"/>
+<Button Content="重新读取" Command="{Binding ReloadCommand}" Margin="8,0,0,0"/>
+</WrapPanel>
+<WrapPanel Margin="0,0,0,8" IsEnabled="{Binding IsIdle}">
+<TextBox Width="230" Text="{Binding NewAccountName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="新原神账号备注"/>
+<Button Content="新增原神档案" Command="{Binding AddAccountCommand}" Margin="8,0,0,0"/>
+</WrapPanel>
+<TextBlock Text="档案备注用于区分本机设置，登录身份将在实机阶段另行核对。" Style="{StaticResource Small}"/>
+<ItemsControl ItemTemplate="{StaticResource AccountConfigurationField}" IsEnabled="{Binding CanEdit}">
+<ItemsControl.Resources><CollectionViewSource x:Key="GenshinGrouped" Source="{Binding Parameters}">
+<CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions>
+</CollectionViewSource></ItemsControl.Resources>
+<ItemsControl.ItemsSource><Binding Source="{StaticResource GenshinGrouped}"/></ItemsControl.ItemsSource>
+<ItemsControl.GroupStyle><GroupStyle HeaderTemplate="{StaticResource AccountConfigurationGroup}"/></ItemsControl.GroupStyle>
+</ItemsControl>
+<Button x:Name="SaveGenshinPlanButton" Style="{StaticResource Primary}" Content="保存原神计划" Command="{Binding SaveCommand}" IsEnabled="{Binding CanEdit}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+<TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 <TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
 <StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>

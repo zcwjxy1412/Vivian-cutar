@@ -335,6 +335,9 @@ public sealed class MainViewModel : ObservableObject
             game => Engines.Single(e => e.Id == game).InstallPath,
             () => BatchRunning || Queue.IsRunning, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
+        GenshinConfiguration = new GenshinConfigurationViewModel(accounts.Database,
+            new GenshinAccountConfigurationProvider(accounts.Database),
+            () => IsIdle && !BatchRunning && !Queue.IsRunning);
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>
@@ -428,6 +431,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
         await Accounts.ReloadAsync();
+        await GenshinConfiguration.LoadAsync();
         await RefreshLastRunsAsync();
         if (autoPrepare) await AutoDiscoverAsync(persist: true);
         await CheckEnginesCoreAsync();
@@ -496,6 +500,7 @@ public sealed class MainViewModel : ObservableObject
     public ThemeAssets Theme { get; } = new();
     public ArtSlot CharacterArt => new(Theme.Character);
     public ArtSlot AssistantArt => new(Theme.Assistant);
+    public GenshinConfigurationViewModel GenshinConfiguration { get; }
     public AssistantViewModel Assistant { get; }
     public ObservableCollection<RecentRunRow> RecentRuns { get; } = [];
     private string _estimate = "—";

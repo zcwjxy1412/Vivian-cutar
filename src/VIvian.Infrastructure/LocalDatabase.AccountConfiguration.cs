@@ -1,6 +1,7 @@
 using System.Text.Json;
 using VIvian.Core;
 using VIvian.Core.Engines;
+using VIvian.Infrastructure.Engines.BetterGi;
 
 namespace VIvian.Infrastructure;
 
@@ -16,11 +17,11 @@ public sealed partial class LocalDatabase
     }
 
     internal Task<long> SaveVerifiedGenshinConfigurationAsync(GameAccount account, AccountSettingsSnapshot previous,
-        IReadOnlyDictionary<string, string> validatedValues, Guid proposalId, Func<bool> stillAllowed, CancellationToken ct)
+        BetterGiAccountPlan plan, Guid proposalId, Func<bool> stillAllowed, CancellationToken ct)
     {
         if (account.Game != GameId.Genshin || account.Id != previous.AccountId || proposalId == Guid.Empty)
             throw new InvalidOperationException("配置写入要求匹配的原神账号档案。");
-        return WriteVerifiedConfigurationAsync(account, previous, validatedValues, proposalId, stillAllowed, ct);
+        return WriteVerifiedConfigurationAsync(account, previous, plan.Values, proposalId, stillAllowed, ct);
     }
 
     private async Task<long> WriteVerifiedConfigurationAsync(GameAccount account, AccountSettingsSnapshot previous,

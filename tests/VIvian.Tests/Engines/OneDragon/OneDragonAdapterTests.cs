@@ -364,6 +364,41 @@ public sealed class OneDragonLifecycleTests
         Assert.Equal(ReasonCodes.NoCompletionEvidence, verdict.ReasonCode);
     }
 
+    [Theory]
+    [InlineData("none", OneDragonEngagementResult.NoEvidence, RunOutcome.Indeterminate)]
+    [InlineData("skip", OneDragonEngagementResult.SkippedByUpstreamRecord, RunOutcome.Indeterminate)]
+    [InlineData("max-only", OneDragonEngagementResult.RewardUnconfirmed, RunOutcome.Indeterminate)]
+    [InlineData("wrong-source", OneDragonEngagementResult.RewardUnconfirmed, RunOutcome.Indeterminate)]
+    [InlineData("confirmed", OneDragonEngagementResult.ClaimConfirmed, RunOutcome.Success)]
+    [InlineData("failed", OneDragonEngagementResult.Failed, RunOutcome.Failed)]
+    public async Task ShortTaskRequiresGameDerivedEvidenceFromTheSelectedRun(string caseId,
+        OneDragonEngagementResult expectedTask, RunOutcome expectedRun)
+    {
+        await using var f = new OneDragonFixture();
+        var request = OneDragonArguments.EngagementReward(1).Request!;
+        var (run, group) = await f.LaunchAsync(f.Adapter(request, contractVerified: true));
+        await using var _run = run;
+        var normal = OdOut.SuccessfulRun("[1]");
+        group.Write(normal[..3]);
+        if (caseId == "skip")
+            group.Write(OdOut.Line("指令[ 执行应用组 one_dragon ] 节点 执行应用 返回状态 应用已完成 活跃度奖励",
+                source: "operation.py 451"));
+        if (caseId is "confirmed" or "wrong-source")
+            group.Write(OdOut.Line("指令[ 活跃度奖励 ] 节点 点击奖励 -> 查看奖励结果 返回状态 日常奖励领取成功",
+                source: caseId == "confirmed" ? "operation.py 451" : "other.py 451"));
+        if (caseId is "confirmed" or "max-only" or "wrong-source")
+            group.Write(OdOut.Line("指令[ 活跃度奖励 ] 节点 查看奖励结果 -> 识别活跃度 返回状态 活跃度已满",
+                    source: "operation.py 451"),
+                OdOut.Line("指令[ 活跃度奖励 ] 执行成功 返回状态 成功", source: "operation.py 700"));
+        if (caseId == "failed")
+            group.Write(OdOut.Line("指令[ 活跃度奖励 ] 执行失败 返回状态 失败", level: "ERROR", source: "operation.py 702"));
+        group.Write(normal[^1]);
+        group.Exit(0);
+
+        Assert.Equal(expectedRun, (await Verdict(run)).Outcome);
+        Assert.Equal(expectedTask, run.Evidence.EngagementResult);
+    }
+
     [Fact]
     public async Task ProductionContractNeverYieldsSuccess()
     {

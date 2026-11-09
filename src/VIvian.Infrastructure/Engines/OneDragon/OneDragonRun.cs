@@ -33,6 +33,7 @@ internal sealed class OneDragonRun : IEngineRun
     private readonly OneDragonRunOptions _options;
     private readonly TimeProvider _time;
     private readonly OneDragonRunEvidence _evidence;
+    private readonly bool _engagementOnly;
     private readonly Action<CleanupState> _released;
     private readonly Channel<RunEvent> _events = Channel.CreateUnbounded<RunEvent>();
     private readonly CancellationTokenSource _reader = new();
@@ -51,6 +52,7 @@ internal sealed class OneDragonRun : IEngineRun
         _options = options;
         _time = time;
         _released = released;
+        _engagementOnly = request.EngagementRewardOnly;
         _evidence = new OneDragonRunEvidence(runId, request, pinnedVersion);
         Emit(RunEventKind.Progress, $"OneDragon 集成启动器已在 VIvian 的作业内启动：PID {group.RootProcessId}，创建时间 {group.RootStartTime:O}；参数 {string.Join(' ', request.ToArguments())}。");
         _outputReader = ReadOutputAsync();
@@ -75,7 +77,8 @@ internal sealed class OneDragonRun : IEngineRun
                 var kind = marker.Kind switch
                 {
                     OneDragonMarkerKind.Completed => RunEventKind.Evidence,
-                    OneDragonMarkerKind.Failure or OneDragonMarkerKind.AutoUpdateAttempted => RunEventKind.Warning,
+                    OneDragonMarkerKind.Failure or OneDragonMarkerKind.EngagementFailed
+                        or OneDragonMarkerKind.AutoUpdateAttempted => RunEventKind.Warning,
                     OneDragonMarkerKind.RuntimeStarted or OneDragonMarkerKind.InstancesSelected or OneDragonMarkerKind.AutoUpdateSkipped => RunEventKind.Progress,
                     _ => RunEventKind.Output,
                 };
@@ -118,6 +121,8 @@ internal sealed class OneDragonRun : IEngineRun
             verdict = verdict with { Outcome = RunOutcome.Cancelled, ReasonCode = ReasonCodes.UserStop };
         else if (_launcherEndedWithoutWorker && verdict.Outcome != RunOutcome.Indeterminate)
             verdict = verdict with { Outcome = RunOutcome.Indeterminate, ReasonCode = ReasonCodes.CleanupUnconfirmed };
+        if (_engagementOnly && outputComplete && !stopped)
+            Emit(RunEventKind.Progress, $"OneDragon 活跃度奖励标准流判定：{_evidence.EngagementResult}。");
         Emit(RunEventKind.Output, $"OneDragon 启动器已退出，退出码 {exitCode?.ToString() ?? "未知"}（退出码不作为成功依据）。");
         _events.Writer.TryComplete();
         return verdict;

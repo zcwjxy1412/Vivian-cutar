@@ -22,6 +22,7 @@ public static class GenshinLoginAcceptance
             .GroupBy(profile => profile.NormalizedPhone, StringComparer.Ordinal).Where(group => group.Count() == 1)
             .Select(group => group.Single()).ToDictionary(profile => profile.AccountId);
         if (selected.Any(id => !enabled.Contains(id) || !profiles.TryGetValue(id, out var profile) ||
+            string.IsNullOrWhiteSpace(profile.NormalizedPhone) ||
             GenshinLoginScreen.NormalizeExactMask(profile.MaskedPhone) != profile.NormalizedPhone))
             throw new InvalidOperationException("所选原神档案须已启用，并各自绑定唯一的脱敏登录标识。");
 

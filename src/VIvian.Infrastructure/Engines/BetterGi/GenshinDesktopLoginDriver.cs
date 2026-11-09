@@ -92,18 +92,15 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         try
         {
             var card = await WaitAsync(policy.Step, view => view.View == GenshinView.Card, cancellationToken);
-            if (card.Rows.Single().NormalizedPhone != phone)
-            {
-                Act(card, GenshinInput.OpenDropdown, card.Secondary, cancellationToken);
-                var dropdown = await WaitAsync(policy.Step, view => view.View == GenshinView.Dropdown, cancellationToken);
-                var matches = dropdown.Rows.Where(row => row.NormalizedPhone == phone).Take(2).ToArray();
-                if (matches.Length != 1)
-                    return Failed(stage, "下拉列表没有唯一匹配的目标账号，已停止。");
-                var match = matches[0];
-                Act(dropdown, GenshinInput.ChooseAccount, new(match.X, match.Y, match.Width, match.Height), cancellationToken);
-                card = await WaitAsync(policy.Step, view => view.View == GenshinView.Card &&
-                    view.Rows.Single().NormalizedPhone == phone, cancellationToken);
-            }
+            Act(card, GenshinInput.OpenDropdown, card.Secondary, cancellationToken);
+            var dropdown = await WaitAsync(policy.Step, view => view.View == GenshinView.Dropdown, cancellationToken);
+            var matches = dropdown.Rows.Where(row => row.NormalizedPhone == phone).Take(2).ToArray();
+            if (matches.Length != 1)
+                return Failed(stage, "下拉列表没有唯一匹配的目标账号，已停止。");
+            var match = matches[0];
+            Act(dropdown, GenshinInput.ChooseAccount, new(match.X, match.Y, match.Width, match.Height), cancellationToken);
+            card = await WaitAsync(policy.Step, view => view.View == GenshinView.Card &&
+                view.Rows.Single().NormalizedPhone == phone, cancellationToken);
 
             var confirmedAt = DateTimeOffset.UtcNow;
             stage = LoginSwitchStage.EnteringGame;

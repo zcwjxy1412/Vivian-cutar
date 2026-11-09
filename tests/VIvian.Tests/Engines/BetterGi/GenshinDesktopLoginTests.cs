@@ -18,6 +18,8 @@ public sealed class GenshinDesktopLoginTests
         var desktop = new Desktop(
             Frame(GenshinView.Card, A.NormalizedPhone),
             Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Dropdown, A.NormalizedPhone, B.NormalizedPhone),
+            Frame(GenshinView.Card, A.NormalizedPhone),
             Frame(GenshinView.Gate),
             Frame(GenshinView.World), Frame(GenshinView.World),
             Frame(GenshinView.World), Frame(GenshinView.Menu), Frame(GenshinView.LeaveWorld),
@@ -34,7 +36,8 @@ public sealed class GenshinDesktopLoginTests
         var second = await driver.SwitchAsync(B, Policy, default);
         Assert.True(second.Ok, second.Detail);
         Assert.Equal(B.ObservedUid, second.Uid);
-        Assert.Equal([GenshinInput.EnterAccount, GenshinInput.OpenGate, GenshinInput.OpenMenu,
+        Assert.Equal([GenshinInput.OpenDropdown, GenshinInput.ChooseAccount,
+            GenshinInput.EnterAccount, GenshinInput.OpenGate, GenshinInput.OpenMenu,
             GenshinInput.LeaveMenu, GenshinInput.ConfirmLeave, GenshinInput.LogoutGate, GenshinInput.ConfirmLogout,
             GenshinInput.OpenDropdown, GenshinInput.ChooseAccount, GenshinInput.EnterAccount, GenshinInput.OpenGate],
             desktop.Actions);
@@ -43,7 +46,7 @@ public sealed class GenshinDesktopLoginTests
     [Fact]
     public async Task DuplicateDropdownRowsNeverGetClicked()
     {
-        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone),
+        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
             Frame(GenshinView.Dropdown, B.NormalizedPhone, B.NormalizedPhone));
         var result = await new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero).SwitchAsync(B, Policy, default);
         Assert.False(result.Ok);
@@ -55,7 +58,9 @@ public sealed class GenshinDesktopLoginTests
     public async Task WorldOnReplacedProcessCannotProveIdentity()
     {
         var replacement = Frame(GenshinView.World) with { Window = Window with { ProcessId = 123 } };
-        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone), Frame(GenshinView.Gate), replacement);
+        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Dropdown, A.NormalizedPhone), Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Gate), replacement);
         var result = await new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero).SwitchAsync(A, Policy, default);
         Assert.False(result.Ok);
         Assert.True(result.Fatal);
@@ -64,7 +69,8 @@ public sealed class GenshinDesktopLoginTests
     [Fact]
     public async Task PreviousWorldUidCannotPassForAnotherAccount()
     {
-        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone), Frame(GenshinView.Gate),
+        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Dropdown, B.NormalizedPhone), Frame(GenshinView.Card, B.NormalizedPhone), Frame(GenshinView.Gate),
             Frame(GenshinView.World, uid: B.PreviousUid), Frame(GenshinView.World, uid: B.PreviousUid));
         var result = await new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero).SwitchAsync(B, Policy, default);
         Assert.False(result.Ok);

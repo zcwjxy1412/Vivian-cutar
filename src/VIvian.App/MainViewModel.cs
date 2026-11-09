@@ -15,6 +15,7 @@ using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.Cli;
 using VIvian.Infrastructure.Engines.BetterGi;
 using VIvian.Infrastructure.Engines.OneDragon;
+using VIvian.Infrastructure.Processes;
 namespace VIvian.App;
 
 /// <summary>Where VIvian keeps its own files. Nothing outside these folders is written by the application.</summary>
@@ -191,6 +192,7 @@ public sealed class MainViewModel : ObservableObject
     }
     public Visibility PendingRestoreVisibility => PendingRestoreText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     public AsyncCommand RestoreConfigurationCommand { get; }
+    public AsyncCommand RecoverDesktopCommand { get; }
 
     /// <summary>Shows which settings the selected task would temporarily change. Read-only; never writes.</summary>
     private void RefreshTemporaryConfigurationNeeds()
@@ -218,10 +220,34 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RestoreConfigurationAsync()
     {
+        using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory, recovery: true);
         var result = await Task.Run(_control.RestorePendingConfiguration);
         ShowRestore(result);
         Status = result.Detail;
         RefreshTemporaryConfigurationNeeds();
+    }
+
+    private async Task RecoverDesktopAsync()
+    {
+        if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved)
+        {
+            Status = "请先停止任务，并在运行记录确认所有待清理进程。";
+            return;
+        }
+        using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory, recovery: true);
+        if (!desktop.Recovering) { Status = "桌面无待交接操作。"; return; }
+        if (MessageBox.Show("请核对上一次运行的游戏、引擎和输入宿主均已退出。确认后会尝试恢复该档案的临时设置。",
+                "核对桌面清理", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+            return;
+        var restore = await Task.Run(_control.RestorePendingConfiguration);
+        ShowRestore(restore);
+        if (restore.State == RestoreState.Blocked || _control.HasPendingConfigurationRestore)
+        {
+            Status = restore.Detail;
+            return;
+        }
+        desktop.ConfirmClean();
+        Status = "已完成桌面交接。";
     }
 
     private bool _oneShotConsumed;
@@ -331,11 +357,13 @@ public sealed class MainViewModel : ObservableObject
         {
             if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
             { Status = "任务运行或清理未确认时不能扫描切换账号。"; return; }
+            using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
             await action();
         });
         StopAllCommand = new(StopAll);
         Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Raise(nameof(CanStopAll)); };
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
+        RecoverDesktopCommand = new(() => RunAsync(RecoverDesktopAsync), HandleError);
         OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
         foreach (var card in Engines)
         {
@@ -559,6 +587,7 @@ public sealed class MainViewModel : ObservableObject
         { Status = "安装身份未核对，或有上次运行尚未确认清理；任务未启动。"; return; }
         if (!Queue.IsIdle) { Status = "已有队列正在运行。"; return; }
         if (!admission.Allowed) { Status = admission.Text; return; }
+        using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
         var allowTemporary = AllowTemporaryConfigurationThisRun;
         // Edits made on the Star Rail page must be in the upstream file before the engine reads it.
         if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
@@ -602,7 +631,11 @@ public sealed class MainViewModel : ObservableObject
             var result = await _control.ExecuteTaskPlan(plan, new RealTaskAuthorization(card.InstallPath,
                 _march7thEvidence, () => March7thConfirmedThisRun && _confirmedInstallPath == card.InstallPath
                     && _confirmedArchivePath == ReleaseArchivePath && _confirmedTask == March7thTask?.Id,
-                card.Report?.Compatibility == CompatibilityClass.IdentityVerified, allowTemporary));
+                card.Report?.Compatibility == CompatibilityClass.IdentityVerified, allowTemporary), desktop);
+            if (result.Queue is { Runs.Count: > 0 } completed
+                && completed.Runs.All(r => r.Cleanup is CleanupState.Confirmed or CleanupState.NotRequired)
+                && !_control.HasPendingConfigurationRestore)
+                desktop.ConfirmClean();
             Status = result.Queue is null ? "已有队列正在运行。" : "星铁本次任务已结束；结果与清理状态见下方。如有问题请点击“导出诊断报告”。";
             if (result.Restore is not null) { ShowRestore(result.Restore); Status += " " + result.Restore.Detail; }
         }
@@ -634,6 +667,7 @@ public sealed class MainViewModel : ObservableObject
         { BatchStatus = "请先在引擎与环境核对星铁官方发行包与安装身份。"; return; }
         if (!VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
+        using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
         if (!Configuration.TryApplyPending(interactive: false))
         { BatchStatus = "请先在游戏管理保存尚未写入的设置。"; return; }
 
@@ -674,15 +708,19 @@ public sealed class MainViewModel : ObservableObject
             }
 
             var completedAccounts = new HashSet<Guid>();
+            desktop.MarkDirty();
             var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, AccountConfigurationMode.Independent,
                 (account, _) => Task.FromResult(snapshots[account.Id]),
-                (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, ct),
+                (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, desktop, ct),
                 progress =>
                 {
                     if (progress.State == BatchRunState.Completed) completedAccounts.Add(progress.AccountId);
                     BatchStatus = $"已完成 {completedAccounts.Count}/{accounts.Length} · {progress.AccountName} · " +
                         $"{BatchProgressText.Describe(progress.State)} · {progress.Detail}";
                 }, token);
+            if (outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed && !Queue.HasUnresolved
+                && !_control.HasPendingConfigurationRestore)
+                desktop.ConfirmClean();
             BatchStatus = (outcome.Completed ? "批次结束：" : "批次已停止：") + outcome.Detail;
         }
         catch (OperationCanceledException) { BatchStatus = "批次已由用户停止。"; }
@@ -698,13 +736,13 @@ public sealed class MainViewModel : ObservableObject
     private static readonly Guid LegacyStarRail = Guid.Parse("00000000-0000-4000-8000-000000000002");
 
     private async Task<BatchTaskResult> RunAccountTasksAsync(string installPath, March7thReleaseEvidence evidence,
-        IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string> settings, DesktopOperationLease desktop, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var taskPlan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
         var result = await _control.ExecuteTaskPlan(taskPlan,
             new RealTaskAuthorization(installPath, evidence, () => !cancellationToken.IsCancellationRequested,
-                true, AllowTemporaryConfiguration: true, AccountSettings: settings));
+                true, AllowTemporaryConfiguration: true, AccountSettings: settings), desktop);
         if (result.Restore is not null) ShowRestore(result.Restore);
         var run = result.Queue?.Runs.LastOrDefault();
         var cleaned = run?.Cleanup == CleanupState.Confirmed;

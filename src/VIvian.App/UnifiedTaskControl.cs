@@ -4,6 +4,7 @@ using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.Cli;
+using VIvian.Infrastructure.Processes;
 
 namespace VIvian.App;
 
@@ -22,7 +23,7 @@ public interface IUnifiedTaskControl : IConfigurationControl
     TaskPlan CreateTaskPlan(GameId game, IReadOnlyList<string> taskIds);
     /// <summary>Settings VIvian would temporarily change for this task (empty: nothing to change).</summary>
     IReadOnlyList<TemporaryChange> RequiredTemporaryChanges(string installDirectory, string taskId);
-    Task<TaskPlanExecution> ExecuteTaskPlan(TaskPlan plan, RealTaskAuthorization authorization);
+    Task<TaskPlanExecution> ExecuteTaskPlan(TaskPlan plan, RealTaskAuthorization authorization, DesktopOperationLease desktop);
     /// <summary>Retries restoring a temporary change left by an interrupted run.</summary>
     RestoreResult RestorePendingConfiguration();
     bool HasPendingConfigurationRestore { get; }
@@ -69,7 +70,7 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
         foreach (var id in taskIds) GetTaskSchema(game, id);
         return new(game, taskIds.Select(id => new TaskPlanEntry(id, true)).ToArray(), 0);
     }
-    public async Task<TaskPlanExecution> ExecuteTaskPlan(TaskPlan plan, RealTaskAuthorization authorization)
+    public async Task<TaskPlanExecution> ExecuteTaskPlan(TaskPlan plan, RealTaskAuthorization authorization, DesktopOperationLease desktop)
     {
         if (plan.Game != GameId.StarRail || plan.Entries.Count != 1 || !plan.Entries[0].Enabled ||
             !RealExecutionPolicy.AllowsTask(plan.Entries[0].TaskId) || !authorization.StillConfirmed() ||
@@ -87,6 +88,7 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
         if (changes.Count > 0 && !authorization.AllowTemporaryConfiguration)
             throw new InvalidOperationException("本任务需要临时修改：" + TemporaryConfigurationManager.Describe(changes, config) +
                 "。请勾选“允许本次临时修改”后再开始。");
+        desktop.MarkDirty();
         if (changes.Count > 0) _temporary.Apply(config, changes, authorization.InstallDirectory, task);
         QueueResult? result;
         try

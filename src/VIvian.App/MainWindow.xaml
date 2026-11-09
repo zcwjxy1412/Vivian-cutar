@@ -169,6 +169,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Button Content="{Binding Queue.PauseButtonText}" Command="{Binding Queue.PauseCommand}" IsEnabled="{Binding Queue.CanPause}" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
 <Button Style="{StaticResource DangerButton}" Content="停止" Command="{Binding StopAllCommand}" IsEnabled="{Binding CanStopAll}" Margin="0" Padding="6,9" FontSize="13"/></UniformGrid>
 <TextBlock Text="账号管理勾选并排序，游戏管理保存任务设置。完成打开程序时的管理员授权后，在这里启动一次。" Style="{StaticResource Small}" FontSize="12" Margin="0,10,0,0" TextWrapping="Wrap"/>
+<Button Content="核对桌面交接" Command="{Binding RecoverDesktopCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left" Margin="0,6,0,0"/>
 <StackPanel Visibility="{Binding PendingRestoreVisibility}" Margin="0,8,0,0"><TextBlock Text="{Binding PendingRestoreText}" Foreground="{StaticResource Warn}"/><Button Content="恢复临时配置" Command="{Binding RestoreConfigurationCommand}" IsEnabled="{Binding IsIdle}" HorizontalAlignment="Left" Margin="0,6,0,0"/></StackPanel>
 <TextBlock Text="{Binding StopKeyText}" Style="{StaticResource Small}" FontSize="12" Margin="0,4,0,0"/>
 </StackPanel></Border>

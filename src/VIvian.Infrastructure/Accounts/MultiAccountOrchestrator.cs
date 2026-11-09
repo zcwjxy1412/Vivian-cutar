@@ -12,7 +12,7 @@ public delegate Task<BatchTaskResult> BatchTaskRunner(GameAccount account,
 /// <param name="HostLaunches">How many times the elevated host was started (= UAC prompts) in this batch.</param>
 /// <param name="HostCleanupConfirmed">False when the elevated host exit could not be proven at batch end.</param>
 public sealed record MultiAccountOutcome(Guid BatchId, bool Completed, int Succeeded, int Failed,
-    string Detail, int HostLaunches = 0, bool HostCleanupConfirmed = true);
+    string Detail, int HostLaunches = 0, bool HostCleanupConfirmed = true, bool GameCleanupConfirmed = false);
 
 /// <summary>
 /// Serialises real account work: reach the saved-account list, select and verify the target account, start one
@@ -59,6 +59,7 @@ public sealed class MultiAccountOrchestrator
         var failed = 0;
         var aborted = false;
         var cancelled = false;
+        var gameClean = false;
         string? stopReason = null;
         GameAccount? previous = null;
         string? previousUid = null;
@@ -199,6 +200,7 @@ public sealed class MultiAccountOrchestrator
             if (!aborted)
             {
                 var stopped = await _driver.StopGameAsync(cancellationToken);
+                gameClean = stopped.Ok;
                 if (!stopped.Ok) { aborted = true; stopReason = "批次末尾游戏清理未确认：" + stopped.Detail; }
             }
         }
@@ -214,7 +216,8 @@ public sealed class MultiAccountOrchestrator
         catch (OperationCanceledException)
         {
             cancelled = true;
-            try { await _driver.StopGameAsync(CancellationToken.None); } catch { /* user stop must still finish */ }
+            try { gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok; }
+            catch { /* user stop must still finish */ }
         }
         catch (Exception ex)
         {
@@ -230,11 +233,11 @@ public sealed class MultiAccountOrchestrator
             State = completed ? "finished" : "stopped",
             Detail = $"完成 {succeeded}，失败 {failed}。" +
                      (cancelled ? " 用户停止了批次。" : aborted ? " 批次已停止：" + stopReason : "")
-        }, completed, succeeded, failed, CancellationToken.None);
+        }, completed, succeeded, failed, CancellationToken.None, gameClean);
     }
 
     private async Task<MultiAccountOutcome> FinishAsync(AccountBatch batch, bool completed, int succeeded, int failed,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool gameClean = false)
     {
         var launches = _host?.LaunchCount ?? 0;
         var hostClean = true;
@@ -257,7 +260,7 @@ public sealed class MultiAccountOrchestrator
         };
         // A user stop has already cancelled the batch token; the final bookkeeping must still be written.
         await _database.SaveBatchAsync(final, cancellationToken);
-        return new(final.Id, completed, succeeded, failed, final.Detail, launches, hostClean);
+        return new(final.Id, completed, succeeded, failed, final.Detail, launches, hostClean, gameClean);
     }
 
     private static string Combine(string detail, string evidence) =>

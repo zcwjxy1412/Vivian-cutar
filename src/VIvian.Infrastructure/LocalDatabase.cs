@@ -10,23 +10,29 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
     private readonly string _connectionString;
     private readonly string _databasePath;
     private readonly bool _requirePreparedProfile;
+    private readonly bool _requirePhysicalPath;
     public LocalDatabase(string path, bool requirePreparedProfile = false)
+        : this(path, requirePreparedProfile, requirePhysicalPath: requirePreparedProfile) { }
+
+    internal LocalDatabase(string path, bool requirePreparedProfile, bool requirePhysicalPath)
     {
         _databasePath = Path.GetFullPath(path);
         _requirePreparedProfile = requirePreparedProfile;
+        _requirePhysicalPath = requirePhysicalPath;
         _connectionString = new SqliteConnectionStringBuilder
-        { DataSource = _databasePath, Mode = requirePreparedProfile ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadWriteCreate,
+        { DataSource = _databasePath, Mode = requirePhysicalPath ? SqliteOpenMode.ReadWrite : SqliteOpenMode.ReadWriteCreate,
           DefaultTimeout = 5, Pooling = false }.ToString();
     }
 
     private async Task<SqliteConnection> OpenAsync(CancellationToken ct)
     {
-        if (_requirePreparedProfile && ReadOnlyFileAccess.FindReparsePoint(_databasePath) is not null)
+        if (_requirePhysicalPath && ReadOnlyFileAccess.FindReparsePoint(_databasePath) is not null)
             throw new IOException("合流数据库路径含链接，拒绝打开。");
         var connection = new SqliteConnection(_connectionString);
         try
         {
             await connection.OpenAsync(ct);
+            if (_requirePhysicalPath) UnifiedProfilePreparation.RequirePhysicalDatabasePath(connection, _databasePath);
             if (_requirePreparedProfile) UnifiedProfilePreparation.RequirePreparedDatabase(connection);
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL;";
@@ -146,7 +152,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
-        if (_requirePreparedProfile) return;
+        if (_requirePreparedProfile)
+        {
+            UnifiedProfilePreparation.RequirePhysicalWrites(Path.GetDirectoryName(_databasePath)!);
+            return;
+        }
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = "PRAGMA journal_mode=WAL;";
@@ -165,6 +175,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
                 await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
                 { DataSource = backupPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
                 await backup.OpenAsync(ct);
+                if (_requirePhysicalPath) UnifiedProfilePreparation.RequirePhysicalDatabasePath(backup, backupPath);
                 c.BackupDatabase(backup);
                 using var check = backup.CreateCommand();
                 check.CommandText = "PRAGMA integrity_check;";

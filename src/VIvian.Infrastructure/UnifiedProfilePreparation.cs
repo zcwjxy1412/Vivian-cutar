@@ -1,4 +1,6 @@
+using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
+using Microsoft.Win32.SafeHandles;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Processes;
 
@@ -9,6 +11,7 @@ public static class UnifiedProfilePreparation
     public const string InstalledProfileName = "VIvian-UserData";
     private const string DatabaseName = "vivian.db";
     private const int PreparedApplicationId = 0x5649564E; // VIVN
+    private const int Win32GetHandle = 29; // SQLITE_FCNTL_WIN32_GET_HANDLE
 
     public static string InstalledDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), InstalledProfileName);
@@ -45,32 +48,67 @@ public static class UnifiedProfilePreparation
         if (!Directory.Exists(parent) || ReadOnlyFileAccess.FindReparsePoint(parent) is not null ||
             new DriveInfo(Path.GetPathRoot(parent)!).DriveType != DriveType.Fixed)
             throw new IOException("合流库暂存目录须位于本地固定磁盘上，且父目录已存在并且不含链接。");
+        using var parentHandle = ReadOnlyFileAccess.OpenDirectoryForRead(parent, FileShare.ReadWrite);
+        RequirePhysicalDirectory(parentHandle, parent);
+        RequirePhysicalWrites(parent);
 
         var staging = Path.Combine(parent, ".vivian-prepare-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
+        using var stagedHandle = ReadOnlyFileAccess.OpenDirectoryForRead(staging, FileShare.ReadWrite);
+        var stagedIdentity = ReadOnlyFileAccess.Identity(stagedHandle);
         var target = Path.Combine(staging, DatabaseName);
         var source = Path.Combine(staging, "incoming.db");
         try
         {
+            RequirePhysicalDirectory(stagedHandle, staging);
+            if (stagedIdentity is null) throw new IOException("无法核对合流暂存目录的身份。");
+            RequirePhysicalWrites(staging);
             CopySnapshot(officialDatabase, target, 6);
             ct.ThrowIfCancellationRequested();
             CopySnapshot(genshinDatabase, source, LocalDatabase.CurrentSchemaVersion);
-            await new LocalDatabase(target).InitializeAsync(ct).ConfigureAwait(false);
+            await new LocalDatabase(target, requirePreparedProfile: false, requirePhysicalPath: true)
+                .InitializeAsync(ct).ConfigureAwait(false);
             MergeGenshin(target, source, ct);
             foreach (var suffix in new[] { "", "-wal", "-shm" }) File.Delete(source + suffix);
             VerifyPrepared(staging);
             ct.ThrowIfCancellationRequested();
+            RequirePhysicalDirectory(stagedHandle, staging);
+            stagedHandle.Dispose();
             Directory.Move(staging, output);
+            using var published = ReadOnlyFileAccess.OpenDirectoryForRead(output, FileShare.ReadWrite);
+            try
+            {
+                RequirePhysicalDirectory(published, output);
+                if (ReadOnlyFileAccess.Identity(published) != stagedIdentity)
+                    throw new IOException("合流结果目录与核验过的暂存目录不一致。");
+                VerifyPrepared(output);
+            }
+            catch
+            {
+                if (ReadOnlyFileAccess.Identity(published) == stagedIdentity &&
+                    ReadOnlyFileAccess.FindReparsePoint(output) is null && !Directory.Exists(staging))
+                {
+                    published.Dispose();
+                    Directory.Move(output, staging);
+                }
+                throw;
+            }
         }
         finally
         {
+            stagedHandle.Dispose();
             // Only delete files of this invocation, never the requested output or either source.
-            if (Directory.Exists(staging) && ReadOnlyFileAccess.FindReparsePoint(staging) is null)
+            if (stagedIdentity is not null && Directory.Exists(staging) && ReadOnlyFileAccess.FindReparsePoint(staging) is null)
             {
-                foreach (var name in new[] { DatabaseName, DatabaseName + ".pre-v7.bak", "incoming.db" })
-                    foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
-                        File.Delete(Path.Combine(staging, name + suffix));
-                Directory.Delete(staging);
+                using var remaining = ReadOnlyFileAccess.OpenDirectoryForRead(staging, FileShare.ReadWrite);
+                if (ReadOnlyFileAccess.Identity(remaining) == stagedIdentity)
+                {
+                    foreach (var name in new[] { DatabaseName, DatabaseName + ".pre-v7.bak", "incoming.db" })
+                        foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
+                            File.Delete(Path.Combine(staging, name + suffix));
+                    remaining.Dispose();
+                    Directory.Delete(staging);
+                }
             }
         }
     }
@@ -80,6 +118,7 @@ public static class UnifiedProfilePreparation
         using var database = OpenExisting(Path.Combine(directory, DatabaseName), SqliteOpenMode.ReadOnly);
         RequirePreparedDatabase(database);
         VerifyIntegrity(database, transaction: null);
+        RequirePhysicalWrites(directory);
     }
 
     internal static void RequirePreparedDatabase(SqliteConnection database)
@@ -96,6 +135,7 @@ public static class UnifiedProfilePreparation
             throw new InvalidDataException("来源数据库版本与合流方案不符。");
         using var snapshot = Connect(snapshotPath, SqliteOpenMode.ReadWriteCreate);
         original.BackupDatabase(snapshot);
+        RequirePhysicalCompanions(originalPath);
         if (Number(snapshot, "PRAGMA user_version;") != expectedVersion)
             throw new InvalidDataException("来源版本在生成快照期间变化，合流库未发布。");
         VerifyIntegrity(snapshot, transaction: null);
@@ -116,6 +156,7 @@ public static class UnifiedProfilePreparation
             attach.Parameters.AddWithValue("$source", source);
             attach.ExecuteNonQuery();
         }
+        RequirePhysicalDatabasePath(database, source, "incoming");
         using var tx = database.BeginTransaction(deferred: false);
         using var sql = database.CreateCommand();
         sql.Transaction = tx;
@@ -197,9 +238,66 @@ public static class UnifiedProfilePreparation
     {
         var database = new SqliteConnection(new SqliteConnectionStringBuilder
         { DataSource = path, Mode = mode, DefaultTimeout = 5, Pooling = false }.ToString());
-        try { database.Open(); return database; }
+        try
+        {
+            database.Open();
+            RequirePhysicalDatabasePath(database, path);
+            return database;
+        }
         catch { database.Dispose(); throw; }
     }
+
+    internal static void RequirePhysicalDatabasePath(SqliteConnection database, string path, string schema = "main")
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        if (database.Handle is not { } sqlite || SqliteFileControl(sqlite, schema, Win32GetHandle, out var nativeHandle) != 0)
+            throw new IOException("无法核对 SQLite 已打开文件的物理路径。");
+
+        // SQLite owns this borrowed handle and closes it with the connection.
+        using var file = new SafeFileHandle(nativeHandle, ownsHandle: false);
+        if (file.IsInvalid || !ReadOnlyFileAccess.HandlePathMatches(file, path) ||
+            ReadOnlyFileAccess.LinkCount(file) != 1)
+            throw new IOException("SQLite 数据库路径被重定向或存在硬链接，请从 Explorer 原生会话重试。");
+        RequirePhysicalCompanions(path);
+    }
+
+    private static void RequirePhysicalCompanions(string path)
+    {
+        foreach (var suffix in new[] { "-wal", "-shm", "-journal" })
+        {
+            var companion = path + suffix;
+            try
+            {
+                using var file = File.OpenHandle(companion, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                if (!ReadOnlyFileAccess.HandlePathMatches(file, companion) ||
+                    (OperatingSystem.IsWindows() && ReadOnlyFileAccess.LinkCount(file) != 1))
+                    throw new IOException("SQLite 辅助文件路径被重定向或存在硬链接，请从 Explorer 原生会话重试。");
+            }
+            catch (FileNotFoundException) { } // A checkpoint can remove a companion before it is opened.
+        }
+    }
+
+    internal static void RequirePhysicalWrites(string directory)
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        using var handle = ReadOnlyFileAccess.OpenDirectoryForRead(directory, FileShare.ReadWrite);
+        RequirePhysicalDirectory(handle, directory);
+        // MSIX can open an existing directory natively but redirect files subsequently created inside it.
+        var path = Path.Combine(directory, ".vivian-write-probe-" + Guid.NewGuid().ToString("N") + ".tmp");
+        using var probe = File.OpenHandle(path, FileMode.CreateNew, FileAccess.Write, FileShare.Delete, FileOptions.DeleteOnClose);
+        if (!ReadOnlyFileAccess.HandlePathMatches(probe, path))
+            throw new IOException("合流目录的新文件写入被重定向，请从 Explorer 原生会话重试。");
+    }
+
+    private static void RequirePhysicalDirectory(SafeFileHandle directory, string path)
+    {
+        if (directory.IsInvalid || !ReadOnlyFileAccess.HandlePathMatches(directory, path))
+            throw new IOException("合流目录的物理路径不一致，请从 Explorer 原生会话重试。");
+    }
+
+    [DllImport("e_sqlite3", EntryPoint = "sqlite3_file_control", ExactSpelling = true, CallingConvention = CallingConvention.Cdecl)]
+    private static extern int SqliteFileControl(SQLitePCL.sqlite3 database,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string schema, int operation, out IntPtr argument);
 
     private static bool Within(string path, string root)
     {

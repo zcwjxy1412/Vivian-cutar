@@ -40,6 +40,8 @@ Task<BetterGiSourceSettings> ConnectAccountProfileAsync(
 
 两套源程序退出并且桌面交接完成后，可用合流候选的 `VIvian.exe --prepare-unified-profile <尚不存在的绝对暂存目录>` 生成可切换的数据。来源固定为上文 v6 和 v7 目录，输入只读。准备过程中同时持有两个来源的单实例锁和桌面锁。冲突、未清理运行或未完成的恢复会阻断；成功通过检查后才出现指定暂存目录。切换前需再核对两套源库没有被其他程序重新打开或修改。
 
+请从 Explorer 原生会话运行正式数据准备。MSIX 可能把 AppData 的读写转到包的 `LocalCache`，即使显示的路径与普通会话相同。源码使用 SQLite 和 Windows 目录的实际句柄核对来源、辅助文件、暂存和发布结果，并用自动删除的临时文件核对新文件写入的位置。重定向时拒绝继续。已安装的旧构建需要在原生会话核对真实路径。[MSIX 文件虚拟化](https://learn.microsoft.com/windows/msix/desktop/flexible-virtualization)
+
 开发侧用 `scripts/Test-UnifiedCutover.ps1 -PreviousPackageDirectory <旧程序目录> -CandidatePackageDirectory <合流候选目录>` 重跑。脚本在临时目录核对快捷方式目标及 EXE 哈希，用固定 SDK 宿主运行目标同目录的程序 DLL，保留旧版所需的临时环境变量。覆盖模拟替换失败恢复、缺库阻断、有准备库启动和回滚。提权提示由正式安装验收单独核对。
 
 候选 `3242768` 的 Windows M5 回归 937/937，WPF 冒烟通过。以 `aff9a76` 的程序副本演练，临时快捷方式的目标始终相同。失败替换和最终回滚都恢复了旧 EXE 哈希，并重新生成启动证据。正式数据目录尚未发布。

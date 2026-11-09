@@ -1,15 +1,122 @@
+using System.Runtime.InteropServices;
 using Microsoft.Data.Sqlite;
 using VIvian.Core;
 using VIvian.Core.Engines;
 using VIvian.Infrastructure;
+using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.BetterGi;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace VIvian.Tests;
 
-public sealed class UnifiedProfilePreparationTests : IDisposable
+public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput) : IDisposable
 {
     private readonly string _root = Directory.CreateTempSubdirectory("vivian-unified-tests-").FullName;
+
+    [Fact]
+    public void PhysicalDatabaseCheckUsesTheSqliteHandle()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var actual = Path.Combine(_root, "actual.db");
+        var expected = Path.Combine(_root, "expected.db");
+        using var database = Open(actual);
+        UnifiedProfilePreparation.RequirePhysicalDatabasePath(database, actual);
+        Assert.Throws<IOException>(() => UnifiedProfilePreparation.RequirePhysicalDatabasePath(database, expected));
+        Assert.False(File.Exists(expected));
+    }
+
+    [Fact]
+    public void APhysicalDatabaseCannotUseAnAliasedCompanion()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var path = Path.Combine(_root, "native.db");
+        var other = Path.Combine(_root, "other-file");
+        File.WriteAllText(other, "fixture");
+        using var database = Open(path);
+        Assert.True(CreateHardLink(path + "-wal", other, IntPtr.Zero));
+        var error = Assert.Throws<IOException>(() => UnifiedProfilePreparation.RequirePhysicalDatabasePath(database, path));
+        Assert.Contains("辅助文件", error.Message);
+        Assert.Equal("fixture", File.ReadAllText(other));
+    }
+
+    [Fact]
+    public void PreparationDirectoryCannotBeRenamedWhileItIsPinned()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var staging = Directory.CreateDirectory(Path.Combine(_root, "staging")).FullName;
+        var output = Path.Combine(_root, "published");
+        using (var pinned = ReadOnlyFileAccess.OpenDirectoryForRead(staging, FileShare.ReadWrite))
+        {
+            Assert.False(pinned.IsInvalid);
+            Assert.ThrowsAny<IOException>(() => Directory.Move(staging, output));
+        }
+        Directory.Move(staging, output);
+        Assert.True(Directory.Exists(output));
+    }
+
+    [Fact]
+    public void AppDataProbeDetectsRedirectedNewFiles()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var directory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var path = Path.Combine(directory, "vivian-redirection-probe-" + Guid.NewGuid().ToString("N"));
+        using (var sample = File.OpenHandle(path, FileMode.CreateNew, FileAccess.Write, FileShare.Delete, FileOptions.DeleteOnClose))
+        {
+            var redirected = !ReadOnlyFileAccess.HandlePathMatches(sample, path);
+            testOutput.WriteLine($"New AppData files redirected: {redirected}");
+            if (redirected)
+            {
+                using var parent = ReadOnlyFileAccess.OpenDirectoryForRead(directory, FileShare.ReadWrite | FileShare.Delete);
+                var error = Assert.Throws<IOException>(() => UnifiedProfilePreparation.RequirePhysicalWrites(directory));
+                if (ReadOnlyFileAccess.HandlePathMatches(parent, directory))
+                    Assert.Contains("新文件写入被重定向", error.Message);
+            }
+            else UnifiedProfilePreparation.RequirePhysicalWrites(directory);
+        }
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task AppDataRedirectionCannotPublishOrUseAShadowDatabase()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+        var profile = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "vivian-redirection-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(profile);
+        try
+        {
+            var v6 = Path.Combine(_root, "v6.db");
+            var v7 = Path.Combine(_root, "v7.db");
+            await new LocalDatabase(v6).InitializeAsync();
+            using (var old = Open(v6))
+                Execute(old, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+            await new LocalDatabase(v7).InitializeAsync();
+
+            var output = Path.Combine(profile, "prepared");
+            using var directory = ReadOnlyFileAccess.OpenDirectoryForRead(profile, FileShare.ReadWrite | FileShare.Delete);
+            Assert.False(directory.IsInvalid);
+            if (ReadOnlyFileAccess.HandlePathMatches(directory, profile))
+            {
+                testOutput.WriteLine("AppData fixture was not virtualized. Verifying normal preparation.");
+                await UnifiedProfilePreparation.PrepareAsync(v6, v7, output, CancellationToken.None);
+                UnifiedProfilePreparation.VerifyPrepared(output);
+                return;
+            }
+
+            testOutput.WriteLine("AppData fixture was virtualized. Verifying rejection of the output and the source.");
+            await Assert.ThrowsAsync<IOException>(() => UnifiedProfilePreparation.PrepareAsync(
+                v6, v7, output, CancellationToken.None));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(profile));
+            var shadow = Path.Combine(profile, "shadow.db");
+            File.Copy(v6, shadow);
+            var elsewhere = Path.Combine(_root, "prepared");
+            await Assert.ThrowsAsync<IOException>(() => UnifiedProfilePreparation.PrepareAsync(
+                shadow, v7, elsewhere, CancellationToken.None));
+            Assert.False(Directory.Exists(elsewhere));
+        }
+        finally { TestDirectories.DeleteWithRetry(profile); }
+    }
 
     [Fact]
     public async Task PreparesTwoAccountsFromConsistentSnapshotsAndKeepsOriginals()
@@ -184,6 +291,10 @@ public sealed class UnifiedProfilePreparationTests : IDisposable
         command.CommandText = sql;
         command.ExecuteNonQuery();
     }
+
+    [DllImport("kernel32.dll", EntryPoint = "CreateHardLinkW", ExactSpelling = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLink(string path, string target, IntPtr securityAttributes);
 
     public void Dispose() => TestDirectories.DeleteWithRetry(_root);
 }

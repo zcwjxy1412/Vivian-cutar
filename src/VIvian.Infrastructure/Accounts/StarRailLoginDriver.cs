@@ -60,7 +60,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     private readonly IGameWindowLocator _locator;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly LoginFlowBudget _budget;
-    private readonly LoginFlowBudget _loginBudget;
+    private readonly LoginFlowBudget? _loginBudget;
     private readonly Func<DateTimeOffset> _now;
     private readonly Func<IDisposable?>? _prepareLaunch;
     private readonly Func<LoginScreenView, string, Task>? _saveEvidence;
@@ -83,7 +83,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         _locator = locator ?? StarRailWindowLocator.Instance;
         _delay = delay ?? Task.Delay;
         _budget = budget ?? LoginFlowBudget.Default;
-        _loginBudget = budget ?? LoginFlowBudget.Default with { MaxUnknownStreak = 20 };
+        _loginBudget = budget;
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
 
@@ -103,9 +103,20 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
 
     private async Task<LoginSwitchOutcome> ReadLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
     {
-        var session = new LoginFlowSession(LoginGoal.AccountSelectable, _loginBudget);
+        var session = new LoginFlowSession(LoginGoal.AccountSelectable, BudgetForWait(policy.GameStart));
         var (outcome, _) = await RunFlowAsync(session, policy.GameStart, null, cancellationToken).ConfigureAwait(false);
         return outcome with { Stage = outcome.Ok ? LoginSwitchStage.WaitingForLogin : outcome.Stage };
+    }
+
+    private LoginFlowBudget BudgetForWait(TimeSpan timeout)
+    {
+        // Cold startup and world loading can stay dark much longer than a normal transition.
+        var pollLimit = (int)Math.Ceiling(timeout / Poll) + 1;
+        return _loginBudget ?? _budget with
+        {
+            MaxSteps = Math.Max(_budget.MaxSteps, pollLimit),
+            MaxUnknownStreak = pollLimit,
+        };
     }
 
     public async Task<LoginSwitchOutcome> SwitchAsync(LoginTarget target, SwitchPolicy policy,
@@ -204,8 +215,9 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                 { Evidence = Judge(evidence, trail), Trail = trail };
         evidence = evidence with { EnterPressedAt = _now() };
 
-        var world = new LoginFlowSession(LoginGoal.InWorld, _budget);
-        var (entered, titlePassedAt) = await RunFlowAsync(world, policy.LoginScreen, selectedWindow, cancellationToken,
+        var worldTimeout = policy.LoginScreen >= policy.GameStart ? policy.LoginScreen : policy.GameStart;
+        var world = new LoginFlowSession(LoginGoal.InWorld, BudgetForWait(worldTimeout));
+        var (entered, titlePassedAt) = await RunFlowAsync(world, worldTimeout, selectedWindow, cancellationToken,
             MaskedPhoneParser.Normalize(target.NormalizedPhone))
             .ConfigureAwait(false);
         trail.AddRange(entered.Trail);
@@ -320,6 +332,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         DateTimeOffset? titlePassed = null;
         LoginStateObservation? last = null;
         LoginScreenView? lastView = null;
+        RecognizedText? previousLogout = null;
+        int? previousLogoutProcess = null;
         while (_now() < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -337,6 +351,20 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                     observedWindow.ProcessStartedAt != expectedWindow.ProcessStartedAt)))
                 return (Fatal(LoginSwitchStage.VerifyingSession, "选择账号后游戏进程已变化或退出，会话与所选账号的关联中断。") with
                     { Trail = trail }, titlePassed);
+
+            var logout = session.Goal == LoginGoal.AccountSelectable && observation.State == LoginScreenState.Title
+                ? observation.ActionTarget : null;
+            var stableLogout = logout is not null && previousLogout is not null && previousLogoutProcess == view.Window?.ProcessId &&
+                Math.Abs(previousLogout.CenterX - logout.CenterX) <= logout.Width * .5 &&
+                Math.Abs(previousLogout.CenterY - logout.CenterY) <= logout.Height * .5;
+            previousLogout = logout;
+            previousLogoutProcess = view.Window?.ProcessId;
+            if (logout is not null && !stableLogout)
+            {
+                _log?.Invoke("标题界面 -> Wait: 等待下一帧核验登出按钮位置。");
+                await _delay(Poll, cancellationToken).ConfigureAwait(false);
+                continue;
+            }
 
             var action = session.Decide(observation, _now());
             _log?.Invoke($"{LoginFlowSession.Describe(observation.State)} -> {action.Kind}: {action.Reason}");

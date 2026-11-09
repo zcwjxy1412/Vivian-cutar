@@ -49,10 +49,9 @@ public static partial class GameUidParser
                              t.Contains("开始游戏", StringComparison.Ordinal) ||
                              t.Contains("进入游戏", StringComparison.Ordinal) ||
                              t.Contains("登录其他账号", StringComparison.Ordinal))) return false;
-        return compact.Any(t => t.Contains("开拓等级", StringComparison.Ordinal) ||
-                                t.Contains("星琼", StringComparison.Ordinal) ||
-                                t.Contains("委托", StringComparison.Ordinal) ||
-                                t.Contains("跃迁", StringComparison.Ordinal) ||
-                                t.Contains("UID", StringComparison.OrdinalIgnoreCase));
+        // The version footer can contain a UID before the world has loaded.
+        return compact.Any(t => t.StartsWith("开拓等级", StringComparison.Ordinal) ||
+                                t is "查看短信" or "阅读短信") ||
+               compact.Count(t => t is "委托" or "跃迁" or "编队" or "背包" or "任务") >= 2;
     }
 }

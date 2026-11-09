@@ -91,6 +91,32 @@ public sealed class ScreenshotFlowRegressionTests
     }
 
     [Fact]
+    public void TitleLogoutIgnoresCandidateAboveSettings()
+    {
+        var correct = T("登出", 1830, 400, 45);
+        var o = LoginStateClassifier.Classify([T("点击进入", 960, 1014),
+            T("登出", 1800, 262, 60), T("设置", 1830, 305, 45), correct, T("退出", 1830, 495, 45)]);
+
+        Assert.Equal(LoginScreenState.Title, o.State);
+        Assert.Equal(correct, o.ActionTarget);
+    }
+
+    [Fact]
+    public void TrainSupplyIsHandledOnlyAfterChoosingTheTargetAccount()
+    {
+        var o = LoginStateClassifier.Classify([T("列车补给", 960, 430),
+            T("点击领取今日补给", 960, 930), T("剩余：146 天", 960, 520)]);
+
+        Assert.Equal(LoginScreenState.DailySupply, o.State);
+        Assert.Equal(LoginActionKind.RestartGame, new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Kind);
+        var world = new LoginFlowSession(LoginGoal.InWorld);
+        var close = LoginStateClassifier.Classify([T("点击空白处关闭", 960, 930)]);
+        Assert.Equal(LoginActionKind.Wait, world.Decide(close).Kind);
+        Assert.Equal("点击领取今日补给", world.Decide(o).Target?.Text);
+        Assert.Equal("点击空白处关闭", world.Decide(close).Target?.Text);
+    }
+
+    [Fact]
     public void DuplicateMaskedIdentitiesCannotBeResolvedByHistoricalRowOrder()
     {
         var rows = MaskedPhoneParser.FindAll([T("153******57", 900, 500), T("153******57", 900, 600)]);

@@ -57,11 +57,11 @@ public sealed class LoginFlowTests
     }
 
     [Fact]
-    public void TitleWithoutLogoutControlFailsWithoutClickingEnter()
+    public void TitleWithoutLogoutControlWaitsWithoutClickingEnter()
     {
         var action = new LoginFlowSession(LoginGoal.AccountSelectable).Decide(LoginStateClassifier.Classify(TitleWithoutLogout));
-        Assert.Equal(LoginActionKind.Fail, action.Kind);
-        Assert.Contains("不会点击", action.Reason, StringComparison.Ordinal);
+        Assert.Equal(LoginActionKind.Wait, action.Kind);
+        Assert.Null(action.Target);
     }
 
     [Fact]

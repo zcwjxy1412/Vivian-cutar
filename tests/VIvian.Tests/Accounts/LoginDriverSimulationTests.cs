@@ -61,6 +61,31 @@ public sealed class LoginDriverSimulationTests
     }
 
     [Fact]
+    public async Task ColdStartupUsesItsTimeBudgetBeyondThePreviousFrameLimit()
+    {
+        var game = FakeGame.Standard();
+        game.UnreadableScans = 65;
+
+        var outcome = await game.Driver().EnsureLoginAsync(new SwitchPolicy(), CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Equal(new[] { "退出登录", "确定" }, game.ClickedTexts);
+    }
+
+    [Fact]
+    public async Task ColdStartupStillTimesOutWithoutClickingAnUnknownScreen()
+    {
+        var game = FakeGame.Standard();
+        game.Screen = "garbage";
+
+        var outcome = await game.Driver().EnsureLoginAsync(Fast, CancellationToken.None);
+
+        Assert.False(outcome.Ok);
+        Assert.Contains("超时", outcome.Detail, StringComparison.Ordinal);
+        Assert.Empty(game.ClickedTexts);
+    }
+
+    [Fact]
     public async Task UnknownScreenProducesNoClicksAndStops()
     {
         var game = FakeGame.Standard();

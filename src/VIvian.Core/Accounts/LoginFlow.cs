@@ -29,6 +29,7 @@ public enum LoginScreenState
     AgreementRequired,
     /// <summary>A plain notice with an explicit acknowledge button ("我知道了").</summary>
     Notice,
+    DailySupply,
     InGame,
 }
 
@@ -95,8 +96,11 @@ public static class LoginStateClassifier
         var title = FindAny(lines, WorldEntryControls);
         if (title is not null && !HasAny(LauncherWords) &&
             (Has("点击进入") || logoutLine is not null || Has("星穹列车")))
-            return new(LoginScreenState.Title, lines, MaskedPhoneParser.FindAll(lines), logoutLine,
-                logoutLine is null ? "标题界面（未识别到退出登录按钮）。" : "标题界面（可退出登录）。");
+        {
+            var titleLogout = FindTitleLogout(lines);
+            return new(LoginScreenState.Title, lines, MaskedPhoneParser.FindAll(lines), titleLogout,
+                titleLogout is null ? "标题界面（等待定位登出按钮）。" : "标题界面（可退出登录）。");
+        }
 
         var enterGame = FindExact(lines, "进入游戏");
         if (accounts.Count > 0 && (enterGame is not null || Has("登录其他账号") || loginPanelDetected))
@@ -110,6 +114,10 @@ public static class LoginStateClassifier
         if (accounts.Count == 0 && (Has("手机号") || Has("账号密码登录") || Has("获取验证码")))
             return new(LoginScreenState.AuthChallenge, lines, accounts, null,
                 "登录界面没有已保存账号，需要用户本人登录。");
+
+        var supply = FindExact(lines, "点击领取今日补给");
+        if (Has("列车补给") && supply is not null)
+            return new(LoginScreenState.DailySupply, lines, accounts, supply, "领取已登录账号的今日列车补给。");
 
         var notice = FindAny(lines, ["我知道了"]);
         if (notice is not null) return new(LoginScreenState.Notice, lines, accounts, notice, "提示框。");
@@ -125,6 +133,19 @@ public static class LoginStateClassifier
 
         return new(LoginScreenState.Unknown, lines, accounts, null, "无法识别当前画面。");
     }
+
+    public static RecognizedText? FindTitleLogout(IReadOnlyList<RecognizedText> lines)
+    {
+        var settings = FindExact(lines, "设置");
+        var exit = FindExact(lines, "退出");
+        var matches = lines.Where(line => LogoutControls.Contains(Compact(line.Text), StringComparer.Ordinal) &&
+            (settings is null || !SameMenuColumn(settings, line) || line.CenterY > settings.Bottom) &&
+            (exit is null || !SameMenuColumn(exit, line) || line.Bottom < exit.Y)).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    private static bool SameMenuColumn(RecognizedText left, RecognizedText right) =>
+        Math.Abs(left.CenterX - right.CenterX) <= Math.Max(left.Width, right.Width);
 
     private static LoginStateObservation ClassifyRetentionDialog(IReadOnlyList<RecognizedText> lines,
         ScreenRegion? panel, bool preserveLoginSelected)
@@ -212,6 +233,7 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
     private int _unknownStreak;
     private int _steps;
     private int _restarts;
+    private bool _supplyClaimStarted;
 
     public LoginGoal Goal => goal;
     public IReadOnlyList<(LoginScreenState State, DateTimeOffset At)> Trail => _trail;
@@ -219,6 +241,9 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
 
     public LoginAction Decide(LoginStateObservation observation, DateTimeOffset? at = null)
     {
+        if (Goal == LoginGoal.InWorld && _supplyClaimStarted && observation.State == LoginScreenState.Unknown &&
+            LoginStateClassifier.FindExact(observation.Lines, "点击空白处关闭") is { } closeSupply)
+            observation = observation with { State = LoginScreenState.DailySupply, ActionTarget = closeSupply, Detail = "关闭今日列车补给结果。" };
         _steps++;
         _trail.Add((observation.State, at ?? DateTimeOffset.UtcNow));
         if (_steps > _budget.MaxSteps)
@@ -246,6 +271,7 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
             _clicks[key] = count;
             if (count > _budget.MaxClicksPerState)
                 return LoginAction.Fail($"在“{Describe(observation.State)}”画面已点击 {count - 1} 次仍未变化，已停止。最后动作：{action.Reason}");
+            if (observation.State == LoginScreenState.DailySupply) _supplyClaimStarted = true;
         }
         if (action.Kind == LoginActionKind.RestartGame)
         {
@@ -260,10 +286,10 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
         LoginScreenState.LoginCard or LoginScreenState.AccountList => LoginAction.Done(o.Detail),
         // Never press "点击进入" here: after auto-login it would enter the world as the previous account.
         LoginScreenState.Title when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, "退出当前自动登录的账号。"),
-        LoginScreenState.Title => LoginAction.Fail("标题界面没有识别到“退出登录”按钮，无法安全回到账号列表；不会点击“点击进入”。"),
+        LoginScreenState.Title => LoginAction.Wait(o.Detail),
         LoginScreenState.LogoutConfirm when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, o.Detail),
         LoginScreenState.LogoutConfirm => LoginAction.Wait(o.Detail),
-        LoginScreenState.InGame => LoginAction.Restart("游戏仍在世界内，需要重启后从标题界面退出登录。"),
+        LoginScreenState.InGame or LoginScreenState.DailySupply => LoginAction.Restart("游戏仍在世界内，需要重启后从标题界面退出登录。"),
         LoginScreenState.Notice when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, "关闭提示框。"),
         LoginScreenState.AuthChallenge or LoginScreenState.AgreementRequired => LoginAction.NeedUser(o.Detail),
         LoginScreenState.Launcher => LoginAction.Fail(o.Detail),
@@ -274,6 +300,7 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
     private static LoginAction ForWorld(LoginStateObservation o) => o.State switch
     {
         LoginScreenState.InGame => LoginAction.Done(o.Detail),
+        LoginScreenState.DailySupply when o.ActionTarget is not null => LoginAction.Click(o.ActionTarget, o.Detail),
         LoginScreenState.Title when LoginStateClassifier.FindAny(o.Lines, LoginStateClassifier.WorldEntryControls) is { } enter =>
             LoginAction.Click(enter, "已登录所选账号，点击进入。"),
         // The card may stay for a moment after "进入游戏"; waiting is safe, clicking again is not.
@@ -299,6 +326,7 @@ public sealed class LoginFlowSession(LoginGoal goal, LoginFlowBudget? budget = n
         LoginScreenState.AuthChallenge => "认证挑战",
         LoginScreenState.AgreementRequired => "协议确认",
         LoginScreenState.Notice => "提示框",
+        LoginScreenState.DailySupply => "列车补给",
         LoginScreenState.InGame => "游戏世界",
         _ => state.ToString(),
     };

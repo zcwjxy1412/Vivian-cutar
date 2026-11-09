@@ -180,6 +180,9 @@ public sealed class LoginRecognitionTests
     {
         var login = new[] { Line("点击进入", 900, 700) };
         Assert.False(GameUidParser.LooksInGame(login));
+        Assert.False(GameUidParser.LooksInGame([Line("UID: 123456789", 110, 1040)]));
+        Assert.False(GameUidParser.LooksInGame([Line("星魂", 900, 870),
+            Line("跃迁会遇到许多角色", 900, 930), Line("UID: 123456789", 110, 1040)]));
 
         var inGame = new[] { Line("开拓等级 65", 200, 300), Line("星琼 120", 200, 340) };
         Assert.True(GameUidParser.LooksInGame(inGame));

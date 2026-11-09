@@ -78,13 +78,15 @@ public sealed class MultiAccountOrchestrator
                 throw new InvalidOperationException("执行队列包含无效或重复的登录标识，未启动游戏。");
             // Reuse a client already at login, including one that is still starting.
             // The driver still verifies the saved-account screen before the first account can run.
+            batch = await StageAsync(batch, accounts[0], BatchRunState.RecognizingLogin,
+                "正在启动星铁或等待已保存账号界面", progress, cancellationToken);
             var prepared = await _driver.EnsureLoginAsync(policy, cancellationToken);
             if (!prepared.Ok)
             {
                 await RecordAsync(batch, accounts[0], prepared.NeedsUser ? "needs_user" : "login_screen_failed",
                     prepared.Detail, cancellationToken);
                 return await FinishAsync(batch with { State = "failed",
-                    Detail = "无法把游戏带到登录界面（已保存账号选择）：" + prepared.Detail }, false, 0, 0, cancellationToken);
+                    Detail = "无法把游戏带到登录界面（已保存账号选择）：" + prepared.Detail }, false, 0, 1, cancellationToken);
             }
 
             for (var index = 0; index < accounts.Count; index++)
@@ -104,7 +106,7 @@ public sealed class MultiAccountOrchestrator
 
                 batch = await StageAsync(batch, account, BatchRunState.RecognizingLogin,
                     $"{index + 1}/{accounts.Count}：确认账号选择界面", progress, cancellationToken);
-                batch = await StageAsync(batch, account, BatchRunState.SelectingAccount, "正在选择并核对账号",
+                batch = await StageAsync(batch, account, BatchRunState.SelectingAccount, "正在选择账号、等待进入世界并核对身份",
                     progress, cancellationToken);
                 var target = new LoginTarget(profile.NormalizedPhone, profile.MaskedPhone, profile.RowOrder,
                     profile.ObservedUid, previousMasked, previousUid);

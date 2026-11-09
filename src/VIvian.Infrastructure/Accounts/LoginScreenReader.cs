@@ -124,7 +124,7 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
     /// Re-read the lower-centre title text and right-hand controls at higher scale.
     /// </summary>
     private static bool HasLogout(IReadOnlyList<RecognizedText> lines) =>
-        LoginStateClassifier.FindAny(lines, LoginStateClassifier.LogoutControls) is not null;
+        LoginStateClassifier.FindTitleLogout(lines) is not null;
 
     private static async Task<IReadOnlyList<RecognizedText>> ReadTitleRegionsAsync(CapturedFrame frame,
         CancellationToken cancellationToken)
@@ -183,7 +183,8 @@ public sealed class LoginScreenReader(IGameWindowLocator? locator = null) : ILog
         {
             var compact = Compact(line.Text);
             if (compact.Length == 0) continue;
-            if (merged.Any(m => Compact(m.Text) == compact && Math.Abs(m.CenterY - line.CenterY) < 12)) continue;
+            if (merged.Any(m => Compact(m.Text) == compact && Math.Abs(m.CenterY - line.CenterY) < 12 &&
+                                Math.Abs(m.CenterX - line.CenterX) < 12)) continue;
             merged.Add(line);
         }
         return merged;

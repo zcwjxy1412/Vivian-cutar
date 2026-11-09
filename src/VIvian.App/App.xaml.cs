@@ -444,7 +444,8 @@ public partial class App : Application
         main.AccountTabs.SelectedIndex = 2;
         window.UpdateLayout();
         if (!ReferenceEquals(main.ZenlessAccountList.ItemsSource, vm.Accounts.ZenlessRows)
-            || vm.Accounts.ZenlessRows.Single().Id != zenless.Id)
+            || vm.Accounts.ZenlessRows.All(a => a.Id != zenless.Id)
+            || vm.Accounts.ZenlessRows.Any(a => a.Game != GameId.ZenlessZoneZero))
             throw new InvalidOperationException("The Zenless account tab is not bound to Zenless accounts");
         main.AccountTabs.SelectedIndex = 0;
         tabs.SelectedIndex = Array.IndexOf(headers, "游戏管理");

@@ -1,16 +1,14 @@
+using System.Text.RegularExpressions;
 using VIvian.Core;
 using VIvian.Core.Engines;
 
 namespace VIvian.Infrastructure.Engines.OneDragon;
 
 /// <summary>
-/// Read-only check of a OneDragon integrated-runtime installation. Runs the shared
-/// <see cref="EngineReadinessInspector"/> and tightens it for execution: only the integrated launcher is accepted as
-/// the managed entry (the plain launcher spawns a Python process that can outlive it), the documented ASCII path rule
-/// is enforced instead of only warned about, and the src / .runtime folders must exist. It never runs OneDragon, never
-/// reads its configuration and never writes.
+/// Read-only inspection of the integrated launcher and its initialization prerequisites.
+/// Identity covers the launcher executable. Code, resources, elevation and the game run need separate evidence.
 /// </summary>
-public static class OneDragonInstallationInspector
+public static partial class OneDragonInstallationInspector
 {
     public static Task<EngineReadinessReport> InspectAsync(string? root, CancellationToken ct = default) =>
         InspectAsync(root, TimeProvider.System, ct);
@@ -27,17 +25,20 @@ public static class OneDragonInstallationInspector
         var extra = new List<ReadinessCheck>();
         var compatibility = report.Compatibility;
 
-        if (!string.Equals(Path.GetFileName(report.ProgramPath), OneDragonContract.EntryProgram, StringComparison.OrdinalIgnoreCase))
+        var integrated = string.Equals(Path.GetFileName(report.ProgramPath), OneDragonContract.EntryProgram,
+            StringComparison.OrdinalIgnoreCase);
+        if (!integrated)
         {
             extra.Add(new("od:entry", "受管入口", CheckState.Failed, EngineErrorCategory.UnsafeLayout,
                 $"没有 {OneDragonContract.EntryProgram}。{OneDragonContract.RawLauncherProgram} 会派生独立的 Python 进程，可能在启动器退出后继续运行，VIvian 不以它作为入口。",
                 "安装官方 WithRuntime-Full 完整包。"));
             compatibility = CompatibilityClass.UnsafeLayout;
         }
-        if (!EngineReadinessInspector.IsAsciiPathWithoutSpaces(directory))
+        var supportedPath = IsSupportedInstallPath(directory);
+        if (!supportedPath)
         {
             extra.Add(new("od:path", "安装路径", CheckState.Failed, EngineErrorCategory.PathInvalid,
-                "上游文档要求安装路径只含英文字母、数字、下划线和连字符且没有空格（级别 C，固定源码中未发现检查）。VIvian 在此路径下不启动 OneDragon。",
+                "请选择无空格的本机英文路径。目录名支持版本号中的点号。",
                 "把 OneDragon 移动到类似 D:\\OneDragon 的路径。"));
             compatibility = CompatibilityClass.UnsafeLayout;
         }
@@ -73,7 +74,42 @@ public static class OneDragonInstallationInspector
             compatibility = CompatibilityClass.Unavailable;
         }
 
-        var checks = report.Checks.Where(c => c.Id != "execution").Concat(extra).Concat(report.Checks.Where(c => c.Id == "execution")).ToList();
-        return report with { Checks = checks, Compatibility = compatibility };
+        var knownLauncher = integrated && string.Equals(report.ProgramSha256, OneDragonContract.LauncherSha256,
+            StringComparison.OrdinalIgnoreCase);
+        if (integrated)
+        {
+            extra.Add(knownLauncher
+                ? new("od:identity", "启动器身份", CheckState.Passed, EngineErrorCategory.None,
+                    $"启动器与官方 {OneDragonContract.PinnedTag} WithRuntime-Full 发行包中的文件一致。")
+                : new("od:identity", "启动器身份", CheckState.Failed, EngineErrorCategory.IdentityMismatch,
+                    "启动器摘要与固定发行包不同，无法核对其身份。", "使用已经核对的官方完整包。"));
+            if (knownLauncher && compatibility is CompatibilityClass.UnknownVersion or CompatibilityClass.PendingValidation)
+                compatibility = CompatibilityClass.IdentityVerified;
+            else if (!knownLauncher && compatibility == CompatibilityClass.PendingValidation)
+                compatibility = CompatibilityClass.UnsafeLayout;
+
+            extra.Add(await OneDragonBootDiagnostics.CheckoutAsync(directory, ct).ConfigureAwait(false));
+            extra.Add(await OneDragonBootDiagnostics.UpdatesAsync(directory, ct).ConfigureAwait(false));
+            var catalog = await OneDragonInstanceCatalog.ReadAsync(directory, ct).ConfigureAwait(false);
+            extra.Add(OneDragonBootDiagnostics.Instances(catalog));
+        }
+
+        var checks = report.Checks.Where(c => c.Id != "execution"
+            && !(supportedPath && c.Id == "ascii-path")
+            && !(integrated && c.Id == "identity")
+            && !(knownLauncher && c.Id == "version" && report.DetectedVersion is null))
+            .Concat(extra).Concat(report.Checks.Where(c => c.Id == "execution")).ToList();
+        return report with
+        {
+            Checks = checks,
+            Compatibility = compatibility,
+            DetectedVersion = knownLauncher ? OneDragonContract.PinnedTag : report.DetectedVersion,
+        };
     }
+
+    // Keep local-drive and ASCII constraints. Allow only dots internal to a component.
+    [GeneratedRegex(@"\A[A-Za-z]:\\[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(?:\\[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*)*\\?\z")]
+    private static partial Regex SupportedInstallPath();
+
+    internal static bool IsSupportedInstallPath(string path) => SupportedInstallPath().IsMatch(path);
 }

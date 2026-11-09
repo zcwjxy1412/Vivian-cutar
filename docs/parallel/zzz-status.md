@@ -1,0 +1,50 @@
+# 绝区零 OneDragon 开发状态
+
+更新于 2026-11-09（America/New_York）。
+
+## 基线与边界
+
+- BASE_SHA 为 `c44dde18c8fbb21caba770f8799d33b880f8f843`，与 AI 和原神分支一致。远端 [#53](https://github.com/zcwjxy1412/Vivian-cutar/pull/53) 以 `feature/m5-2-auto-account-switch@3512ca4` 为 base，head 即 BASE_SHA。最新 [#52](https://github.com/zcwjxy1412/Vivian-cutar/pull/52) head `3512ca4` 和正式安装源提交 `aff9a76` 均为 BASE_SHA 祖先。原源码工作区开工时干净。该基线没有 AGENTS.md；已核对交接手册、r7 实机验收和 AI 的共同基线。
+- 工作在 `feature/m6-zzz-onedragon`。每次交付以草稿 PR 的提交列表和本页测试记录为准。
+- 正式 `E:\auto agent game\VIvian\VIvian.exe` 的 BUILD-INFO 为 `aff9a76d7fc0884c35ff3656f0433cb3adfcefd4`，星铁助手 v2026.10.31，数据目录为 `%LOCALAPPDATA%\VIvian-M5-DailyTest`（schema v6）。开发与验证使用独立工作树及测试数据。
+
+## 本机核对
+
+| 项目 | 结果 |
+| --- | --- |
+| 安装与包型 | `E:\VIvianEngines\OneDragon-v2.6.0` 有集成启动器、`.runtime`、`src`、`assets/models`。本地 WithRuntime-Full ZIP 的 SHA-256 `2fd5f6bfc6c01fcf6f21092dc6e18fa18e146d2614ca6ad130d5fc3057ba0ced` 与 GitHub Release API 摘要一致。安装中对应归档的 3,118 个文件逐项比对一致。启动器无 Authenticode 签名，PE 未提供可用的 FileVersion。 |
+| 身份与版本 | 启动器 SHA-256 `d4a8e2780eacc6754a88810d1d6b2fccdf4dd60a1e00725a12b5ebe8589158c1`。`--version` 以 0 退出并输出 v2.6.0。`--help` 以 0 退出并列出 `-o/-c/-i`。版本固定标签为 `5f2e473bbc5b100ae2ea482dd25be0277bbca87c`，许可证 GPL-3.0。 |
+| 旧路径规则 | 共享正则只允许字母、数字、下划线、连字符和分隔符，拒绝实际根目录中的点号。实包可从该目录执行上述查询。OneDragon 专属检查只放行组件内部的点号，保留英文无空格、本地盘符、入口、重解析点和结构检查。 |
+| 初始化 | 原安装没有 `.git`、`config` 或 `.log`。固定源码会在目标本地分支未建立时走首次同步，缺失 `auto_update_code` 默认启用。现有安装没有可确认的保存实例。 |
+| 权限和归属 | 检查时开发进程非管理员。固定源码中 `-o` 在管理员启动器内工作，普通权限走异步提权转发后返回 0。真实任务、提权副本归属及游戏进程清理仍待观察。帮助输出的中文按本机编码输出，不能据此假设真实任务标准流是 UTF-8。 |
+| 实例 | 固定版新实例从 1 开始分配；读取 `config/one_dragon.yml` 的 `instance_list` 作为清单。实例读取器仅返回编号和标志。未知编号、空列表或多选无法通过单实例检查，脚本实例编号不能证明游戏身份。 |
+
+[官方 v2.6.0 发行页](https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon/releases/tag/v2.6.0) · [固定源码](https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon/tree/5f2e473bbc5b100ae2ea482dd25be0277bbca87c)
+
+## 验证与公共依赖
+
+- R1（安装诊断、实例和标准流结果，提交 `c535255144c59052b0f41877ede34fc03bfa9147`）。基线 Windows M5 测试 733/733。增量以锁定 SDK 10.0.403 和锁定依赖运行 Release Windows M5，749/749 通过，跳过 0。WPF Release 构建 0 警告、0 错误。回归测试先复现标准流出错被判成功及取消被判未确认，再验证修订。完整套件含真实 Windows Job Object 的同名外部进程保留和作业内子进程终止测试，进程为模拟引擎。
+- R1 无共享代码和依赖变更。真实启动仍由公共准入负责。提交供 AI 窗口核对的最小需求为跨游戏桌面互斥和不可续跑的未清理/未恢复状态、按游戏和适配器精确放行的诊断入口，以及内部账号到上游实例的显式绑定和可单独查询的运行证据。
+- 真机下一项为隔离副本中的单实例短任务。先确认共同桌面锁和提升权限的受监管宿主，再做精确进程紧急停止演练；之后核对游戏账号、实例和仅启用一项任务的配置。聚合结束行只用于对账，游戏结果与清理需各有证据。未确认清理或恢复时本轮留在阻断状态。
+
+## R2 · 单实例任务清单与无游戏停止演练
+
+代码提交 `d8be109feb6ba820e6d70e3f020336d9049d966c`。
+
+- [草稿 PR #56](https://github.com/zcwjxy1412/Vivian-cutar/pull/56) 继续以 #53 分支为 base。任务计划入口为 `OneDragonTaskPlans.ReadAsync(root, instanceIndex)`，按 `config/{NN}/one_dragon/_group.yml` 保存顺序读取已启用任务。已核对 `engagement_reward`、`email`、`coffee`、`charge_plan` 的注册，未知启用项、重复键、缺组和旧格式均不给出可执行计划。体力子参数仍待实现验证。
+- 固定源码的 `OneDragonApp` 在「仅运行当前」模式直接采用当前实例，即使启动器已回显另一个 `-i`。读取器要求此模式下编号与唯一活动实例一致。全实例模式下显式只选一个已保存的编号。
+- 隔离副本为 `E:\\VIvianEngines-M6-Lab\\OneDragon-v2.6.0`。Git 本地分支 `m6-pin-v2.6.0` 和 HEAD 都指向 `5f2e473`。发行包内 867 个 Python 源文件与标签逐项一致（统一行尾后比较）。另一个 `version.py` 差异是官方发行构建写入 v2.6.0 的预期版本文件。副本补齐官方内嵌运行时与模型，`env.yml` 已关闭代码更新并指向该本地分支。旁路 SHA-256 清单覆盖 5,719 个源码、运行时、资源及配置文件。
+- 通过 AI 窗口提交 `fdc503e` 的共同桌面互斥进行验证。真实启动器的受监管 `--version` 返回 v2.6.0、退出码 0、作业剩余 0。第二次同参数急停演练 RunId `f712c8e5-e3c4-4e41-a83f-3d1f7a7af9d4`，作业内从 1 到 0，进程退出码 1，5 毫秒确认清理，配置摘要一致，随后清空恢复标记。此演练只覆盖启动器本身，真实 `-o` 与游戏子进程仍需相同归属验证。
+- 本机 `E:\\ZenlessZoneZero Game\\ZenlessZoneZero.exe` 已确认存在。隔离 OneDragon 尚无真实保存实例。首次任务候选是 `engagement_reward`，固定源码可识别游戏内满活跃度和领取确认，需分别记录本次新领取、已满但领取未确认及上游按旧记录跳过。
+- R2 定向 OneDragon 测试 90/90；Release Windows M5 完整单元测试 756/756，跳过 0。
+- 公共配置接口由 AI 窗口提交 `771b7fb` 提供。通过该窗口交接精确诊断准入、共同锁和账号绑定需求。当前共享 Windows 监管器将管道 IOException 归为结束，真实任务仍需结合独立游戏证据和清理；适配器已拒绝把明确报告的流错误或超时判为成功。
+
+## R3 · 短任务标准流判定
+
+代码提交 `c93097e39be49e0b7e47e85ede4db5311ecf2566`。定向 OneDragon 测试 96/96，Windows M5 单元测试 762/762，跳过 0。WPF Release 锁定依赖构建 0 警告、0 错误。
+
+- `OneDragonArguments.EngagementReward(instanceIndex)` 固定为 `-o -c -i <编号>`。后续真实诊断要求一个已核对实例、其默认组唯一启用 `engagement_reward`、源码和资源校验通过，并经过公共执行准入。实际任务来自实例配置。
+- `OneDragonRunEvidence.EngagementResult` 仅采用本次受监管输出。在固定版本启动、确认跳过更新及实例回显之后，依次核对领取确认、活跃度已满和该子任务成功返回。按已有运行记录跳过、活跃度已满但领取未确认、任务失败和互相冲突的行分别记录。一条龙的聚合结束和启动器退出码不充分。
+- 结果测试使用从固定源码核对的合成标准流，覆盖仅聚合完成、按旧记录跳过、活跃度已满、来源不符、短任务成功和失败。真机门仍关闭。安装身份核对与无游戏停止演练的证据见 R2。
+- 实际 `--help` 即便设置 `PYTHONIOENCODING=utf-8`，仍为 Windows ANSI 936，`--version` 则显式用 UTF-8。真实 `-o` 的标准流编码待确认。若实测证实编码差异，需要监管器仅为 OneDragon 指定经验证的解码选项。
+- 下一步依赖一个已核对游戏身份的保存实例和提升权限的公共诊断宿主。先固定并检查单任务配置，在共同桌面锁下验证游戏子进程归属、终态和恢复。之后再开放体力字段映射和跨账号配置，按实测补任务运行证据。

@@ -56,7 +56,7 @@ public sealed class OneDragonProcessProbe : IOneDragonProcessProbe
 /// </summary>
 public sealed class OneDragonAdapter : IGameAdapter
 {
-    public const string RuleVersionValue = "zzzod-v2.6.0-m4-r1";
+    public const string RuleVersionValue = "zzzod-v2.6.0-m6-r3";
 
     private readonly Func<string?> _installRoot;
     private readonly OneDragonTaskRequest _request;
@@ -90,9 +90,12 @@ public sealed class OneDragonAdapter : IGameAdapter
 
     public static bool ExecutionGateOpen => RealExecutionPolicy.BuildPermitsRealExecution && OneDragonContract.LaunchContractVerified;
 
-    public async Task<PreflightResult> PreflightAsync(RunContext context, CancellationToken ct)
+    public Task<PreflightResult> PreflightAsync(RunContext context, CancellationToken ct) =>
+        CheckAdmissionAsync(_installRoot(), ct);
+
+    private async Task<PreflightResult> CheckAdmissionAsync(string? root, CancellationToken ct)
     {
-        var report = await _inspect(_installRoot(), ct).ConfigureAwait(false);
+        var report = await _inspect(root, ct).ConfigureAwait(false);
         if (report.Compatibility is not (CompatibilityClass.PendingValidation or CompatibilityClass.IdentityVerified)
             || report.ProgramPath is null)
         {
@@ -108,24 +111,39 @@ public sealed class OneDragonAdapter : IGameAdapter
         if (_probe.CountRunning(report.ProgramPath) > 0)
             return PreflightResult.Block(ReasonCodes.ForeignProcess,
                 "发现已在运行的 OneDragon 启动器（可能来自用户或之前的运行）。VIvian 不会关闭它，已停止队列。");
+        if (report.Checks.FirstOrDefault(c => c.State == CheckState.Failed) is { } prerequisite)
+            return PreflightResult.Block(ReasonCodes.PreflightError, prerequisite.Message, blocksQueue: false);
         if (!ExecutionGateOpen)
             return PreflightResult.Block(ReasonCodes.RealAdapterUnverified,
                 $"OneDragon {OneDragonContract.PinnedTag} 的启动、进程归属、代码自动更新与完成证据尚未在 Windows 桌面验证，真实执行保持关闭。", blocksQueue: false);
+        if (report.Checks.FirstOrDefault(c => c.Id == "od:checkout")?.State != CheckState.Passed)
+            return PreflightResult.Block(ReasonCodes.PreflightError, "尚未确认 OneDragon 的固定源码和资源。", blocksQueue: false);
+        if (!_request.EngagementRewardOnly || _request.Instances.Count != 1)
+            return PreflightResult.Block(ReasonCodes.NotConfigured, "首轮只允许单实例活跃度奖励诊断。", blocksQueue: false);
+
+        var plan = await OneDragonTaskPlans.ReadAsync(directory, _request.Instances[0], ct).ConfigureAwait(false);
+        if (plan.Status != OneDragonTaskPlanStatus.Available || plan.Tasks.Count != 1 || plan.Tasks[0].Id != "engagement_reward")
+            return PreflightResult.Block(ReasonCodes.NotConfigured, "请选择已核对且只启用活跃度奖励的 OneDragon 脚本实例。", blocksQueue: false);
         return PreflightResult.Ok();
     }
 
-    public Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+    public async Task<IEngineRun> StartAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
     {
         if (!ExecutionGateOpen)
             throw new EngineStartException(ReasonCodes.RealAdapterUnverified, nothingStarted: true,
                 $"OneDragon {OneDragonContract.PinnedTag} 的真实执行尚未开放，未启动任何进程。");
-        return LaunchAsync(context, supervisor, ct);
+        var root = _installRoot();
+        var admission = await CheckAdmissionAsync(root, ct).ConfigureAwait(false);
+        if (!admission.CanStart)
+            throw new EngineStartException(admission.ReasonCode!, nothingStarted: true, admission.Detail!);
+        return await LaunchAsync(context, supervisor, ct, root).ConfigureAwait(false);
     }
 
-    internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+    internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct,
+        string? admittedRoot = null)
     {
         ArgumentNullException.ThrowIfNull(supervisor);
-        var root = _installRoot();
+        var root = admittedRoot ?? _installRoot();
         if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root.Trim().Trim('"')))
             throw new EngineStartException(ReasonCodes.NotConfigured, nothingStarted: true, "未配置 OneDragon 安装目录。");
         var directory = Path.GetFullPath(root.Trim().Trim('"'));

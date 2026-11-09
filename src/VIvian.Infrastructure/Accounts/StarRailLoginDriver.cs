@@ -418,7 +418,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         var region = view.Panel is null ? null
             : new ScreenRegion(view.Panel.X - 8, view.Panel.Y - 8, view.Panel.Width + 16, view.Panel.Height + 16);
         return (LoginStateClassifier.Classify(lines, view.Panel is not null, region,
-            view.Frame is not null && LoginRetentionDetector.IsSelected(view.Frame, lines)), view);
+            view.Frame is not null && LoginRetentionDetector.IsSelected(view.Frame, lines, region)), view);
     }
 
     /// <summary>Local-only screenshot of the frame that stopped the flow, so the screen can be inspected later.</summary>
@@ -433,7 +433,8 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     {
         var click = await _input.ClickAsync(window, (int)Math.Round(x), (int)Math.Round(y), cancellationToken)
             .ConfigureAwait(false);
-        if (!click.Ok) _log?.Invoke("click failed: " + click.Error);
+        _log?.Invoke($"click {(click.Ok ? "accepted" : "failed")} client=({x:0},{y:0}) pid={window.ProcessId}"
+            + (click.Ok ? "" : ": " + click.Error));
         return click.Ok;
     }
 

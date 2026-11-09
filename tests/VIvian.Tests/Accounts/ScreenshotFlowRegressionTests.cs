@@ -53,6 +53,35 @@ public sealed class ScreenshotFlowRegressionTests
         Assert.Equal("退出并保留登录记录", new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Target?.Text);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Screenshot4IgnoresBackgroundExitEvenWhenCancelOcrIsMissing(bool readCancel)
+    {
+        var exit = T("退出", 1090, 725, 45);
+        var lines = new List<RecognizedText>
+        {
+            T("退出登录", 960, 450), T("退出并清除登录记录", 900, 520),
+            T("退出并保留登录记录", 900, 615), exit, T("退出", 1830, 450, 45),
+        };
+        if (readCancel) lines.Add(T("取消", 810, 725, 45));
+        var o = LoginStateClassifier.Classify(lines, true, new ScreenRegion(632, 377, 666, 410),
+            preserveLoginSelected: true);
+
+        Assert.Equal(exit, new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Target);
+    }
+
+    [Fact]
+    public void VerifiedRetentionWithOnlyBackgroundExitWaitsWithoutReclickingRetention()
+    {
+        var o = LoginStateClassifier.Classify([T("退出登录", 960, 450), T("退出并清除登录记录", 900, 520),
+            T("退出并保留登录记录", 900, 615), T("取消", 810, 725), T("退出", 1830, 450, 45)],
+            true, new ScreenRegion(632, 377, 666, 410), preserveLoginSelected: true);
+
+        Assert.Equal(LoginScreenState.LogoutConfirm, o.State);
+        Assert.Equal(LoginActionKind.Wait, new LoginFlowSession(LoginGoal.AccountSelectable).Decide(o).Kind);
+    }
+
     [Fact]
     public void Screenshot8WelcomeBannerIsTitleNotLoginCard()
     {

@@ -5,9 +5,10 @@ namespace VIvian.Infrastructure.Accounts;
 /// <summary>Checks the gold selected radio marker beside the OCR-located retention option (reference frame 4).</summary>
 public static class LoginRetentionDetector
 {
-    public static bool IsSelected(CapturedFrame frame, IReadOnlyList<RecognizedText> lines)
+    public static bool IsSelected(CapturedFrame frame, IReadOnlyList<RecognizedText> lines, ScreenRegion? panel = null)
     {
-        var label = LoginStateClassifier.FindExact(lines, "退出并保留登录记录");
+        var modal = panel is { } region ? lines.Where(l => region.Contains(l.CenterX, l.CenterY)).ToArray() : lines;
+        var label = LoginStateClassifier.FindExact(modal, "退出并保留登录记录");
         if (label is null || label.Height < 5) return false;
         var left = Math.Max(0, (int)(label.X - label.Height * 1.8));
         var right = Math.Min(frame.Width, (int)label.X);

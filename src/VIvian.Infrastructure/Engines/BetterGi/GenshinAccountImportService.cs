@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using VIvian.Core.Accounts;
 using VIvian.Infrastructure.Accounts;
 
@@ -40,20 +41,75 @@ public sealed class GenshinAccountImportService(LocalDatabase database)
     {
         ct.ThrowIfCancellationRequested();
         var screen = AnalyzeImport(width, height, lines);
-        if (screen.State != GenshinLoginScreenState.SavedAccountCard || screen.Account is not { } account)
-            return new(false, screen.State == GenshinLoginScreenState.NeedsUser
-                ? "请先在游戏中完成登录验证，再导入显示脱敏账号的照片。"
-                : "未识别出唯一的原神脱敏账号，请使用显示完整账号卡片的登录照片。");
+        if (screen.State == GenshinLoginScreenState.NeedsUser)
+            return new(false, "请先在游戏中完成登录验证，再导入显示脱敏账号的截图。");
 
-        var (saved, created) = await database.RegisterGenshinPhotoAccountAsync(account, accountId, ct).ConfigureAwait(false);
+        var accounts = screen.Account is { } account ? [account] : AnalyzeExpandedList(width, height, lines);
+        if (accounts.Count == 0)
+            return new(false, "未能核对原神脱敏账号，请使用清晰的账号卡片或完整的保存账号列表。");
+        if (accountId.HasValue && accounts.Count != 1)
+            return new(false, "绑定已有档案时，请收起列表并截取要绑定的单个账号卡片。");
+
+        var registered = await database.RegisterGenshinPhotoAccountsAsync(accounts, accountId, ct).ConfigureAwait(false);
+        var saved = registered.FirstOrDefault().Account;
         if (accountId.HasValue)
             return saved is null
                 ? new(false, "无法绑定所选档案。请确认它是已启用的独立原神档案，且双方的登录标识没有冲突。")
                 : new(true, "已核对所选原神档案的登录绑定，原有任务和设置已保留。", saved);
-        return saved is null
-            ? new(false, "无法唯一确定已登记的原神账号，请检查档案。")
-            : new(true, created ? "已新建原神档案。已有手工档案在绑定同一脱敏登录标识后才会复用。" : "此原神账号已登记，已返回现有档案。", saved, created);
+        if (saved is null) return new(false, "无法唯一确定已登记的原神账号，请检查档案。");
+        var created = registered.Count(row => row.Created);
+        return new(true, registered.Count > 1
+            ? $"已识别 {registered.Count} 个原神账号，新建 {created} 个，复用 {registered.Count - created} 个。"
+            : created == 1 ? "已新建原神档案。" : "此原神账号已登记，已返回现有档案。", saved, created > 0);
     }
+
+    private static IReadOnlyList<LoginAccountObservation> AnalyzeExpandedList(int width, int height,
+        IReadOnlyList<RecognizedText> lines)
+    {
+        var compact = lines.Select(line => line with { Text = Compact(line.Text) }).ToArray();
+        if (compact.Any(line => !GenshinLoginScreen.WithinFrame(line, width, height) ||
+                line.Text == "进入游戏" || GenshinLoginScreen.IsBlockingOverlay(line.Text)))
+            return [];
+
+        var footer = FindUnique(compact.Where(line => line.Text == "登录其他账号"));
+        if (footer is null || Math.Abs(footer.CenterX - width / 2d) > width * .12) return [];
+        var brand = FindUnique(compact.Where(line =>
+            (line.Text.Equals("miHoYo", StringComparison.OrdinalIgnoreCase) ||
+             line.Text.Equals("HO", StringComparison.OrdinalIgnoreCase)) &&
+            Math.Abs(line.CenterX - footer.CenterX) <= footer.Width * .6 &&
+            (footer.CenterY - line.CenterY) / footer.Height is >= 11 and <= 28));
+        if (brand is null) return [];
+
+        var rows = compact.Where(line => line.Y > brand.Bottom && line.Bottom < footer.Y &&
+            (line.CenterX - footer.CenterX) / footer.Width is >= -2.5 and <= -.25 &&
+            (line.Text.Any(c => c is '*' or '＊' or '•' or '·') ||
+             line.Text.Take(3).Count(char.IsDigit) == 3)).OrderBy(line => line.Y).ToArray();
+        if (rows.Length < 2) return [];
+        var header = rows[0];
+        var headerPosition = (header.CenterY - brand.CenterY) / (footer.CenterY - brand.CenterY);
+        var masks = rows.Select(line => GenshinLoginScreen.NormalizeExactMask(line.Text)).ToArray();
+        if (headerPosition is < .17 or > .39 || masks.Any(string.IsNullOrEmpty) ||
+            !masks.Skip(1).Contains(masks[0]) || masks.Skip(1).Distinct(StringComparer.Ordinal).Count() != rows.Length - 1)
+            return [];
+
+        var accounts = new List<LoginAccountObservation>(rows.Length - 1);
+        // The selected header is repeated in the list. Only saved rows have a last-used caption.
+        for (var i = 1; i < rows.Length; i++)
+        {
+            var row = rows[i];
+            var next = i + 1 < rows.Length ? rows[i + 1] : footer;
+            if (row.Y <= rows[i - 1].Bottom || Math.Abs(row.X - header.X) > header.Width * .3 ||
+                !compact.Any(line => line.Y >= row.Bottom && line.Bottom < next.Y &&
+                    Math.Abs(line.X - row.X) <= row.Width * .55 && IsLastUsed(line.Text)))
+                return [];
+            accounts.Add(new(row.Text, masks[i], i - 1, row.X, row.Y, row.Width, row.Height, .9, ""));
+        }
+        return accounts;
+    }
+
+    private static bool IsLastUsed(string text) => text is "刚刚" or "昨天" ||
+        Regex.IsMatch(MaskedPhoneParser.ToAsciiDigits(text), @"\A[0-9]{1,3}(?:秒|分钟|小时|天|周|个月|年)前\z",
+            RegexOptions.CultureInvariant);
 
     private static GenshinLoginScreen AnalyzeImport(int width, int height, IReadOnlyList<RecognizedText> lines)
     {

@@ -100,12 +100,14 @@ public sealed class M5StopAndCleanupTests : IDisposable
     }
 
     [Fact]
-    public void ActiveRunIsAdoptedOnlyForThisTaskAndStartedAfterUs()
+    public void ActiveRunIsAdoptedOnlyForThisTaskAndExactProcess()
     {
         Active(RunId);
-        Assert.Equal(RunId, March7thUpstreamActivity.ActiveRunStartedSince(_root, "routine", DateTimeOffset.Now.AddMinutes(-1)));
-        Assert.Null(March7thUpstreamActivity.ActiveRunStartedSince(_root, "routine", DateTimeOffset.Now.AddMinutes(1)));
-        Assert.Null(March7thUpstreamActivity.ActiveRunStartedSince(_root, "daily", DateTimeOffset.Now.AddMinutes(-1)));
+        var created = DateTimeOffset.FromUnixTimeMilliseconds((long)(Created * 1000));
+        Assert.Equal(RunId, March7thUpstreamActivity.ActiveRunOwnedBy(_root, "routine", 4242, created));
+        Assert.Null(March7thUpstreamActivity.ActiveRunOwnedBy(_root, "routine", 4242, created.AddMinutes(1)));
+        Assert.Null(March7thUpstreamActivity.ActiveRunOwnedBy(_root, "routine", 4243, created));
+        Assert.Null(March7thUpstreamActivity.ActiveRunOwnedBy(_root, "daily", 4242, created));
     }
 
     [Fact]
@@ -115,7 +117,6 @@ public sealed class M5StopAndCleanupTests : IDisposable
         var supervisor = new CountingSupervisor();
         var run = new March7thRun(Guid.NewGuid(), group, supervisor, Path.Combine(_root, "m7a.exe"), _root, "routine");
         Record(RunId, "running");
-        Active(RunId);
         March7thUpstreamActivity.Observe = _ => (true, Created);
         // The worker: acknowledges as soon as the stop command appears, as upstream's pause controller does.
         var worker = Task.Run(async () =>
@@ -219,8 +220,8 @@ public sealed class M5StopAndCleanupTests : IDisposable
         private readonly TaskCompletionSource<int> _exit = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Exit() { _lines.Writer.TryComplete(); _exit.TrySetResult(0); }
         public Guid RunId { get; } = Guid.NewGuid();
-        public int RootProcessId => 1;
-        public DateTimeOffset RootStartTime => DateTimeOffset.UtcNow;
+        public int RootProcessId => 4242;
+        public DateTimeOffset RootStartTime => DateTimeOffset.FromUnixTimeMilliseconds((long)(Created * 1000));
         public int ActiveProcessCount => 0;
         public bool OwnsProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle process) => false;
         public IAsyncEnumerable<string> OutputLines => _lines.Reader.ReadAllAsync();

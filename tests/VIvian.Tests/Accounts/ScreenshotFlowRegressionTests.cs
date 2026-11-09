@@ -117,6 +117,18 @@ public sealed class ScreenshotFlowRegressionTests
     }
 
     [Fact]
+    public void LiveSecondAccountHudConfirmsWorldWithoutReadingTheUid()
+    {
+        var effects = T("状 态 效 果 U", 1800, 240, 110);
+        var chat = T("寰 ？ Enter", 88, 970, 95);
+        Assert.Equal(LoginScreenState.InGame, LoginStateClassifier.Classify([effects, chat]).State);
+        Assert.Equal(LoginScreenState.Unknown, LoginStateClassifier.Classify([effects]).State);
+        Assert.Equal(LoginScreenState.Unknown, LoginStateClassifier.Classify([chat]).State);
+        Assert.Equal(LoginScreenState.AuthChallenge,
+            LoginStateClassifier.Classify([effects, chat, T("请完成安全验证", 960, 520)]).State);
+    }
+
+    [Fact]
     public void DuplicateMaskedIdentitiesCannotBeResolvedByHistoricalRowOrder()
     {
         var rows = MaskedPhoneParser.FindAll([T("153******57", 900, 500), T("153******57", 900, 600)]);

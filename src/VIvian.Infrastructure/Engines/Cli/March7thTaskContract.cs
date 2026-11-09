@@ -39,22 +39,26 @@ public static partial class March7thTaskContract
     {
         var last = output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
             .Select(x => x.Trim()).LastOrDefault(x => x.StartsWith('{'));
-        if (last is null || rootProcessId <= 0) return null;
+        if (last is null) return null;
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(last, new System.Text.Json.JsonDocumentOptions { MaxDepth = 16 });
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
-            if (!root.TryGetProperty("run_id", out var idValue) || idValue.ValueKind != System.Text.Json.JsonValueKind.String) return null;
-            var id = idValue.GetString();
-            if (!IsRunId(id)) return null;
-            if (!root.TryGetProperty("task", out var t) || t.ValueKind != System.Text.Json.JsonValueKind.String || t.GetString() != task) return null;
-            if (!root.TryGetProperty("pid", out var pidValue) || !pidValue.TryGetInt32(out var pid) || pid != rootProcessId) return null;
-            if (!root.TryGetProperty("pid_create_time", out var created) || !created.TryGetDouble(out var seconds) || !double.IsFinite(seconds)) return null;
-            var rootSeconds = rootStartTime.ToUnixTimeMilliseconds() / 1000.0;
-            return Math.Abs(seconds - rootSeconds) <= 1.0 ? id : null;
+            using var doc = JsonDocument.Parse(last, new JsonDocumentOptions { MaxDepth = 16 });
+            return MatchRootRun(doc.RootElement, task, rootProcessId, rootStartTime);
         }
-        catch (System.Text.Json.JsonException) { return null; }
+        catch (JsonException) { return null; }
+    }
+
+    internal static string? MatchRootRun(JsonElement root, string task, int rootProcessId, DateTimeOffset rootStartTime)
+    {
+        if (rootProcessId <= 0 || root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("run_id", out var id) || id.ValueKind != JsonValueKind.String || !IsRunId(id.GetString()) ||
+            !root.TryGetProperty("task", out var t) || t.ValueKind != JsonValueKind.String || t.GetString() != task ||
+            !root.TryGetProperty("pid", out var pidValue) || pidValue.ValueKind != JsonValueKind.Number ||
+            !pidValue.TryGetInt32(out var pid) || pid != rootProcessId ||
+            !root.TryGetProperty("pid_create_time", out var created) || created.ValueKind != JsonValueKind.Number ||
+            !created.TryGetDouble(out var seconds) || !double.IsFinite(seconds)) return null;
+        var rootSeconds = rootStartTime.ToUnixTimeMilliseconds() / 1000.0;
+        return Math.Abs(seconds - rootSeconds) <= 1.0 ? id.GetString() : null;
     }
 
     public static IReadOnlyList<string> StartArguments(string task)

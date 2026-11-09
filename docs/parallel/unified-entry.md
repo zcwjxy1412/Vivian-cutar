@@ -10,7 +10,7 @@
 
 保留「游戏管理 → 原神」的账号选择和一套任务字段。安装目录来自主程序已保存并核验的原神引擎设置，连接后自动解析所选账号的一条龙档案。缺少档案时显示「连接 BetterGI」，从该账号已保存的计划生成。已有可验证的旧绑定可读回，默认档案不参与自动认领。目录不可用时在同页显示原因，并链接到「引擎与环境」处理。
 
-原神模块提供以下接口，主程序接入时以实际合流签名为准。
+以下接口随原神提交 `b92ba6e` 合流，已接入同一任务页。没有指定账号时优先选择已识别且启用的原神账号。路径后补时自动核对当前账号。任务顺序只读显示，安装级共享树脂预算继续只读。登录验收从 `a94a979` 的接口读取 BetterGI 保存的国服客户端路径，缺少有效值时可手选。
 
 ```csharp
 Task<BetterGiSourceSettings?> FindAccountProfileAsync(
@@ -24,7 +24,7 @@ Task<BetterGiSourceSettings> ConnectAccountProfileAsync(
 
 连接后，一条龙档案提供已映射字段的当前值，VIvian 账号设置提供其余字段和该账号的资源预算。BetterGI 安装级树脂设置只读。档案编辑需要能表示已关闭的受支持任务，执行渲染仍仅纳入已启用且通过准入的任务。外部修改读回同一页，覆盖草稿前检查源 revision。底层按归属分别提交和回读，失败的编辑保留在草稿中。只使用已读回的配置生成有效计划。
 
-共享层继续使用 `AccountConfigurationTarget(GameId.Genshin, accountId)` 与 `IAccountConfigurationProvider`。统一调度接收冻结后的有效计划及账号、SQLite 设置 revision、源档案身份和 revision。入队和启动前核对同一账号与版本，变更或恢复未确认时阻断。原神模块负责生成和定位档案、映射参数、验证并渲染执行配置。共享层负责 WPF、合并数据、统一调度、停止及恢复门控。实机和树脂操作暂停。
+共享层继续使用 `AccountConfigurationTarget(GameId.Genshin, accountId)` 与 `IAccountConfigurationProvider`。后续统一调度接收冻结后的有效计划及账号、SQLite 设置 revision、源档案身份和 revision。入队和启动前核对同一账号与版本，变更或恢复未确认时阻断。原神模块负责生成和定位档案、映射参数、验证并渲染执行配置。共享层负责 WPF、合并数据、统一调度、停止及恢复门控。实机和树脂操作暂停。
 
 ## 数据合并与安装切换
 

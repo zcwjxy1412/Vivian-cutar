@@ -115,11 +115,13 @@ public partial class MainWindow : Window
             vm.GenshinConfiguration.Source.SetVisible(e.NewValue is true);
     }
 
-    private void BrowseBetterGiSource(object sender, RoutedEventArgs e)
+    private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem =
+        Navigation.Items.OfType<System.Windows.Controls.TabItem>().First(item => Equals(item.Header, "引擎与环境"));
+
+    private async void GenshinLoginVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm) return;
-        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择 BetterGI 安装目录", Multiselect = false };
-        if (dialog.ShowDialog(this) == true) vm.GenshinConfiguration.Source.InstallRoot = dialog.FolderName;
+        if (e.NewValue is true && DataContext is MainViewModel vm)
+            await vm.GenshinConfiguration.DiscoverGameExecutableAsync();
     }
 
     private void BrowseGenshinExecutable(object sender, RoutedEventArgs e)

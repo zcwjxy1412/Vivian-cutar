@@ -11,6 +11,7 @@ using VIvian.Infrastructure.Simulation;
 using VIvian.Infrastructure.Processes;
 using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Accounts;
+using VIvian.Infrastructure.Engines.BetterGi;
 
 namespace VIvian.App;
 
@@ -173,6 +174,11 @@ public partial class App : Application
             }).Build();
             await _host.StartAsync();
             await Task.Run(() => database.InitializeAsync());
+            if (_smoke)
+            {
+                var recognized = await database.AddAccountAsync(GameId.Genshin, "原神识别样例", "", null);
+                await database.SaveLoginProfileAsync(recognized.Id, "130******00", "130****00", 0, .9, null, "测试数据");
+            }
             await Task.Run(() => database.ReconcileInterruptedBatchesAsync());
             // Log retention follows the user's preference; only VIvian's own log files are considered.
             var prefs = await Task.Run(() => database.LoadPreferencesAsync());
@@ -453,30 +459,66 @@ public partial class App : Application
         main.GameTabs.SelectedIndex = 1;
         window.UpdateLayout();
         var genshin = vm.GenshinConfiguration;
+        if (genshin.SelectedAccount is not { Enabled: true, LoginState: "recognized" })
+            throw new InvalidOperationException("The first selected Genshin account must be the enabled recognized fixture");
+        var sections = main.GenshinSettingsTabs.Items.OfType<System.Windows.Controls.TabItem>()
+            .Select(item => item.Header as string);
+        if (!sections.SequenceEqual(new[] { "任务设置", "登录验收" }))
+            throw new InvalidOperationException("Genshin settings must have one task editor and a separate login check");
         if (main.SaveGenshinPlanButton.Command != genshin.SaveCommand)
             throw new InvalidOperationException("Genshin plan editor is not bound");
-        var legacy = genshin.SelectedAccount ?? throw new InvalidOperationException("Missing Genshin account");
+        var recognized = genshin.SelectedAccount;
         genshin.NewAccountName = "原神冒烟档案";
         await genshin.AddAccountAsync();
         var added = genshin.SelectedAccount ?? throw new InvalidOperationException("Genshin account creation failed");
-        if (added.Id == legacy.Id || genshin.Parameters.Any(p => p.IsBoolean && p.BoolValue))
+        if (added.Id == recognized.Id || genshin.Parameters.Any(p => p.IsBoolean && p.BoolValue))
             throw new InvalidOperationException("New Genshin profile is not isolated or tasks default to on");
         genshin.Parameters.Single(p => p.Path == "dailyRewards").BoolValue = true;
         await genshin.SaveAsync();
         var saved = await database.LoadAccountSettingsAsync(added.Id);
-        var untouched = await database.LoadAccountSettingsAsync(legacy.Id);
+        var untouched = await database.LoadAccountSettingsAsync(recognized.Id);
         if (saved.Values.GetValueOrDefault("dailyRewards") != "true" || untouched.Values.Count != 0
             || (await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
             throw new InvalidOperationException("Genshin plan save did not isolate Genshin and Star Rail accounts");
-        main.GenshinSettingsTabs.SelectedIndex = 1;
         window.UpdateLayout();
-        if (main.SaveBetterGiButton.Command != genshin.Source.SaveCommand ||
+        if (main.ConnectBetterGiButton.Command != genshin.ConnectSourceCommand ||
             main.OpenBetterGiButton.Command != genshin.Source.OpenCommand ||
-            main.SaveBetterGiButton.IsEnabled || main.OpenBetterGiButton.IsEnabled)
-            throw new InvalidOperationException("BetterGI source editor is unbound or allows opening and saving without a profile");
+            main.ConnectBetterGiButton.IsEnabled || main.OpenBetterGiButton.IsEnabled ||
+            main.GenshinPlanFields.Items.Count != genshin.Parameters.Count)
+            throw new InvalidOperationException("Unified Genshin editor failed to bind or enabled BetterGI without a verified installation");
+        using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(7)))
+        {
+            while (!genshin.Source.Status.Contains("保存 BetterGI 安装目录", StringComparison.Ordinal))
+                await Task.Delay(25, deadline.Token);
+            var card = vm.Engines.Single(e => e.Id == GameId.Genshin);
+            var oldPath = card.SavedInstallPath;
+            try
+            {
+                card.SavedInstallPath = card.InstallPath;
+                while (!genshin.Source.Status.Contains(BetterGiContract.PinnedTag, StringComparison.Ordinal))
+                    await Task.Delay(25, deadline.Token);
+                if (main.ConnectBetterGiButton.IsEnabled)
+                    throw new InvalidOperationException("The unverified BetterGI fixture can create an account profile");
+            }
+            finally { card.SavedInstallPath = oldPath; }
+            var finishSourceWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var sourceWrite = vm.SerializeGenshinSourceWriteAsync(() => finishSourceWrite.Task);
+            try
+            {
+                vm.SaveCommand.Execute(null);
+                var storedPath = (await database.LoadSettingsAsync()).Single(setting => setting.Game == GameId.Genshin).InstallPath;
+                if (storedPath != oldPath || card.SavedInstallPath != oldPath)
+                    throw new InvalidOperationException("Saving engine settings changed the root during a Genshin source write");
+            }
+            finally
+            {
+                finishSourceWrite.SetResult();
+                await sourceWrite;
+            }
+        }
         if (RealExecutionPolicy.IsM5DailyTest)
         {
-            main.GenshinSettingsTabs.SelectedIndex = 2;
+            main.GenshinSettingsTabs.SelectedIndex = 1;
             window.UpdateLayout();
             if (main.VerifyGenshinLoginButton.Command != genshin.VerifyLoginCommand)
                 throw new InvalidOperationException("The isolated Genshin login verification is not bound");
@@ -488,7 +530,8 @@ public partial class App : Application
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
-        return "three game account tabs isolated; Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
+        return "three game account tabs isolated; unified Genshin editor picked the recognized account and checked late BetterGI discovery; " +
+            "Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
     }
 
     private static void CaptureAccountScreens(MainWindow window, int accounts, int games, string root)
@@ -505,7 +548,7 @@ public partial class App : Application
             SaveScreen(window, root, "accounts-genshin-1024x768.png");
             window.Navigation.SelectedIndex = games;
             window.GameTabs.SelectedIndex = 1;
-            window.GenshinSettingsTabs.SelectedIndex = 1;
+            window.GenshinSettingsTabs.SelectedIndex = 0;
             SaveScreen(window, root, "settings-bettergi-1024x768.png");
         }
         finally

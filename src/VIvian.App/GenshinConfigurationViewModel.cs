@@ -29,11 +29,12 @@ public sealed class GenshinConfigurationViewModel
     private string _status = "请选择原神档案，编辑本机任务计划。";
     private string _loginStatus = "请选择已从截图建档的账号，然后指定原神国服程序。";
     private string _gameExecutable = "";
+    private bool _gameExecutableAuto;
     private GameAccount? _secondLoginAccount;
     private bool _busy;
 
     public GenshinConfigurationViewModel(LocalDatabase database, IAccountConfigurationProvider provider, Func<bool> hostIdle,
-        string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot)
+        string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot, Func<Func<Task>, Task> serializeSourceWrite)
     {
         _database = database;
         _provider = provider;
@@ -42,13 +43,20 @@ public sealed class GenshinConfigurationViewModel
         _betterGiRoot = betterGiRoot;
         _profileDirectory = profileDirectory;
         _import = new(database);
-        Source = new(profileDirectory, desktopIdle);
+        Source = new(profileDirectory, desktopIdle, () => IsIdle && !Parameters.Any(row => row.IsChanged), betterGiRoot,
+            serializeSourceWrite);
         Source.FieldsChanged += () => Raise(nameof(VisiblePlanParameters));
-        ReloadCommand = new(LoadAsync, ReportError);
+        Source.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(Source.IsIdle)) Raise(nameof(CanEdit));
+            if (e.PropertyName == nameof(Source.CanConnect)) Raise(nameof(CanConnect));
+        };
+        ReloadCommand = new(ReloadConfigurationAsync, ReportError);
         AddAccountCommand = new(AddAccountAsync, ReportError);
         ImportCommand = new(() => ChooseScreenshotAsync(bindExisting: false), ReportError);
         BindLoginScreenshotCommand = new(() => ChooseScreenshotAsync(bindExisting: true), ReportError);
         SaveCommand = new(SaveAsync, ReportError);
+        ConnectSourceCommand = new(ConnectSourceAsync, ReportError);
         VerifyLoginCommand = new(VerifyLoginAsync, ex => LoginStatus = UserFacingError.Describe(ex));
         CancelLoginCommand = new(_ => _verification?.Cancel());
         ClearSecondLoginAccountCommand = new(_ => SecondLoginAccount = null);
@@ -56,12 +64,14 @@ public sealed class GenshinConfigurationViewModel
 
     public ObservableCollection<GameAccount> Accounts { get; } = [];
     public ObservableCollection<ParameterRow> Parameters { get; } = [];
-    public IEnumerable<ParameterRow> VisiblePlanParameters => Parameters.Where(row => !Source.Manages(row.Path));
+    public IEnumerable<ParameterRow> VisiblePlanParameters => Parameters.Select(row =>
+        Source.ProfileRows.FirstOrDefault(source => source.Path == row.Path) ?? row);
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand AddAccountCommand { get; }
     public AsyncCommand ImportCommand { get; }
     public AsyncCommand BindLoginScreenshotCommand { get; }
     public AsyncCommand SaveCommand { get; }
+    public AsyncCommand ConnectSourceCommand { get; }
     public GenshinSourceConfigurationViewModel Source { get; }
     public AsyncCommand VerifyLoginCommand { get; }
     public RelayCommand<object> CancelLoginCommand { get; }
@@ -69,7 +79,11 @@ public sealed class GenshinConfigurationViewModel
     public bool IsLoginVerificationAvailable => RealExecutionPolicy.IsM5DailyTest;
     public bool IsVerifyingLogin => _verification is not null;
     public string LoginStatus { get => _loginStatus; private set => Set(ref _loginStatus, value); }
-    public string GameExecutable { get => _gameExecutable; set => Set(ref _gameExecutable, value); }
+    public string GameExecutable
+    {
+        get => _gameExecutable;
+        set { _gameExecutableAuto = false; Set(ref _gameExecutable, value); }
+    }
     public GameAccount? SecondLoginAccount { get => _secondLoginAccount; set => Set(ref _secondLoginAccount, value); }
 
     public GameAccount? SelectedAccount
@@ -91,7 +105,8 @@ public sealed class GenshinConfigurationViewModel
     public string Status { get => _status; private set => Set(ref _status, value); }
     public bool IsIdle => !_busy && !IsVerifyingLogin;
     public bool CanBindLoginScreenshot => IsIdle && SelectedAccount is { Enabled: true, LoginState: not "recognized" };
-    public bool CanEdit => IsIdle && _snapshot is { WriteUnavailableReason: null };
+    public bool CanEdit => IsIdle && Source.IsIdle && _snapshot is { WriteUnavailableReason: null };
+    public bool CanConnect => CanEdit && Source.CanConnect;
 
     internal void Close()
     {
@@ -99,7 +114,61 @@ public sealed class GenshinConfigurationViewModel
         _close.Cancel();
     }
 
+    internal async Task DiscoverGameExecutableAsync()
+    {
+        var root = _betterGiRoot();
+        var previous = GameExecutable;
+        var wasAuto = _gameExecutableAuto;
+        if (previous.Length > 0 && !wasAuto) return;
+        if (root.Length == 0)
+        {
+            if (wasAuto) GameExecutable = "";
+            return;
+        }
+        try
+        {
+            var executable = await BetterGiConfiguration.FindClientExecutableAsync(root, _close.Token);
+            if (_close.IsCancellationRequested || previous != GameExecutable || wasAuto != _gameExecutableAuto ||
+                root != _betterGiRoot()) return;
+            _gameExecutableAuto = executable is not null;
+            Set(ref _gameExecutable, executable ?? "", nameof(GameExecutable));
+        }
+        catch (OperationCanceledException) when (_close.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or InvalidDataException
+            or IOException or UnauthorizedAccessException or TimeoutException or System.Text.Json.JsonException)
+        {
+            if (previous != GameExecutable || wasAuto != _gameExecutableAuto || root != _betterGiRoot()) return;
+            if (wasAuto) GameExecutable = "";
+            LoginStatus = "暂时无法读取 BetterGI 保存的国服客户端路径，可以手动选择。";
+        }
+    }
+
     internal Task LoadAsync() => ConfirmDiscard(includeSource: false) ? RunAsync(() => LoadAccountsAsync(SelectedAccount?.Id)) : Task.CompletedTask;
+
+    private Task ReloadConfigurationAsync() => ConfirmDiscard() ? RunAsync(async () =>
+    {
+        await LoadAccountsAsync(SelectedAccount?.Id);
+        await Source.ReloadAsync();
+    }) : Task.CompletedTask;
+
+    private Task ConnectSourceAsync()
+    {
+        if (!CanConnect || !_desktopIdle()) return Task.CompletedTask;
+        return RunAsync(async () =>
+        {
+            if (Parameters.Any(row => row.IsChanged))
+            {
+                Status = "请先保存当前账号的任务设置，再连接 BetterGI。";
+                return;
+            }
+            if (_snapshot is not { } snapshot) return;
+            var current = await _provider.ReadAsync(snapshot.Target, _close.Token);
+            if (current.Revision != snapshot.Revision || current.WriteUnavailableReason is not null)
+                throw new SettingsConflictException();
+            await Source.ConnectAsync(current.Target.AccountId,
+                current.Values.ToDictionary(value => value.Schema.Path, value => value.Value!), _close.Token);
+        });
+    }
 
     internal Task AddAccountAsync() => RunAsync(async () =>
     {
@@ -156,6 +225,8 @@ public sealed class GenshinConfigurationViewModel
             LoginStatus = "登录验收需要以管理员身份打开隔离测试版。";
             return;
         }
+        await DiscoverGameExecutableAsync();
+        if (!IsIdle || !Source.IsIdle || !_desktopIdle() || _close.IsCancellationRequested) return;
         if (SelectedAccount is not { LoginState: "recognized", Enabled: true } first ||
             SecondLoginAccount is { } second && (second.Id == first.Id || !second.Enabled || second.LoginState != "recognized"))
         {
@@ -206,13 +277,28 @@ public sealed class GenshinConfigurationViewModel
         }
     }
 
-    internal Task SaveAsync() => RunAsync(async () =>
+    internal Task SaveAsync()
     {
-        if (!_hostIdle() || _snapshot is not { WriteUnavailableReason: null } snapshot) return;
-        var changes = VisiblePlanParameters.Where(row => row.IsChanged).ToDictionary(row => row.Path, row => row.Current);
-        if (changes.Count == 0) { Status = "没有需要保存的修改。"; return; }
+        if (!CanEdit || !_hostIdle()) return Task.CompletedTask;
+        return RunAsync(async () =>
+        {
+            var hasSourceDraft = Source.HasDraft;
+            if (await SaveLocalChangesAsync() && hasSourceDraft) await Source.SaveAsync();
+        });
+    }
+
+    private async Task<bool> SaveLocalChangesAsync()
+    {
+        if (!_hostIdle() || _snapshot is not { WriteUnavailableReason: null } snapshot) return false;
+        var changes = Parameters.Where(row => row.IsChanged && !Source.Manages(row.Path))
+            .ToDictionary(row => row.Path, row => row.Current);
+        if (changes.Count == 0)
+        {
+            if (!Source.HasDraft) Status = "没有需要保存的修改。";
+            return true;
+        }
         var proposal = await _provider.ProposeAsync(snapshot.Target, snapshot.Revision, changes, CancellationToken.None);
-        if (!proposal.Validation.Valid) { Status = proposal.Validation.Reason; return; }
+        if (!proposal.Validation.Valid) { Status = proposal.Validation.Reason; return false; }
         var applied = await _provider.ApplyAsync(proposal,
             () => ReferenceEquals(_snapshot, snapshot) && SelectedAccount?.Id == snapshot.Target.AccountId && _hostIdle(),
             CancellationToken.None);
@@ -223,8 +309,9 @@ public sealed class GenshinConfigurationViewModel
             Values = snapshot.Values.Select(value => saved.TryGetValue(value.Schema.Path, out var updated)
                 ? value with { Value = updated } : value).ToArray(),
         });
-        Status = $"已保存并读回核对「{snapshot.AccountName}」的原神计划。审计 {applied.AuditId:D}";
-    });
+        Status = $"已保存并读回核对「{snapshot.AccountName}」在 VIvian 中管理的字段。审计 {applied.AuditId:D}";
+        return true;
+    }
 
     private async Task LoadAccountsAsync(Guid? accountId)
     {
@@ -233,7 +320,9 @@ public sealed class GenshinConfigurationViewModel
         Accounts.Clear();
         foreach (var account in current) Accounts.Add(account);
         SecondLoginAccount = current.FirstOrDefault(a => a.Id == secondId);
-        await SelectAsync(current.FirstOrDefault(a => a.Id == accountId) ?? current.FirstOrDefault());
+        await SelectAsync(current.FirstOrDefault(a => a.Id == accountId)
+            ?? current.FirstOrDefault(a => a.Enabled && a.LoginState == "recognized")
+            ?? current.FirstOrDefault());
     }
 
     private async Task SelectAsync(GameAccount? account)
@@ -246,7 +335,7 @@ public sealed class GenshinConfigurationViewModel
         if (account is null) { Status = "请先新增原神档案。"; return; }
         var view = await _provider.ReadAsync(new(GameId.Genshin, account.Id), CancellationToken.None);
         Show(view);
-        Status = view.WriteUnavailableReason ?? $"正在编辑「{view.AccountName}」的本机任务计划。";
+        Status = view.WriteUnavailableReason ?? $"正在编辑「{view.AccountName}」的任务设置。";
     }
 
     private void Show(AccountConfigurationView? snapshot)
@@ -257,6 +346,7 @@ public sealed class GenshinConfigurationViewModel
             foreach (var value in snapshot.Values) Parameters.Add(new(value));
         Raise(nameof(VisiblePlanParameters));
         Raise(nameof(CanEdit));
+        Raise(nameof(CanConnect));
     }
 
     private async Task RunAsync(Func<Task> action)
@@ -265,6 +355,7 @@ public sealed class GenshinConfigurationViewModel
         _busy = true;
         Raise(nameof(IsIdle));
         Raise(nameof(CanEdit));
+        Raise(nameof(CanConnect));
         Raise(nameof(CanBindLoginScreenshot));
         try { await action(); }
         catch (OperationCanceledException) when (_close.IsCancellationRequested) { }
@@ -278,6 +369,7 @@ public sealed class GenshinConfigurationViewModel
             _busy = false;
             Raise(nameof(IsIdle));
             Raise(nameof(CanEdit));
+            Raise(nameof(CanConnect));
             Raise(nameof(CanBindLoginScreenshot));
         }
     }

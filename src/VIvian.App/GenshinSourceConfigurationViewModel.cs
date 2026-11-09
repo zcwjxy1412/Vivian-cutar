@@ -11,53 +11,54 @@ using VIvian.Infrastructure.Processes;
 
 namespace VIvian.App;
 
-/// <summary>Edits one existing BetterGI source profile, independently of VIvian's task plan.</summary>
+/// <summary>Resolves and edits the selected account's BetterGI fields.</summary>
 public sealed class GenshinSourceConfigurationViewModel : ObservableObject
 {
     private readonly string _bindingPath;
     private readonly Func<bool> _hostIdle;
+    private readonly Func<bool> _editorIdle;
+    private readonly Func<string> _installRoot;
+    private readonly Func<Func<Task>, Task> _serializeWrite;
     private readonly DispatcherTimer _refreshTimer = new(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(2) };
     private readonly DispatcherTimer _saveTimer = new(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(900) };
     private Guid? _accountId;
     private Guid? _restoreAttempt;
     private BetterGiSourceSettings? _binding;
     private BetterGiSourceSettingsSnapshot? _snapshot;
-    private string _installRoot = "";
-    private string _profileName = "";
+    private string _lookupRoot = "";
     private string _status = "请选择原神账号。";
+    private string _taskOrder = "";
+    private bool _canConnect;
     private bool _polling;
     private bool _busy;
     private bool _readFailed;
     private bool _conflicted;
 
-    public GenshinSourceConfigurationViewModel(string profileDirectory, Func<bool> hostIdle)
+    public GenshinSourceConfigurationViewModel(string profileDirectory, Func<bool> hostIdle, Func<bool> editorIdle,
+        Func<string> installRoot, Func<Func<Task>, Task> serializeWrite)
     {
         _bindingPath = Path.Combine(profileDirectory, "genshin-source-bindings.json");
         _hostIdle = hostIdle;
-        BindCommand = new(BindAsync, ReportError);
-        ReloadCommand = new(ReloadAsync, ReportError);
-        SaveCommand = new(SaveAsync, ReportError);
+        _editorIdle = editorIdle;
+        _installRoot = installRoot;
+        _serializeWrite = serializeWrite;
         OpenCommand = new(OpenAsync, ReportError);
         _refreshTimer.Tick += async (_, _) => await PollAsync();
         _saveTimer.Tick += async (_, _) =>
         {
             _saveTimer.Stop();
-            await SaveAsync();
+            if (_editorIdle()) await SaveAsync();
         };
     }
 
     public ObservableCollection<ParameterRow> ProfileRows { get; } = [];
     public ObservableCollection<ParameterRow> SharedRows { get; } = [];
-    public AsyncCommand BindCommand { get; }
-    public AsyncCommand ReloadCommand { get; }
-    public AsyncCommand SaveCommand { get; }
     public AsyncCommand OpenCommand { get; }
-    public string InstallRoot { get => _installRoot; set => Set(ref _installRoot, value); }
-    public string ProfileName { get => _profileName; set => Set(ref _profileName, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
-    public string BindingLabel => _binding is { } binding ? $"已绑定「{binding.ProfileName}」 · {binding.InstallRoot}" : "尚未读取已绑定档案";
-    public bool CanBind => _accountId is not null && !_busy;
-    public bool CanOpen => _binding is not null && !_busy;
+    public string TaskOrder { get => _taskOrder; private set => Set(ref _taskOrder, value); }
+    public bool CanConnect => _canConnect && !_busy && IsCurrentRoot(_lookupRoot);
+    public bool HasBinding => _binding is not null;
+    public bool CanOpen => !_busy && _binding is { } binding && IsCurrentRoot(binding.InstallRoot);
     public bool CanSave => CanOpen && !_readFailed && !_conflicted && HasDraft;
     public bool HasDraft => ProfileRows.Any(row => row.IsChanged);
     public bool IsIdle => !_busy;
@@ -72,9 +73,10 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
         _accountId = accountId;
         _restoreAttempt = null;
         _binding = null;
-        InstallRoot = ProfileName = "";
+        _canConnect = false;
+        TaskOrder = "";
         Show(null);
-        Status = accountId is null ? "请选择原神账号。" : "请选择安装目录并填写已存在的一条龙配置名称。";
+        Status = accountId is null ? "请选择原神账号。" : "等待核对账号的 BetterGI 档案。";
         UpdateAvailability();
         if (_refreshTimer.IsEnabled) _ = RestoreBindingAsync();
     }
@@ -83,65 +85,86 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
     {
         if (!visible) { _refreshTimer.Stop(); _saveTimer.Stop(); return; }
         _refreshTimer.Start();
-        if (_binding is null) _ = RestoreBindingAsync();
-        else _ = PollAsync();
+        _ = PollAsync();
     }
 
     private Task RestoreBindingAsync() => RunAsync(async () =>
     {
         if (_accountId is not { } id) return;
         _restoreAttempt = id;
-        if (!(await LoadBindingsAsync()).TryGetValue(id, out var saved) || _accountId != id) return;
-        InstallRoot = saved.InstallRoot;
-        ProfileName = saved.ProfileName;
-        await LoadBindingAsync(id, saved.InstallRoot, saved.ProfileName, persist: false);
-    });
-
-    private Task BindAsync() => RunAsync(async () =>
-    {
-        if (!_hostIdle() || _accountId is not { } id || !ConfirmDiscard()) return;
-        await LoadBindingAsync(id, InstallRoot.Trim(), ProfileName.Trim(), persist: true);
-    });
-
-    private async Task LoadBindingAsync(Guid id, string installRoot, string profileName, bool persist)
-    {
-        var binding = await BetterGiSourceSettings.BindAsync(installRoot, profileName);
-        var snapshot = await binding.ReadAsync();
-        if (_accountId != id) return;
-        if (persist)
+        var root = _lookupRoot = _installRoot();
+        _canConnect = false;
+        _readFailed = true;
+        BetterGiSourceSettings? binding = null;
+        if (root.Length > 0)
         {
-            var saved = await LoadBindingsAsync();
-            if (_accountId != id) return;
-            if (saved.Any(entry => entry.Key != id
-                && string.Equals(entry.Value.InstallRoot, binding.InstallRoot, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(entry.Value.ProfileName, binding.ProfileName, StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException("此 BetterGI 源档案已绑定其他 VIvian 原神账号。");
-            saved[id] = new(binding.InstallRoot, binding.ProfileName);
-            var temp = _bindingPath + ".tmp";
-            await File.WriteAllTextAsync(temp, JsonSerializer.Serialize(saved));
-            File.Move(temp, _bindingPath, overwrite: true);
+            binding = await BetterGiSourceSettings.FindAccountProfileAsync(root, id);
+            if (binding is null)
+            {
+                var saved = await LoadBindingsAsync();
+                if (saved.TryGetValue(id, out var old) && SameRoot(old.InstallRoot, root))
+                {
+                    if (old.ProfileName.StartsWith("VIvian ", StringComparison.OrdinalIgnoreCase) &&
+                        Guid.TryParseExact(old.ProfileName.AsSpan(7), "N", out var owner) && owner != id)
+                        throw new InvalidDataException("旧绑定指向另一个原神账号的专属 BetterGI 档案。");
+                    if (saved.Any(entry => entry.Key != id && SameRoot(entry.Value.InstallRoot, root) &&
+                        string.Equals(entry.Value.ProfileName, old.ProfileName, StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidDataException("多个原神账号曾绑定同一 BetterGI 档案，请核对旧绑定。");
+                    binding = await BetterGiSourceSettings.BindAsync(root, old.ProfileName);
+                }
+            }
         }
-        if (_accountId != id) return;
-        _binding = binding;
-        InstallRoot = binding.InstallRoot;
-        ProfileName = binding.ProfileName;
-        Show(snapshot);
-        Status = "已读取源档案。此页打开时会定期检查 BetterGI 的外部修改。";
+        if (_accountId != id || !IsCurrentRoot(root)) return;
+        if (binding is not null)
+        {
+            await ShowBindingAsync(id, binding);
+            return;
+        }
+        _binding = null;
+        TaskOrder = "";
+        Show(null);
+        _canConnect = root.Length > 0;
+        Status = _canConnect ? "此账号尚未连接 BetterGI。保存任务设置后可连接。"
+            : "请先在「引擎与环境」保存 BetterGI 安装目录。";
+    });
+
+    internal Task ReloadAsync() => RestoreBindingAsync();
+
+    internal Task ConnectAsync(Guid id, IReadOnlyDictionary<string, string> savedSettings, CancellationToken ct)
+    {
+        if (!CanConnect || _accountId != id) return Task.CompletedTask;
+        return RunAsync(() => _serializeWrite(async () =>
+        {
+            if (!_hostIdle() || !IsCurrentRoot(_lookupRoot))
+            {
+                Status = "任务运行、恢复待确认或安装路径已变化。请核对后重试。";
+                return;
+            }
+            var binding = await BetterGiSourceSettings.ConnectAccountProfileAsync(_lookupRoot, id, savedSettings, ct);
+            await ShowBindingAsync(id, binding);
+        }));
     }
 
-    private Task ReloadAsync() => _binding is null ? RestoreBindingAsync() : RunAsync(async () =>
+    private async Task ShowBindingAsync(Guid id, BetterGiSourceSettings binding)
     {
-        if (_binding is not { } binding || !ConfirmDiscard()) return;
-        var latest = await binding.ReadAsync();
-        if (!ReferenceEquals(binding, _binding)) return;
-        Show(latest);
-        Status = "已重新读取 BetterGI 源档案。";
-    });
+        var snapshot = await binding.ReadAsync();
+        if (_accountId != id || !IsCurrentRoot(binding.InstallRoot)) return;
+        _binding = binding;
+        _canConnect = false;
+        Show(snapshot);
+        Status = "已连接此账号的 BetterGI 档案。";
+        await RefreshTaskOrderAsync(binding, snapshot);
+    }
 
-    internal Task SaveAsync() => RunAsync(async () =>
+    internal Task SaveAsync() => RunAsync(() => _serializeWrite(async () =>
     {
         _saveTimer.Stop();
-        if (_binding is not { } binding || _snapshot is not { } snapshot || _readFailed || _conflicted) return;
+        if (_binding is not { } binding || _snapshot is not { } snapshot || !HasDraft) return;
+        if (!IsCurrentRoot(binding.InstallRoot) || _readFailed || _conflicted)
+        {
+            Status = "BetterGI 档案暂不能写入。请重新读取后核对保留的草稿。";
+            return;
+        }
         if (!_hostIdle())
         {
             Status = "任务运行或恢复待确认。草稿已保留，可以稍后重试写入。";
@@ -152,14 +175,15 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
         var updated = await binding.UpdateProfileAsync(snapshot.ProfileRevision, changes);
         if (!ReferenceEquals(binding, _binding)) return;
         Show(updated);
-        Status = $"已写入并读回核对「{binding.ProfileName}」 · {DateTime.Now:HH:mm:ss}";
-    });
+        Status = $"BetterGI 已写入并读回 · {DateTime.Now:HH:mm:ss}";
+        await RefreshTaskOrderAsync(binding, updated);
+    }));
 
     private Task OpenAsync() => RunAsync(async () =>
     {
-        if (!_hostIdle() || _binding is not { } binding) return;
+        if (!_hostIdle() || _binding is not { } binding || !IsCurrentRoot(binding.InstallRoot)) return;
         await binding.ReadAsync();
-        if (!_hostIdle() || !ReferenceEquals(binding, _binding)) return;
+        if (!_hostIdle() || !ReferenceEquals(binding, _binding) || !IsCurrentRoot(binding.InstallRoot)) return;
         if (WindowsProcessSupervisor.IsCurrentProcessElevated())
         {
             WindowsProcessSupervisor.RevealExecutable(binding.ProgramPath);
@@ -172,17 +196,26 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
 
     private async Task PollAsync()
     {
-        if (!_busy && _binding is null && _accountId != _restoreAttempt)
+        if (_busy || _polling || !_editorIdle()) return;
+        if (_accountId is not null && (_accountId != _restoreAttempt || !IsCurrentRoot(_lookupRoot)))
         {
+            if (HasDraft)
+            {
+                _conflicted = true;
+                Status = "BetterGI 安装路径已变化。草稿已保留，请核对后重新读取。";
+                UpdateAvailability();
+                return;
+            }
             await RestoreBindingAsync();
             return;
         }
-        if (_busy || _polling || _binding is not { } binding || _snapshot is not { } baseline) return;
+        if (_binding is not { } binding || _snapshot is not { } baseline) return;
         _polling = true;
         try
         {
             var latest = await binding.ReadAsync();
-            if (_busy || !ReferenceEquals(binding, _binding) || !ReferenceEquals(baseline, _snapshot)) return;
+            if (_busy || !_editorIdle() || !IsCurrentRoot(binding.InstallRoot) ||
+                !ReferenceEquals(binding, _binding) || !ReferenceEquals(baseline, _snapshot)) return;
             var changed = latest.ProfileRevision != baseline.ProfileRevision;
             if (changed && HasDraft)
             {
@@ -191,10 +224,15 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
             }
             else if (!_conflicted && (changed || _readFailed))
             {
-                if (changed) Show(latest);
+                if (changed)
+                {
+                    Show(latest);
+                    await RefreshTaskOrderAsync(binding, latest);
+                    if (!ReferenceEquals(binding, _binding) || !ReferenceEquals(latest, _snapshot)) return;
+                }
                 Status = "已读回 BetterGI 源档案。";
             }
-            if (latest.SharedDomainRevision != baseline.SharedDomainRevision)
+            if (latest.SharedDomainRevision != _snapshot?.SharedDomainRevision)
             {
                 ShowShared(latest);
                 _snapshot = _snapshot! with { SharedDomainRevision = latest.SharedDomainRevision };
@@ -210,6 +248,22 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
             UpdateAvailability();
         }
         finally { _polling = false; }
+    }
+
+    private async Task RefreshTaskOrderAsync(BetterGiSourceSettings binding, BetterGiSourceSettingsSnapshot snapshot)
+    {
+        string order;
+        try
+        {
+            var plan = await BetterGiConfiguration.InspectOneDragonAsync(binding.InstallRoot, binding.ProfileName);
+            order = plan.EnabledTasks.Count == 0 ? "一条龙档案尚未启用任务。"
+                : "BetterGI 任务顺序 · " + string.Join(" → ", plan.EnabledTasks);
+        }
+        catch (Exception ex) when (IsSourceError(ex))
+        {
+            order = "暂时无法核对 BetterGI 任务顺序。";
+        }
+        if (ReferenceEquals(binding, _binding) && ReferenceEquals(snapshot, _snapshot)) TaskOrder = order;
     }
 
     private void Show(BetterGiSourceSettingsSnapshot? snapshot)
@@ -255,17 +309,24 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
         if (_refreshTimer.IsEnabled && CanSave) _saveTimer.Start();
     }
 
-    internal bool ConfirmDiscard() => !HasDraft ||
-        MessageBox.Show("继续会丢弃当前未写入 BetterGI 的草稿。", "BetterGI 源档案", MessageBoxButton.YesNo,
+    internal bool ConfirmDiscard()
+    {
+        if (!HasDraft) return true;
+        _saveTimer.Stop();
+        return MessageBox.Show("继续会丢弃当前未写入 BetterGI 的草稿。", "BetterGI 源档案", MessageBoxButton.YesNo,
             MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes;
+    }
 
     private async Task<Dictionary<Guid, SourceBinding>> LoadBindingsAsync()
     {
         try
         {
             await using var file = File.OpenRead(_bindingPath);
-            return await JsonSerializer.DeserializeAsync<Dictionary<Guid, SourceBinding>>(file)
-                ?? throw new InvalidDataException("原神源档案绑定文件无效。");
+            var bindings = await JsonSerializer.DeserializeAsync<Dictionary<Guid, SourceBinding>>(file);
+            if (bindings is null || bindings.Values.Any(binding => binding is null ||
+                string.IsNullOrWhiteSpace(binding.InstallRoot) || string.IsNullOrWhiteSpace(binding.ProfileName)))
+                throw new InvalidDataException("原神源档案绑定文件无效。");
+            return bindings;
         }
         catch (FileNotFoundException) { return []; }
     }
@@ -287,10 +348,10 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
     private void UpdateAvailability()
     {
         Raise(nameof(IsIdle));
-        Raise(nameof(CanBind));
+        Raise(nameof(CanConnect));
+        Raise(nameof(HasBinding));
         Raise(nameof(CanOpen));
         Raise(nameof(CanSave));
-        Raise(nameof(BindingLabel));
     }
 
     private void ReportError(Exception ex)
@@ -309,6 +370,11 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
 
     private static bool IsSourceError(Exception ex) => ex is IOException or InvalidDataException or UnauthorizedAccessException or
         ArgumentException or InvalidOperationException or JsonException or TimeoutException or Win32Exception;
+
+    private bool IsCurrentRoot(string root) => SameRoot(root, _installRoot());
+
+    private static bool SameRoot(string left, string right) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(left), Path.TrimEndingDirectorySeparator(right), StringComparison.OrdinalIgnoreCase);
 
     private sealed record SourceBinding(string InstallRoot, string ProfileName);
 }

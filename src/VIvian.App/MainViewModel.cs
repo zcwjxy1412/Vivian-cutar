@@ -339,7 +339,7 @@ public sealed class MainViewModel : ObservableObject
             new GenshinAccountConfigurationProvider(accounts.Database),
             () => IsIdle && !BatchRunning && !Queue.IsRunning, paths.DataDirectory,
             () => IsIdle && !BatchRunning && !Queue.IsRunning && !Queue.HasUnresolved && !_control.HasPendingConfigurationRestore,
-            () => Engines.Single(e => e.Id == GameId.Genshin).InstallPath.Trim().Trim('"'));
+            () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinSourceWriteAsync);
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>
@@ -815,6 +815,15 @@ public sealed class MainViewModel : ObservableObject
         Busy(true);
         try { await action(); }
         finally { Busy(false); _operation.Release(); }
+    }
+
+    internal async Task SerializeGenshinSourceWriteAsync(Func<Task> action)
+    {
+        // The main operation gate also owns saving and auto-discovering engine paths.
+        if (!await _operation.WaitAsync(0))
+            throw new InvalidOperationException("主程序正在保存设置或处理任务，请稍后重试。");
+        try { await action(); }
+        finally { _operation.Release(); }
     }
 
     internal async Task<bool> WaitForBatchShutdownAsync(TimeSpan timeout)

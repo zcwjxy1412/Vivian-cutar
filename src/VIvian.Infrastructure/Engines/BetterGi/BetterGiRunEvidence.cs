@@ -25,6 +25,7 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
     public bool ForeignActivitySeen { get; private set; }
 
     public int IgnoredRecords { get; private set; }
+    internal bool OwnedPrimarySeen { get; private set; }
 
     public enum Disposition { Owned, Historical, Foreign }
 
@@ -46,6 +47,7 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
                 if (recent && record.ProcessId != attribution.RootProcessId) ForeignActivitySeen = true;
                 return new(recent ? Disposition.Foreign : Disposition.Historical, marker);
             }
+            OwnedPrimarySeen = true;
             switch (marker.Kind)
             {
                 case BetterGiMarkerKind.Activated:
@@ -97,7 +99,7 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
                 && _completions == 1 && _activations.Count == 1 && !_completionBeforeActivation && !_configMismatch;
             if (completionValid) signals.Add(new(runId, SignalKind.CompletionMarker, "BetterGI 日志：一条龙和配置组任务结束", at));
             if (detached)
-                signals.Add(new(runId, SignalKind.FailureMarker, "BetterGI 以提权方式自行重启，新进程不属于本次运行", at));
+                signals.Add(new(runId, SignalKind.FailureMarker, "BetterGI 任务可能离开受监管进程，执行与清理均未确认", at));
             else if (stoppedByVivian)
                 signals.Add(new(runId, SignalKind.ProcessExit, "BetterGI 主进程（由 VIvian 终止，退出码不作为证据）", at, ExitCode: null));
             else if (exitCode is { } code)

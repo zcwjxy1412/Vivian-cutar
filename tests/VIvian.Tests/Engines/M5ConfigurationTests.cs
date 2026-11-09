@@ -149,6 +149,9 @@ public sealed class M5ConfigurationTests : IDisposable
     // Upstream logs "任务无法完成" for sub-tasks it does not implement and keeps going; a later verified 500 counts.
     [InlineData("开始日常任务\n任务无法完成: 累计消耗120点开拓力\n实训分数已达标\n2026-11-06 12:00:00,000 | INFO | 每日实训已完成", true)]
     [InlineData("开始日常任务\n每日实训已完成\n每日实训未完成", false)]
+    [InlineData("开始日常任务\n每日实训未完成\n每日实训已完成", true)]
+    [InlineData("开始日常任务\n2026-11-09 03:36:01,123 | INFO | 检测到本日活跃度已满提示，跳过后续任务检测\n2026-11-09 03:36:19,123 | INFO | 未检测到每日实训奖励", true)]
+    [InlineData("开始日常任务\n2026-11-09 03:36:01,123 | INFO | 检测到本日活跃度已满提示，跳过后续任务检测", false)]
     [InlineData("每日实训已完成\n开始日常任务", false)]
     [InlineData("开始日常任务\n每日实训已完成\n发生错误 xyz", false)]
     [InlineData("开始日常任务\n日志提到每日实训已完成之类的说明文字", false)]
@@ -169,6 +172,32 @@ public sealed class M5ConfigurationTests : IDisposable
             "daily", 0, id);
         Assert.True(March7thDailyEvidence.ProvesComplete("开始日常任务\n当前累计分数：500/500\n每日实训已完成\n" + final), complete.Detail);
         Assert.Equal(VIvian.Core.Execution.RunOutcome.Success, complete.Outcome);
+    }
+
+    [Theory]
+    [InlineData("03:18:34.002", 230000, true, VIvian.Core.Execution.RunOutcome.Success)]
+    [InlineData("03:18:34.002", 230001, true, VIvian.Core.Execution.RunOutcome.Failed)]
+    [InlineData("03:16:56.347", 230000, true, VIvian.Core.Execution.RunOutcome.Failed)]
+    [InlineData("03:18:34.002", 230000, false, VIvian.Core.Execution.RunOutcome.Failed)]
+    public void LaterRewardImageCheckRequiresTheSameWorkersCommittedTraceInThatStage(
+        string traceTime, int tracePid, bool committed, VIvian.Core.Execution.RunOutcome expected)
+    {
+        const string id = "20261109-031124-be5b";
+        var logs = Directory.CreateDirectory(Path.Combine(_root, "logs"));
+        File.WriteAllText(Path.Combine(logs.FullName, "config_diag.log"),
+            $"2026-11-09 {traceTime} [DEBUG] [pid={tracePid}] [thread=MainThread] set_value: daily_tasks={{}}\n" +
+            (committed ? $"2026-11-09 {traceTime} [DEBUG] [pid={tracePid}] [thread=MainThread] save_config 原子替换成功: size=45433\n" : ""));
+        const string output = """
+            | 开始日常任务 |
+            2026-11-09 03:17:30,654 | INFO | 每日实训未完成
+            ========== 检测到每日实训奖励 ==========
+            2026-11-09 03:18:22,973 | INFO | 切换到：星际和平指南-每日实训
+            ---------- 每日实训奖励完成 ----------
+            2026-11-09 03:18:34,290 | INFO | 当前界面：星际和平指南-每日实训
+            {"schema":1,"run_id":"20261109-031124-be5b","task":"routine","status":"success","lock":"acquired","exit_code":0,"pid":230000,"started_at":"2026-11-09T03:11:24-05:00","ended_at":"2026-11-09T03:18:38-05:00"}
+            """;
+        Assert.Equal(expected, March7thTaskContract.ParseFinalRecord(output, "routine", 0, id,
+            installDirectory: _root).Outcome);
     }
 
     [Fact]

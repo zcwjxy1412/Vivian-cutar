@@ -147,7 +147,7 @@ internal sealed class March7thRun : IEngineRun, IPausableEngineRun
             if (id is null) return Unknown("上游运行编号缺失或冲突。");
             if (truncated && output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).LastOrDefault()?.Length >= 32768)
                 return Unknown("上游终态记录过长，无法完整核对。");
-            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates);
+            var parsed = March7thTaskContract.ParseFinalRecord(output, _task, exit, id, _templates, _directory);
             if (circuit == ResolutionCircuit)
                 return new RunVerdict(RunOutcome.Failed, ReasonCodes.ResolutionCircuitOpen,
                     [new Evidence(RunId, EvidenceKind.FailureReported, "上游日志连续报告游戏分辨率获取失败；已发送本次任务的停止命令。", DateTimeOffset.UtcNow)]);

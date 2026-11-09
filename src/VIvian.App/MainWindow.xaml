@@ -315,10 +315,11 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </StackPanel></TabItem>
 </TabControl>
 </StackPanel></Border>
-<Border Style="{StaticResource Panel}" DataContext="{Binding Engines[0]}"><StackPanel>
-<TextBlock Text="{Binding Compatibility, StringFormat=BetterGI 安装状态 · {0}}" Foreground="{Binding StateBrush}" FontSize="16" FontWeight="SemiBold"/>
+<Border Style="{StaticResource Panel}" DataContext="{Binding Engines[0]}" Padding="14,10"><Expander>
+<Expander.Header><TextBlock Text="{Binding Compatibility, StringFormat=BetterGI 安装状态 · {0}}" Foreground="{Binding StateBrush}" FontWeight="SemiBold"/></Expander.Header>
+<StackPanel Margin="20,0,0,0">
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
-<TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
+<TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Expander></Border>
 </StackPanel></ScrollViewer></TabItem>
 <TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
 <StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>

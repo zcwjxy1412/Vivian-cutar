@@ -245,10 +245,11 @@ public sealed class AssistantViewModel : ObservableObject
         try
         {
             await _client.TestConnectionAsync(endpoint, request.Token);
+            await _client.TestToolRoundTripAsync(endpoint, request.Token);
             if (revision == _settingsRevision && !request.IsCancellationRequested)
             {
                 _connectionResult = "测试成功";
-                SettingsStatus = "模型已响应。保存设置后即可聊天。";
+                SettingsStatus = "聊天和工具往返均已通过。保存设置后即可聊天。";
             }
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }

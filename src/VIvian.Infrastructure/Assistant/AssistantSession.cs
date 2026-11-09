@@ -102,7 +102,7 @@ public sealed class AssistantSession(ChatCompletionsClient client, AssistantTool
         }
     }
 
-    private static (string Id, string Name, string Arguments) ParseCall(JsonNode? node, HashSet<string> seen)
+    internal static (string Id, string Name, string Arguments) ParseCall(JsonNode? node, HashSet<string> seen)
     {
         if (node is not JsonObject call || ChatCompletionsClient.StringValue(call["type"]) != "function"
             || ChatCompletionsClient.StringValue(call["id"]) is not { Length: > 0 and <= 128 } id

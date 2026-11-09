@@ -1,4 +1,5 @@
 using System.Text;
+using VIvian.Infrastructure.Engines;
 
 namespace VIvian.Infrastructure.Processes;
 
@@ -10,27 +11,35 @@ public sealed class DesktopOperationLease : IDisposable
 
     private readonly FileStream _file;
     private readonly byte[] _owner;
+    private readonly string _lockPath;
 
-    private DesktopOperationLease(FileStream file, byte[] owner, bool recovering)
+    private DesktopOperationLease(FileStream file, byte[] owner, string lockPath, bool recovering)
     {
         _file = file;
         _owner = owner;
+        _lockPath = lockPath;
         Recovering = recovering;
     }
 
     public bool Recovering { get; }
 
     public static DesktopOperationLease Acquire(string profileDirectory, bool recovery = false) =>
-        AcquireAt(LockPath, profileDirectory, recovery);
+        AcquireAt(LockPath, profileDirectory, recovery, WindowsProcessSupervisor.IsCurrentProcessElevated());
 
-    internal static DesktopOperationLease AcquireAt(string lockPath, string profileDirectory, bool recovery = false)
+    internal static DesktopOperationLease AcquireAt(string lockPath, string profileDirectory, bool recovery = false,
+        bool requireExisting = false)
     {
+        lockPath = Path.GetFullPath(lockPath);
+        if (ReadOnlyFileAccess.FindReparsePoint(lockPath) is not null)
+            throw new InvalidOperationException("桌面互斥文件或目录是链接，拒绝访问。");
+        if (requireExisting && !File.Exists(lockPath))
+            throw new InvalidOperationException("请先在普通权限下运行 Initialize-M6DesktopLock.ps1 初始化桌面互斥文件。");
         var owner = Encoding.UTF8.GetBytes(Path.TrimEndingDirectorySeparator(Path.GetFullPath(profileDirectory)).ToUpperInvariant());
         FileStream file;
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
-            file = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            if (!requireExisting) Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+            file = new FileStream(lockPath, requireExisting ? FileMode.Open : FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -39,6 +48,7 @@ public sealed class DesktopOperationLease : IDisposable
 
         try
         {
+            VerifyHandle(file, lockPath);
             var pending = file.Length != 0;
             if (pending)
             {
@@ -49,7 +59,7 @@ public sealed class DesktopOperationLease : IDisposable
                 if (!previousOwner.AsSpan().SequenceEqual(owner))
                     throw PendingCleanup();
             }
-            return new(file, owner, pending);
+            return new(file, owner, lockPath, pending);
         }
         catch
         {
@@ -61,6 +71,7 @@ public sealed class DesktopOperationLease : IDisposable
     /// <summary>Call immediately before the first desktop mutation. A crash leaves the marker intact.</summary>
     public void MarkDirty()
     {
+        VerifyHandle(_file, _lockPath);
         _file.Position = 0;
         _file.Write(_owner);
         _file.SetLength(_owner.Length);
@@ -70,11 +81,20 @@ public sealed class DesktopOperationLease : IDisposable
     /// <summary>Call only after process cleanup and configuration restoration have both been verified.</summary>
     public void ConfirmClean()
     {
+        VerifyHandle(_file, _lockPath);
         _file.SetLength(0);
         _file.Flush(flushToDisk: true);
     }
 
     public void Dispose() => _file.Dispose();
+
+    private static void VerifyHandle(FileStream file, string lockPath)
+    {
+        if (ReadOnlyFileAccess.FindReparsePoint(lockPath) is not null
+            || !ReadOnlyFileAccess.HandlePathMatches(file.SafeFileHandle, lockPath)
+            || (OperatingSystem.IsWindows() && ReadOnlyFileAccess.LinkCount(file.SafeFileHandle) != 1))
+            throw new InvalidOperationException("桌面互斥文件的实际路径或链接数不安全，拒绝写入。");
+    }
 
     private static InvalidOperationException PendingCleanup() =>
         new("上一次桌面操作的清理或配置恢复待确认。请在原档案核对并完成恢复后再运行。");

@@ -18,6 +18,9 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
     private int _completions;
     private bool _completionBeforeActivation;
     private bool _configMismatch;
+    private bool _progressSeen;
+    private BetterGiMarkerKind _dailyRewardCheck;
+    private readonly bool _requiresDailyReward = request.OneDragonPlan?.EnabledTasks.Contains(BetterGiMarkers.DailyRewardTask) == true;
 
     public Guid RunId => runId;
 
@@ -58,6 +61,13 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
                         _configMismatch = true;
                     }
                     break;
+                case BetterGiMarkerKind.Progress:
+                    _progressSeen = _activations.Count == 1;
+                    break;
+                case BetterGiMarkerKind.DailyRewardVerified:
+                case BetterGiMarkerKind.DailyRewardUnverified:
+                    if (_progressSeen && _completions == 0) _dailyRewardCheck = marker.Kind;
+                    break;
                 case BetterGiMarkerKind.Completed:
                     _completions++;
                     if (_activations.Count == 0) _completionBeforeActivation = true;
@@ -97,7 +107,10 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
             signals = [.. _signals];
             var completionValid = request.HasKnownCompletionContract
                 && _completions == 1 && _activations.Count == 1 && !_completionBeforeActivation && !_configMismatch;
-            if (completionValid) signals.Add(new(runId, SignalKind.CompletionMarker, "BetterGI 日志：一条龙和配置组任务结束", at));
+            if (completionValid && (!_requiresDailyReward || _dailyRewardCheck == BetterGiMarkerKind.DailyRewardVerified))
+                signals.Add(new(runId, SignalKind.CompletionMarker, _requiresDailyReward
+                    ? "BetterGI 日志：流程结束且本次检查确认每日奖励已领取"
+                    : "BetterGI 日志：一条龙和配置组任务结束", at));
             if (detached)
                 signals.Add(new(runId, SignalKind.FailureMarker, "BetterGI 任务可能离开受监管进程，执行与清理均未确认", at));
             else if (stoppedByVivian)

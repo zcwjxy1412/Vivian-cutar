@@ -46,6 +46,43 @@ public sealed class BetterGiLaunchGuardTests
     }
 
     [Fact]
+    public async Task CurrentTaskOrderAndResumeMarkerMatchTheUpstreamPlan()
+    {
+        await using var fixture = new BetterGiFixture();
+        var path = Path.Combine(fixture.Root, "User", "OneDragon", "默认配置.json");
+        File.WriteAllText(path, """
+            {
+              "Name": "默认配置",
+              "TaskEnabledList": { "craft": true, "daily": true, "domain": false },
+              "TaskDefinitions": { "craft": "合成树脂", "daily": "领取每日奖励", "domain": "自动秘境" },
+              "TaskOrder": [ "craft", "daily", "domain" ],
+              "NextTaskId": "daily",
+              "CompletionAction": "无"
+            }
+            """);
+
+        var plan = await BetterGiConfiguration.InspectOneDragonAsync(fixture.Root);
+
+        Assert.Equal(["领取每日奖励"], plan.EnabledTasks);
+        Assert.Equal("无", plan.CompletionAction);
+    }
+
+    [Fact]
+    public async Task EnabledGroupMissingFromTheInstallationBlocksThePlan()
+    {
+        await using var fixture = new BetterGiFixture();
+        var path = Path.Combine(fixture.Root, "User", "OneDragon", "日常.json");
+        File.WriteAllText(path, """{ "Name": "日常", "TaskEnabledList": { "缺失组": true } }""");
+        var adapter = fixture.Adapter(BetterGiArguments.OneDragon("日常").Request);
+
+        var error = await Assert.ThrowsAsync<EngineStartException>(
+            () => adapter.LaunchAsync(fixture.Context, fixture.Supervisor, default));
+
+        Assert.True(error.NothingStarted);
+        Assert.Equal(0, fixture.Supervisor.Calls);
+    }
+
+    [Fact]
     public async Task AProfileRemovedAfterPreflightIsRecheckedAtLaunch()
     {
         await using var fixture = new BetterGiFixture();

@@ -87,6 +87,8 @@ public enum BetterGiMarkerKind
     Progress,
     /// <summary>"一条龙和配置组任务结束" — the only completion line of the one-dragon flow.</summary>
     Completed,
+    DailyRewardVerified,
+    DailyRewardUnverified,
     /// <summary>"任务被取消，退出执行", "一条龙在启动阶段被取消" or a TaskRunner interruption by cancellation.</summary>
     Cancelled,
     /// <summary>"没有配置,退出执行!" or "没有配置组任务,退出执行!" — nothing (more) was run.</summary>
@@ -106,6 +108,9 @@ public sealed record BetterGiMarker(BetterGiMarkerKind Kind, string? Value = nul
 /// </summary>
 public static partial class BetterGiMarkers
 {
+    public const string DailyRewardTask = "领取每日奖励";
+    private const string DailyRewardSource = "BetterGenshinImpact.GameTask.Common.Job.CheckRewardsTask";
+
     public const string CompletedLine = "一条龙和配置组任务结束";
     public const string ActivatedPrefix = "启用一条龙配置：";
     public const string ArgumentConfigPrefix = "参数指定的一条龙配置：";
@@ -129,6 +134,13 @@ public static partial class BetterGiMarkers
         var message = record.Message;
         if (record.Level == "FTL" || message.StartsWith(FatalPrefix, StringComparison.Ordinal))
             return new(BetterGiMarkerKind.Fatal);
+        if (record.SourceContext == DailyRewardSource)
+        {
+            if (record.Level == "INF" && message == "检查每日奖励结果：今日奖励已领取")
+                return new(BetterGiMarkerKind.DailyRewardVerified);
+            if (record.Level == "WRN" && message == "检查每日奖励结果：未领取，请手动检查！")
+                return new(BetterGiMarkerKind.DailyRewardUnverified);
+        }
         if (message == CompletedLine) return record.Level == "INF" ? new(BetterGiMarkerKind.Completed) : new(BetterGiMarkerKind.Failure);
         if (message.StartsWith(ActivatedPrefix, StringComparison.Ordinal))
             return new(BetterGiMarkerKind.Activated, message[ActivatedPrefix.Length..]);

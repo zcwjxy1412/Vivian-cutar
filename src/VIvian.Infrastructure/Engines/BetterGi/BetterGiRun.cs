@@ -115,8 +115,8 @@ internal sealed class BetterGiRun : IEngineRun
         var kind = accepted.Marker.Kind switch
         {
             BetterGiMarkerKind.Progress or BetterGiMarkerKind.Activated or BetterGiMarkerKind.ArgumentConfig => RunEventKind.Progress,
-            BetterGiMarkerKind.Completed or BetterGiMarkerKind.Cancelled or BetterGiMarkerKind.NothingDone => RunEventKind.Evidence,
-            BetterGiMarkerKind.Failure or BetterGiMarkerKind.Fatal or BetterGiMarkerKind.ConfigNotFound => RunEventKind.Warning,
+            BetterGiMarkerKind.Completed or BetterGiMarkerKind.Cancelled or BetterGiMarkerKind.NothingDone or BetterGiMarkerKind.DailyRewardVerified => RunEventKind.Evidence,
+            BetterGiMarkerKind.Failure or BetterGiMarkerKind.Fatal or BetterGiMarkerKind.ConfigNotFound or BetterGiMarkerKind.DailyRewardUnverified => RunEventKind.Warning,
             _ => RunEventKind.Output,
         };
         Emit(kind, $"[{record.Level}] {Truncate(record.Message)}");
@@ -179,7 +179,8 @@ internal sealed class BetterGiRun : IEngineRun
         {
             var now = _time.GetTimestamp();
             if (_time.GetElapsedTime(started, now) >= _options.LogDrainLimit) return;
-            if (_time.GetElapsedTime(Interlocked.Read(ref _lastLogTimestamp), now) >= _options.LogQuietPeriod) return;
+            var lastActivity = Math.Max(started, Interlocked.Read(ref _lastLogTimestamp));
+            if (_time.GetElapsedTime(lastActivity, now) >= _options.LogQuietPeriod) return;
             await Task.Delay(TimeSpan.FromMilliseconds(50), _time).ConfigureAwait(false);
         }
     }

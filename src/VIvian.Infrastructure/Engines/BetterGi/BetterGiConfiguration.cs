@@ -3,8 +3,12 @@ using System.Text.Json;
 
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
+/// <summary>The effective built-in and group task order plus the one-dragon fields VIvian can inspect.</summary>
+public sealed record BetterGiOneDragonPlan(string Name, IReadOnlyList<string> EnabledTasks, string CompletionAction,
+    string CraftingBenchCountry, int MinResinToKeep, string DomainName, string PartyName, bool WeeklyDomainEnabled);
+
 /// <summary>Resolves 0.66.0 requests against the same on-disk names BetterGI will use.</summary>
-internal static class BetterGiConfiguration
+public static class BetterGiConfiguration
 {
     private const int MaxConfigBytes = 1024 * 1024;
     private static readonly JsonDocumentOptions JsonOptions = new()
@@ -13,7 +17,18 @@ internal static class BetterGiConfiguration
         CommentHandling = JsonCommentHandling.Skip,
     };
 
-    public static Task<BetterGiTaskRequest> ResolveAsync(string installRoot, BetterGiTaskRequest request, CancellationToken ct) =>
+    public static async Task<BetterGiOneDragonPlan> InspectOneDragonAsync(string installRoot, string? name = null,
+        CancellationToken ct = default)
+    {
+        if (!Path.IsPathFullyQualified(installRoot))
+            throw new ArgumentException("BetterGI 安装目录必须是绝对路径。", nameof(installRoot));
+        var request = BetterGiArguments.OneDragon(name);
+        if (request.Request is null) throw new InvalidDataException(request.Error);
+        var resolved = await ResolveAsync(Path.GetFullPath(installRoot), request.Request, ct).ConfigureAwait(false);
+        return resolved.OneDragonPlan!;
+    }
+
+    internal static Task<BetterGiTaskRequest> ResolveAsync(string installRoot, BetterGiTaskRequest request, CancellationToken ct) =>
         ReadOnlyFileAccess.BoundedAsync(() => Resolve(installRoot, request, ct), ReadOnlyFileAccess.QueryTimeout, ct);
 
     private static BetterGiTaskRequest Resolve(string installRoot, BetterGiTaskRequest request, CancellationToken ct)
@@ -24,10 +39,7 @@ internal static class BetterGiConfiguration
             foreach (var group in request.Groups)
             {
                 ct.ThrowIfCancellationRequested();
-                var path = Path.Combine(user, "ScriptGroup", group + ".json");
-                using var json = ReadJson(path);
-                if (!string.Equals(ReadString(json.RootElement, "name"), group, StringComparison.Ordinal))
-                    throw new InvalidDataException("BetterGI 配置组文件名与内部名称不一致。");
+                CheckGroup(user, group);
             }
             return request;
         }
@@ -46,7 +58,7 @@ internal static class BetterGiConfiguration
             throw new InvalidDataException("BetterGI 一条龙配置目录含链接。");
 
         var count = 0;
-        var matches = 0;
+        BetterGiOneDragonPlan? plan = null;
         foreach (var path in Directory.EnumerateFiles(directory, "*.json"))
         {
             ct.ThrowIfCancellationRequested();
@@ -55,16 +67,60 @@ internal static class BetterGiConfiguration
             using var json = ReadJson(path);
             if (!string.Equals(ReadString(json.RootElement, "Name"), requestedName, StringComparison.Ordinal))
                 continue;
-            if (++matches > 1)
+            if (plan is not null)
                 throw new InvalidDataException("BetterGI 存在同名的一条龙配置，无法确认目标唯一。");
-            if (ReadString(json.RootElement, "CompletionAction") is { } action
-                && action is not ("" or "关闭游戏" or "关闭软件" or "关闭游戏和软件"))
-                throw new InvalidDataException("BetterGI 一条龙配置包含关机或无法识别的完成后动作。");
+            plan = ReadOneDragonPlan(requestedName!, json.RootElement);
         }
-        if (matches == 0)
+        if (plan is null)
             throw new InvalidDataException("BetterGI 找不到指定的一条龙配置，已阻止回退到默认配置。");
 
-        return BetterGiArguments.OneDragon(requestedName).Request!;
+        foreach (var task in plan.EnabledTasks.Distinct(StringComparer.Ordinal))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!BuiltInTasks.Contains(task)) CheckGroup(user, task);
+        }
+        return BetterGiArguments.OneDragon(requestedName).Request! with { OneDragonPlan = plan };
+    }
+
+    private static readonly HashSet<string> BuiltInTasks = new(StringComparer.Ordinal)
+    {
+        "领取邮件", "合成树脂", "自动秘境", "自动首领讨伐", "自动幽境危战", "自动地脉花", "领取每日奖励", "领取尘歌壶奖励",
+    };
+
+    private static void CheckGroup(string user, string group)
+    {
+        if (BetterGiArguments.ValidateName(group, "配置组名") is { } invalid)
+            throw new InvalidDataException(invalid);
+        using var json = ReadJson(Path.Combine(user, "ScriptGroup", group + ".json"));
+        if (!string.Equals(ReadString(json.RootElement, "name"), group, StringComparison.Ordinal))
+            throw new InvalidDataException("BetterGI 配置组文件名与内部名称不一致。");
+    }
+
+    private static BetterGiOneDragonPlan ReadOneDragonPlan(string name, JsonElement json)
+    {
+        var action = ReadString(json, "CompletionAction") ?? "";
+        if (action is not ("" or "无" or "关闭游戏" or "关闭软件" or "关闭游戏和软件"))
+            throw new InvalidDataException("BetterGI 一条龙配置包含关机或无法识别的完成后动作。");
+
+        return new BetterGiOneDragonPlan(name, ReadEnabledTasks(json), action,
+            ReadString(json, "CraftingBenchCountry") ?? "枫丹",
+            ReadProperty(json, "MinResinToKeep")?.GetInt32() ?? 0,
+            ReadString(json, "DomainName") ?? "",
+            ReadString(json, "PartyName") ?? "",
+            ReadProperty(json, "WeeklyDomainEnabled")?.GetBoolean() ?? false);
+    }
+
+    private static IReadOnlyList<string> ReadEnabledTasks(JsonElement json)
+    {
+        var enabled = ReadProperty(json, "TaskEnabledList")?.Deserialize<Dictionary<string, bool>>() ?? [];
+        var definitions = ReadProperty(json, "TaskDefinitions")?.Deserialize<Dictionary<string, string>>() ?? [];
+        var configuredOrder = ReadProperty(json, "TaskOrder")?.Deserialize<List<string>>();
+        var order = configuredOrder is { Count: > 0 } ? configuredOrder : enabled.Keys.ToList();
+        var visible = order.Where(id => enabled.ContainsKey(id) && (definitions.Count == 0 || definitions.ContainsKey(id))).ToList();
+        var next = ReadString(json, "NextTaskId");
+        var start = visible.FindIndex(id => id == next);
+        return visible.Skip(Math.Max(0, start)).Where(id => enabled[id])
+            .Select(id => definitions.Count == 0 ? id : definitions[id]).ToList().AsReadOnly();
     }
 
     private static JsonDocument ReadJson(string path)
@@ -79,18 +135,18 @@ internal static class BetterGiConfiguration
         return JsonDocument.Parse(reader.ReadToEnd(), JsonOptions);
     }
 
-    private static string? ReadString(JsonElement json, string key)
+    private static string? ReadString(JsonElement json, string key) => ReadProperty(json, key)?.GetString();
+
+    private static JsonElement? ReadProperty(JsonElement json, string key)
     {
-        string? result = null;
-        var found = false;
+        JsonElement? result = null;
         foreach (var property in json.EnumerateObject())
         {
             if (!string.Equals(property.Name, key, StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (found)
+            if (result.HasValue)
                 throw new InvalidDataException("BetterGI 配置包含含义重复的字段。");
-            result = property.Value.GetString();
-            found = true;
+            result = property.Value;
         }
         return result;
     }

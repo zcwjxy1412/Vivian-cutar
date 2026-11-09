@@ -10,6 +10,89 @@ namespace VIvian.Tests.Engines.BetterGi;
 public sealed class GenshinAccountImportTests
 {
     [Fact]
+    public async Task ExpandedListImportsSavedRowsOnceAndIgnoresTheRepeatedHeader()
+    {
+        await using var fixture = new BetterGiFixture();
+        var database = new LocalDatabase(Path.Combine(fixture.Root, "import.db"));
+        await database.InitializeAsync();
+        var service = new GenshinAccountImportService(database);
+
+        var first = await service.RegisterRecognizedAsync(1920, 1080, Expanded(), default);
+        var second = await service.RegisterRecognizedAsync(1920, 1080, Expanded(), default);
+
+        Assert.True(first.Success, first.Detail);
+        Assert.True(first.Created);
+        Assert.True(second.Success, second.Detail);
+        Assert.False(second.Created);
+        Assert.Equal(first.Account!.Id, second.Account!.Id);
+        Assert.Equal(["138****97", "139****61"],
+            (await database.LoadLoginProfilesAsync(GameId.Genshin)).Select(profile => profile.NormalizedPhone));
+    }
+
+    [Theory]
+    [InlineData("138******97")]
+    [InlineData("13912345661")]
+    public async Task ExpandedListRefusesAmbiguousOrUnmaskedRows(string lastRow)
+    {
+        await using var fixture = new BetterGiFixture();
+        var database = new LocalDatabase(Path.Combine(fixture.Root, "import.db"));
+        await database.InitializeAsync();
+
+        var result = await new GenshinAccountImportService(database)
+            .RegisterRecognizedAsync(1920, 1080, Expanded(lastRow), default);
+
+        Assert.False(result.Success);
+        Assert.Empty(await database.LoadLoginProfilesAsync(GameId.Genshin));
+    }
+
+    [Fact]
+    public async Task ExpandedListCannotBindAHandpickedProfileWithoutASingleAccount()
+    {
+        await using var fixture = new BetterGiFixture();
+        var database = new LocalDatabase(Path.Combine(fixture.Root, "import.db"));
+        await database.InitializeAsync();
+        var account = await database.AddAccountAsync(GameId.Genshin, "待绑定", "", null);
+
+        var result = await new GenshinAccountImportService(database)
+            .RegisterRecognizedAsync(1920, 1080, Expanded(), default, account.Id);
+
+        Assert.False(result.Success);
+        Assert.Empty(await database.LoadLoginProfilesAsync(GameId.Genshin));
+    }
+
+    [Fact]
+    public async Task ConflictOnASecondSavedRowRollsBackTheFirstNewAccount()
+    {
+        await using var fixture = new BetterGiFixture();
+        var database = new LocalDatabase(Path.Combine(fixture.Root, "import.db"));
+        await database.InitializeAsync();
+        foreach (var label in new[] { "冲突甲", "冲突乙" })
+        {
+            var duplicate = await database.AddAccountAsync(GameId.Genshin, label, "", null);
+            await database.SaveLoginProfileAsync(duplicate.Id, "139******61", "139****61", 0, .9, null, "测试");
+        }
+
+        var result = await new GenshinAccountImportService(database)
+            .RegisterRecognizedAsync(1920, 1080, Expanded(), default);
+
+        Assert.False(result.Success);
+        var profiles = await database.LoadLoginProfilesAsync(GameId.Genshin);
+        Assert.Equal(2, profiles.Count);
+        Assert.All(profiles, profile => Assert.Equal("139****61", profile.NormalizedPhone));
+    }
+
+    private static RecognizedText[] Expanded(string lastRow = "139******61") =>
+    [
+        new("HO", 935, 377, 59, 43),
+        new("138 * * * * * * 97", 787, 486, 117, 17),
+        new("138******97", 787, 553, 117, 17),
+        new("刚 刚", 820, 594, 32, 15),
+        new(lastRow, 787, 642, 117, 17),
+        new("1 天 前", 818, 681, 42, 16),
+        new("登 录 其 他 账 号", 900, 740, 120, 18),
+    ];
+
+    [Fact]
     public async Task ReimportKeepsOneGenshinAccountAndLeavesSameMaskInStarRailAlone()
     {
         await using var fixture = new BetterGiFixture();

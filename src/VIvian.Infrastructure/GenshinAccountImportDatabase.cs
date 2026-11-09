@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using VIvian.Core;
 using VIvian.Core.Accounts;
 
@@ -5,15 +6,34 @@ namespace VIvian.Infrastructure;
 
 public sealed partial class LocalDatabase
 {
-    internal async Task<(GameAccount? Account, bool Created)> RegisterGenshinPhotoAccountAsync(
-        LoginAccountObservation account, Guid? targetAccountId, CancellationToken ct)
+    internal async Task<IReadOnlyList<(GameAccount? Account, bool Created)>> RegisterGenshinPhotoAccountsAsync(
+        IReadOnlyList<LoginAccountObservation> accounts, Guid? targetAccountId, CancellationToken ct)
     {
-        if (targetAccountId == Guid.Empty || targetAccountId == LegacyId(GameId.Genshin))
-            return (null, false);
+        if (accounts.Count == 0 || targetAccountId == Guid.Empty || targetAccountId == LegacyId(GameId.Genshin) ||
+            targetAccountId.HasValue && accounts.Count != 1)
+            return [];
 
         await using var connection = await OpenAsync(ct).ConfigureAwait(false);
         // Reserve the writer before lookup so two imports cannot both see an absent identity.
         using var transaction = connection.BeginTransaction(deferred: false);
+        var registered = new List<(Guid Id, bool Created)>(accounts.Count);
+        foreach (var account in accounts)
+        {
+            var entry = await RegisterGenshinPhotoAccountAsync(connection, transaction, account, targetAccountId, ct)
+                .ConfigureAwait(false);
+            if (entry is not { } row) return [];
+            registered.Add(row);
+        }
+        ct.ThrowIfCancellationRequested();
+        transaction.Commit();
+        var saved = (await LoadAccountsAsync(GameId.Genshin, ct).ConfigureAwait(false)).ToDictionary(row => row.Id);
+        return registered.Select(row => (saved.GetValueOrDefault(row.Id), row.Created)).ToArray();
+    }
+
+    private static async Task<(Guid Id, bool Created)?> RegisterGenshinPhotoAccountAsync(
+        SqliteConnection connection, SqliteTransaction transaction, LoginAccountObservation account,
+        Guid? targetAccountId, CancellationToken ct)
+    {
         using var lookup = connection.CreateCommand();
         lookup.Transaction = transaction;
         lookup.CommandText = """
@@ -33,13 +53,13 @@ public sealed partial class LocalDatabase
                 var storedId = reader.GetString(0);
                 existingId = storedId == "legacy-genshin" ? LegacyId(GameId.Genshin)
                     : Guid.TryParse(storedId, out var parsed) ? parsed : null;
-                if (existingId is null || await reader.ReadAsync(ct).ConfigureAwait(false)) return (null, false);
+                if (existingId is null || await reader.ReadAsync(ct).ConfigureAwait(false)) return null;
             }
         }
 
         if (targetAccountId is { } selected)
         {
-            if (existingId is { } owner && owner != selected) return (null, false);
+            if (existingId is { } owner && owner != selected) return null;
             using var target = connection.CreateCommand();
             target.Transaction = transaction;
             target.CommandText = """
@@ -50,7 +70,7 @@ public sealed partial class LocalDatabase
             target.Parameters.AddWithValue("$id", DatabaseId(selected));
             target.Parameters.AddWithValue("$game", (int)GameId.Genshin);
             target.Parameters.AddWithValue("$identity", account.NormalizedPhone);
-            if (await target.ExecuteScalarAsync(ct).ConfigureAwait(false) is null) return (null, false);
+            if (await target.ExecuteScalarAsync(ct).ConfigureAwait(false) is null) return null;
         }
 
         var id = targetAccountId ?? existingId ?? Guid.NewGuid();
@@ -80,9 +100,6 @@ public sealed partial class LocalDatabase
             insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
             await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
-        ct.ThrowIfCancellationRequested();
-        transaction.Commit();
-        var saved = (await LoadAccountsAsync(GameId.Genshin, ct).ConfigureAwait(false)).SingleOrDefault(row => row.Id == id);
-        return (saved, created);
+        return (id, created);
     }
 }

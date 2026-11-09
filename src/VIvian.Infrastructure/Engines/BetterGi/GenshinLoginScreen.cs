@@ -41,9 +41,7 @@ public sealed partial class GenshinLoginScreen
             UserOnlyText.Any(marker => line.Text.Contains(marker, StringComparison.Ordinal))))
             return new(GenshinLoginScreenState.NeedsUser);
 
-        if (width <= 0 || height <= 0 || compact.Any(line => !WithinFrame(line, width, height) ||
-                line.Text is "确定" or "确认" or "取消" ||
-                UnsupportedOverlayText.Any(marker => line.Text.Contains(marker, StringComparison.Ordinal))))
+        if (width <= 0 || height <= 0 || compact.Any(line => !WithinFrame(line, width, height) || IsBlockingOverlay(line.Text)))
             return new(GenshinLoginScreenState.Unrecognized);
 
         var brand = UniqueLabel(compact, "miHoYo");
@@ -87,7 +85,10 @@ public sealed partial class GenshinLoginScreen
 
     private static bool IsPossibleAccountCharacter(char c) => char.IsDigit(c) || c is '*' or '＊' or '•' or '·';
 
-    private static bool WithinFrame(RecognizedText line, int width, int height) =>
+    internal static bool IsBlockingOverlay(string compactText) => compactText is "确定" or "确认" or "取消" ||
+        UnsupportedOverlayText.Any(marker => compactText.Contains(marker, StringComparison.Ordinal));
+
+    internal static bool WithinFrame(RecognizedText line, int width, int height) =>
         line.X >= 0 && line.Y >= 0 && line.Width > 0 && line.Height > 0 &&
         line.X + line.Width <= width && line.Bottom <= height;
 

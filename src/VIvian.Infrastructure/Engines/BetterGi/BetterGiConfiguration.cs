@@ -5,13 +5,27 @@ namespace VIvian.Infrastructure.Engines.BetterGi;
 
 /// <summary>The effective built-in and group task order plus the one-dragon fields VIvian can inspect.</summary>
 public sealed record BetterGiOneDragonPlan(string Name, IReadOnlyList<string> EnabledTasks, string CompletionAction,
-    string CraftingBenchCountry, int MinResinToKeep, string DomainName, string PartyName, bool WeeklyDomainEnabled);
+    string CraftingBenchCountry, int MinResinToKeep, string DomainName, string PartyName, bool WeeklyDomainEnabled,
+    string AdventurersGuildCountry, string DailyRewardPartyName);
+
+public sealed record BetterGiDomainResinPlan(bool SpecifyResinUse, IReadOnlyList<string> Priority,
+    int Original, int Original20, int Original40, int Condensed, int Transient, int Fragile, bool AutoArtifactSalvage)
+{
+    internal bool HasExplicitBudget
+    {
+        get
+        {
+            int[] counts = [Original, Original20, Original40, Condensed, Transient, Fragile];
+            return SpecifyResinUse && counts.All(count => count >= 0) && counts.Any(count => count > 0);
+        }
+    }
+}
 
 /// <summary>Resolves 0.66.0 requests against the same on-disk names BetterGI will use.</summary>
 public static class BetterGiConfiguration
 {
-    private const int MaxConfigBytes = 1024 * 1024;
-    private static readonly JsonDocumentOptions JsonOptions = new()
+    internal const int MaxConfigBytes = 1024 * 1024;
+    internal static readonly JsonDocumentOptions JsonOptions = new()
     {
         AllowTrailingCommas = true,
         CommentHandling = JsonCommentHandling.Skip,
@@ -26,6 +40,25 @@ public static class BetterGiConfiguration
         if (request.Request is null) throw new InvalidDataException(request.Error);
         var resolved = await ResolveAsync(Path.GetFullPath(installRoot), request.Request, ct).ConfigureAwait(false);
         return resolved.OneDragonPlan!;
+    }
+
+    public static Task<BetterGiDomainResinPlan> InspectDomainResinAsync(string installRoot, CancellationToken ct = default)
+    {
+        if (!Path.IsPathFullyQualified(installRoot))
+            throw new ArgumentException("BetterGI 安装目录必须是绝对路径。", nameof(installRoot));
+        return ReadOnlyFileAccess.BoundedAsync(() =>
+        {
+            using var document = ReadJson(Path.Combine(Path.GetFullPath(installRoot), "User", "config.json"));
+            var domain = ReadProperty(document.RootElement, "autoDomainConfig", StringComparison.Ordinal);
+            var priority = Domain("resinPriorityList")?.Deserialize<string[]>() ?? ["浓缩树脂", "原粹树脂"];
+            return new BetterGiDomainResinPlan(Domain("specifyResinUse")?.GetBoolean() ?? false, Array.AsReadOnly(priority),
+                Count("originalResinUseCount"), Count("originalResin20UseCount"), Count("originalResin40UseCount"), Count("condensedResinUseCount"),
+                Count("transientResinUseCount"), Count("fragileResinUseCount"),
+                Domain("autoArtifactSalvage")?.GetBoolean() ?? false);
+
+            JsonElement? Domain(string key) => domain is { } value ? ReadProperty(value, key, StringComparison.Ordinal) : null;
+            int Count(string key) => Domain(key)?.GetInt32() ?? 0;
+        }, ReadOnlyFileAccess.QueryTimeout, ct);
     }
 
     internal static Task<BetterGiTaskRequest> ResolveAsync(string installRoot, BetterGiTaskRequest request, CancellationToken ct) =>
@@ -48,7 +81,7 @@ public static class BetterGiConfiguration
         if (request.Kind == BetterGiTaskKind.OneDragonSelected)
         {
             using var settings = ReadJson(Path.Combine(user, "config.json"));
-            requestedName = ReadString(settings.RootElement, "selectedOneDragonFlowConfigName");
+            requestedName = ReadProperty(settings.RootElement, "selectedOneDragonFlowConfigName", StringComparison.Ordinal)?.GetString();
         }
         if (BetterGiArguments.ValidateName(requestedName, "一条龙配置名") is { } invalid)
             throw new InvalidDataException(invalid);
@@ -99,7 +132,7 @@ public static class BetterGiConfiguration
     private static BetterGiOneDragonPlan ReadOneDragonPlan(string name, JsonElement json)
     {
         var action = ReadString(json, "CompletionAction") ?? "";
-        if (action is not ("" or "无" or "关闭游戏" or "关闭软件" or "关闭游戏和软件"))
+        if (!IsSafeCompletionAction(action))
             throw new InvalidDataException("BetterGI 一条龙配置包含关机或无法识别的完成后动作。");
 
         return new BetterGiOneDragonPlan(name, ReadEnabledTasks(json), action,
@@ -107,7 +140,9 @@ public static class BetterGiConfiguration
             ReadProperty(json, "MinResinToKeep")?.GetInt32() ?? 0,
             ReadString(json, "DomainName") ?? "",
             ReadString(json, "PartyName") ?? "",
-            ReadProperty(json, "WeeklyDomainEnabled")?.GetBoolean() ?? false);
+            ReadProperty(json, "WeeklyDomainEnabled")?.GetBoolean() ?? false,
+            ReadString(json, "AdventurersGuildCountry") ?? "枫丹",
+            ReadString(json, "DailyRewardPartyName") ?? "");
     }
 
     private static IReadOnlyList<string> ReadEnabledTasks(JsonElement json)
@@ -135,14 +170,17 @@ public static class BetterGiConfiguration
         return JsonDocument.Parse(reader.ReadToEnd(), JsonOptions);
     }
 
-    private static string? ReadString(JsonElement json, string key) => ReadProperty(json, key)?.GetString();
+    internal static bool IsSafeCompletionAction(string action) =>
+        action is "" or "无" or "关闭游戏" or "关闭软件" or "关闭游戏和软件";
 
-    private static JsonElement? ReadProperty(JsonElement json, string key)
+    internal static string? ReadString(JsonElement json, string key) => ReadProperty(json, key)?.GetString();
+
+    private static JsonElement? ReadProperty(JsonElement json, string key, StringComparison comparison = StringComparison.OrdinalIgnoreCase)
     {
         JsonElement? result = null;
         foreach (var property in json.EnumerateObject())
         {
-            if (!string.Equals(property.Name, key, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(property.Name, key, comparison))
                 continue;
             if (result.HasValue)
                 throw new InvalidDataException("BetterGI 配置包含含义重复的字段。");

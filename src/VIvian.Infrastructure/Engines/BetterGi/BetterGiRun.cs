@@ -47,6 +47,7 @@ internal sealed class BetterGiRun : IEngineRun
     private readonly Task _outputReader;
     private readonly Task<RunVerdict> _verdict;
     private long _lastLogTimestamp;
+    private int? _rootExitCode;
     private volatile bool _stoppedByVivian;
     private volatile bool _detached;
     private CleanupState _lastCleanup = CleanupState.Pending;
@@ -76,6 +77,7 @@ internal sealed class BetterGiRun : IEngineRun
     public IAsyncEnumerable<RunEvent> Events => _events.Reader.ReadAllAsync();
     internal BetterGiRunEvidence Evidence => _evidence;
     internal bool Detached => _detached;
+    internal BetterGiRunObservation Observe() => _evidence.Observe(_rootExitCode);
 
     private void Emit(RunEventKind kind, string message) =>
         _events.Writer.TryWrite(new RunEvent(RunId, _time.GetUtcNow(), kind, message));
@@ -144,6 +146,7 @@ internal sealed class BetterGiRun : IEngineRun
         try { exitCode = await _group.WaitForRootExitAsync(CancellationToken.None).ConfigureAwait(false); }
         catch (Exception) { exitCode = null; }
 
+        _rootExitCode = exitCode;
         if (exitCode == BetterGiContract.ElevationRestartExitCode && !_stoppedByVivian)
         {
             _detached = true;
@@ -160,10 +163,10 @@ internal sealed class BetterGiRun : IEngineRun
         if (last is not null) Handle(last);
         await _readers.CancelAsync().ConfigureAwait(false);
 
-        if (exitCode is (0 or BetterGiContract.SingleInstanceOrIntegrationExitCode) && !_evidence.OwnedPrimarySeen)
+        if (!_evidence.OwnedPrimarySeen)
         {
             _detached = true;
-            Emit(RunEventKind.Warning, "BetterGI 退出前未留下本次主实例日志，可能已把命令转发给外部实例。");
+            Emit(RunEventKind.Warning, "BetterGI 退出前未留下本次主实例日志，无法排除向外部实例转发激活。");
         }
 
         var verdict = _evidence.Evaluate(exitCode, _stoppedByVivian, _detached, _options.CompletionContractVerified, _time.GetUtcNow());
@@ -196,6 +199,18 @@ internal sealed class BetterGiRun : IEngineRun
         }
         _stoppedByVivian = true;
         var cleanup = await TerminateOwnedAsync(ct).ConfigureAwait(false);
+        if (cleanup == CleanupState.Confirmed)
+        {
+            try
+            {
+                await _verdict.WaitAsync(ct).ConfigureAwait(false);
+                cleanup = Record(Restrict(cleanup));
+            }
+            catch (OperationCanceledException)
+            {
+                cleanup = Record(CleanupState.Unconfirmed);
+            }
+        }
         return new StopResult(cleanup, cleanup == CleanupState.Confirmed ? "terminated_owned_processes" : ReasonCodes.CleanupUnconfirmed);
     }
 

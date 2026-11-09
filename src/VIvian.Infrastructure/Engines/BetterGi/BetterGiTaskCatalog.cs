@@ -24,9 +24,9 @@ public static class BetterGiTaskCatalog
             "一条龙提供秘境和队伍，全局秘境设置提供树脂策略。",
             Invocation: "startOneDragon <配置名>", CompletionSignal: "秘境轮次与领奖证据待实机校准",
             ParameterPaths: ["DomainName", "PartyName", "WeeklyDomainEnabled", "autoDomainConfig.specifyResinUse",
-                "autoDomainConfig.resinPriorityList", "autoDomainConfig.originalResin20UseCount", "autoDomainConfig.originalResin40UseCount",
+                "autoDomainConfig.resinPriorityList", "autoDomainConfig.originalResinUseCount", "autoDomainConfig.originalResin20UseCount", "autoDomainConfig.originalResin40UseCount",
                 "autoDomainConfig.condensedResinUseCount", "autoDomainConfig.transientResinUseCount",
-                "autoDomainConfig.fragileResinUseCount", "CompletionAction"]),
+                "autoDomainConfig.fragileResinUseCount", "autoDomainConfig.autoArtifactSalvage", "CompletionAction"]),
     ]);
 
     public static IReadOnlyList<EngineParameterDefinition> Parameters { get; } = Array.AsReadOnly<EngineParameterDefinition>(
@@ -41,10 +41,12 @@ public static class BetterGiTaskCatalog
         Field("CompletionAction", "结束后动作", "enum", "无|关闭游戏|关闭软件|关闭游戏和软件", "无"),
         Field("autoDomainConfig.specifyResinUse", "指定树脂次数", "boolean", "true|false", "false", Global),
         Field("autoDomainConfig.resinPriorityList", "树脂优先序", "list", "上游秘境设置可选", "浓缩树脂,原粹树脂", Global),
+        Field("autoDomainConfig.originalResinUseCount", "原粹树脂次数（旧字段）", "integer", "非负整数", "0", Global),
         Field("autoDomainConfig.originalResin20UseCount", "20 原粹次数", "integer", "非负整数", "0", Global),
         Field("autoDomainConfig.originalResin40UseCount", "40 原粹次数", "integer", "非负整数", "0", Global),
         Field("autoDomainConfig.condensedResinUseCount", "浓缩树脂次数", "integer", "非负整数", "0", Global),
         Field("autoDomainConfig.transientResinUseCount", "须臾树脂次数", "integer", "非负整数", "0", Global),
+        Field("autoDomainConfig.autoArtifactSalvage", "秘境后分解圣遗物", "boolean", "true|false", "false", Global),
         Field("autoDomainConfig.fragileResinUseCount", "脆弱树脂次数", "integer", "非负整数", "0", Global),
     ]);
 

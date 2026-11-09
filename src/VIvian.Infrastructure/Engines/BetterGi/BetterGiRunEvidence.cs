@@ -3,6 +3,9 @@ using VIvian.Core.Execution;
 
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
+internal sealed record BetterGiRunObservation(int ProcessId, DateTimeOffset ProcessStartedAt, bool OwnedPrimary,
+    bool FlowEnded, bool DailyRewardVerified, bool ForeignActivitySeen, bool AdverseSignal, int? ExitCode);
+
 /// <summary>
 /// Collects the attributable BetterGI markers of one run and turns them into a verdict through the shared
 /// <see cref="CompletionEvidenceEvaluator"/>. Completion counts only when, for this run's own process:
@@ -10,6 +13,8 @@ namespace VIvian.Infrastructure.Engines.BetterGi;
 /// line followed the activation, and no configuration fallback, cancellation, nothing-done, error or fatal record
 /// appeared. Process exit alone, or a completion line from any other process or an earlier run, never counts.
 /// </summary>
+
+
 public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request, BetterGiAttribution attribution)
 {
     private readonly Lock _gate = new();
@@ -26,6 +31,13 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
 
     /// <summary>A BetterGI process other than the owned root wrote records after this run started.</summary>
     public bool ForeignActivitySeen { get; private set; }
+
+    internal BetterGiRunObservation Observe(int? exitCode)
+    {
+        lock (_gate)
+            return new(attribution.RootProcessId, attribution.RootStartTime, OwnedPrimarySeen, _completions == 1 && _activations.Count == 1 && !_completionBeforeActivation && !_configMismatch,
+                _dailyRewardCheck == BetterGiMarkerKind.DailyRewardVerified, ForeignActivitySeen, _signals.Count != 0, exitCode);
+    }
 
     public int IgnoredRecords { get; private set; }
     internal bool OwnedPrimarySeen { get; private set; }

@@ -510,7 +510,7 @@ public sealed class BetterGiLifecycleTests
         Assert.False(run.WaitForVerdictAsync(default).IsCompleted); // still running: nothing was sent to it
 
         var emergency = await run.RequestStopAsync(StopMode.Emergency, default);
-        Assert.Equal(CleanupState.Confirmed, emergency.Cleanup);
+        Assert.Equal(CleanupState.Unconfirmed, emergency.Cleanup); // no owned startup evidence
         var verdict = await run.WaitForVerdictAsync(new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
         Assert.NotEqual(RunOutcome.Success, verdict.Outcome);
         Assert.NotEqual(RunOutcome.Failed, verdict.Outcome);

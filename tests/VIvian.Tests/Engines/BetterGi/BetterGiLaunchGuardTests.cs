@@ -83,6 +83,67 @@ public sealed class BetterGiLaunchGuardTests
     }
 
     [Fact]
+    public async Task DomainResinCapsRemainSeparatedFromResinPriorityAndSalvage()
+    {
+        await using var fixture = new BetterGiFixture();
+        File.WriteAllText(Path.Combine(fixture.Root, "User", "config.json"), """
+            {
+              "autoDomainConfig": {
+                "specifyResinUse": true,
+                "resinPriorityList": [ "原粹树脂", "浓缩树脂" ],
+                "originalResinUseCount": 6, "originalResin20UseCount": 1, "originalResin40UseCount": 2,
+                "condensedResinUseCount": 3, "transientResinUseCount": 4,
+                "fragileResinUseCount": 5, "autoArtifactSalvage": true
+              }
+            }
+            """);
+
+        var plan = await BetterGiConfiguration.InspectDomainResinAsync(fixture.Root);
+
+        Assert.True(plan.SpecifyResinUse);
+        Assert.Equal(["原粹树脂", "浓缩树脂"], plan.Priority);
+        Assert.Equal((6, 1, 2, 3, 4, 5), (plan.Original, plan.Original20, plan.Original40, plan.Condensed, plan.Transient, plan.Fragile));
+        Assert.True(plan.HasExplicitBudget);
+        Assert.True(plan.AutoArtifactSalvage);
+    }
+
+    [Fact]
+    public async Task MisCasedGlobalResinFieldsDoNotEnableExplicitLimits()
+    {
+        await using var fixture = new BetterGiFixture();
+        File.WriteAllText(Path.Combine(fixture.Root, "User", "config.json"),
+            """{ "autoDomainConfig": { "SpecifyResinUse": true, "OriginalResin20UseCount": 3 } }""");
+
+        var plan = await BetterGiConfiguration.InspectDomainResinAsync(fixture.Root);
+
+        Assert.False(plan.SpecifyResinUse);
+        Assert.Equal(0, plan.Original20);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task AProfileWithSalvageOrUnboundedResinDoesNotReachLaunch(bool salvage, bool specifyResin)
+    {
+        await using var fixture = new BetterGiFixture();
+        var user = Path.Combine(fixture.Root, "User");
+        File.WriteAllText(Path.Combine(user, "OneDragon", "默认配置.json"),
+            """{ "Name": "默认配置", "TaskEnabledList": { "自动秘境": true } }""");
+        File.WriteAllText(Path.Combine(user, "config.json"), System.Text.Json.JsonSerializer.Serialize(new
+        {
+            autoDomainConfig = new { autoArtifactSalvage = salvage, specifyResinUse = specifyResin },
+        }));
+        var adapter = fixture.Adapter(BetterGiArguments.OneDragon("默认配置").Request);
+
+        var error = await Assert.ThrowsAsync<EngineStartException>(
+            () => adapter.LaunchAsync(fixture.Context, fixture.Supervisor, default));
+
+        Assert.True(error.NothingStarted);
+        Assert.Equal(0, fixture.Supervisor.Calls);
+    }
+
+    [Fact]
     public async Task AProfileRemovedAfterPreflightIsRecheckedAtLaunch()
     {
         await using var fixture = new BetterGiFixture();
@@ -135,6 +196,20 @@ public sealed class BetterGiLaunchGuardTests
 
         Assert.Equal(RunOutcome.Indeterminate, verdict.Outcome);
         Assert.Equal(ReasonCodes.CleanupUnconfirmed, verdict.ReasonCode);
+        Assert.Equal(CleanupState.Unconfirmed, await run.ReconcileAsync(default));
+        await run.DisposeAsync();
+        Assert.True(fixture.Registry.IsBusy);
+    }
+
+    [Fact]
+    public async Task EmergencyStopWithoutPrimaryEvidenceKeepsTheSlotBlocked()
+    {
+        await using var fixture = new BetterGiFixture();
+        var (run, group) = await fixture.LaunchAsync(fixture.Adapter());
+        var stop = await run.RequestStopAsync(StopMode.Emergency, default);
+
+        Assert.Equal(0, group.ActiveProcessCount);
+        Assert.Equal(CleanupState.Unconfirmed, stop.Cleanup);
         Assert.Equal(CleanupState.Unconfirmed, await run.ReconcileAsync(default));
         await run.DisposeAsync();
         Assert.True(fixture.Registry.IsBusy);

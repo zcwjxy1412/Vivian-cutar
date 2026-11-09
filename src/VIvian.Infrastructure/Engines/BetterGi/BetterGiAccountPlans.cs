@@ -11,7 +11,7 @@ public static class BetterGiAccountPlans
 {
     private const string TaskSource = "BetterGI 0.66.0 OneDragonFlowViewModel / AutoDomainParam";
     private const string CurrentParty = "当前队伍";
-    private const string NoDomain = "未设置";
+    internal const string NoDomain = "未设置";
     internal const string Daily = "dailyRewards";
     internal const string Craft = "craftCondensedResin";
     internal const string Domain = "autoDomain";
@@ -101,30 +101,13 @@ public sealed class BetterGiAccountPlan
 
     public BetterGiPlanFiles Render(Guid accountId, string gameExecutable)
     {
-        if (accountId == Guid.Empty)
-            throw new ArgumentException("需要原神账号的内部档案编号。", nameof(accountId));
+        var name = SourceProfileName(accountId);
         if (!Path.IsPathFullyQualified(gameExecutable) || !ClientNames.Contains(Path.GetFileName(gameExecutable), StringComparer.OrdinalIgnoreCase))
             throw new ArgumentException("需要原神客户端的完整路径。", nameof(gameExecutable));
         if (Tasks.Count == 0)
             throw new InvalidOperationException("此账号没有已启用的原神任务。");
 
-        var name = $"VIvian {accountId:N}";
         var domain = Enabled(BetterGiAccountPlans.Domain);
-        var profile = new
-        {
-            Name = name,
-            TaskEnabledList = Tasks.ToDictionary(task => task.Id, _ => true),
-            TaskOrder = Tasks.Select(task => task.Id).ToArray(),
-            TaskDefinitions = Tasks.ToDictionary(task => task.Id, task => task.Title),
-            AdventurersGuildCountry = Values["AdventurersGuildCountry"],
-            DailyRewardPartyName = BetterGiAccountPlans.Party(Values["DailyRewardPartyName"]),
-            CraftingBenchCountry = Values["CraftingBenchCountry"],
-            MinResinToKeep = BetterGiAccountPlans.Count(Values, "MinResinToKeep"),
-            DomainName = domain ? Values["DomainName"] : "",
-            PartyName = BetterGiAccountPlans.Party(Values["PartyName"]),
-            WeeklyDomainEnabled = false,
-            CompletionAction = "关闭软件",
-        };
         var settings = new
         {
             selectedOneDragonFlowConfigName = name,
@@ -147,9 +130,41 @@ public sealed class BetterGiAccountPlan
                 autoArtifactSalvage = false, rewardRecognitionEnabled = domain,
             },
         };
-        return new(name, JsonSerializer.Serialize(profile, Json), JsonSerializer.Serialize(settings, Json));
+        return new(name, RenderProfile(name, includeDisabled: false), JsonSerializer.Serialize(settings, Json));
 
         int CountWhenDomain(string key) => domain ? BetterGiAccountPlans.Count(Values, key) : 0;
+    }
+
+    internal static string SourceProfileName(Guid accountId)
+    {
+        if (accountId == Guid.Empty)
+            throw new ArgumentException("需要原神账号的内部档案编号。", nameof(accountId));
+        return $"VIvian {accountId:N}";
+    }
+
+    internal string RenderSourceProfile(Guid accountId) => RenderProfile(SourceProfileName(accountId), includeDisabled: true);
+
+    private string RenderProfile(string name, bool includeDisabled)
+    {
+        var tasks = Order.Where(entry => includeDisabled || Enabled(entry.Setting)).ToArray();
+        var domainName = Values["DomainName"];
+        return JsonSerializer.Serialize(new
+        {
+            Name = name,
+            TaskEnabledList = tasks.ToDictionary(entry => entry.Task, entry => Enabled(entry.Setting)),
+            TaskOrder = tasks.Select(entry => entry.Task).ToArray(),
+            TaskDefinitions = tasks.ToDictionary(entry => entry.Task,
+                entry => BetterGiTaskCatalog.Tasks.Single(task => task.Id == entry.Task).Title),
+            AdventurersGuildCountry = Values["AdventurersGuildCountry"],
+            DailyRewardPartyName = BetterGiAccountPlans.Party(Values["DailyRewardPartyName"]),
+            CraftingBenchCountry = Values["CraftingBenchCountry"],
+            MinResinToKeep = BetterGiAccountPlans.Count(Values, "MinResinToKeep"),
+            DomainName = (includeDisabled || Enabled(BetterGiAccountPlans.Domain)) &&
+                domainName != BetterGiAccountPlans.NoDomain ? domainName : "",
+            PartyName = BetterGiAccountPlans.Party(Values["PartyName"]),
+            WeeklyDomainEnabled = false,
+            CompletionAction = includeDisabled ? "无" : "关闭软件",
+        }, Json);
     }
 
     private bool Enabled(string setting) => Values[setting] == "true";

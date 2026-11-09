@@ -61,6 +61,7 @@ public sealed class MultiAccountOrchestrator
         var aborted = false;
         var cancelled = false;
         var gameClean = false;
+        var desktopTouched = false;
         string? stopReason = null;
         GameAccount? previous = null;
         string? previousUid = null;
@@ -82,7 +83,9 @@ public sealed class MultiAccountOrchestrator
             // The driver still verifies the saved-account screen before the first account can run.
             batch = await StageAsync(batch, accounts[0], BatchRunState.RecognizingLogin,
                 "正在启动星铁或等待已保存账号界面", progress, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
             beforeDesktopMutation?.Invoke();
+            desktopTouched = true;
             var prepared = await _driver.EnsureLoginAsync(policy, cancellationToken);
             if (!prepared.Ok)
             {
@@ -218,12 +221,11 @@ public sealed class MultiAccountOrchestrator
         catch (OperationCanceledException)
         {
             cancelled = true;
-            try
+            if (desktopTouched)
             {
-                beforeDesktopMutation?.Invoke();
-                gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok;
+                try { gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok; }
+                catch { /* user stop must still finish */ }
             }
-            catch { /* user stop must still finish */ }
         }
         catch (Exception ex)
         {

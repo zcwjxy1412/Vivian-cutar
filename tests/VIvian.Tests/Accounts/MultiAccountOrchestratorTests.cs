@@ -12,6 +12,22 @@ public sealed class MultiAccountOrchestratorTests
     private static readonly AccountConfigurationMode Unified = AccountConfigurationMode.Unified;
 
     [Fact]
+    public async Task CancellationWhileReadingSettingsDoesNotTouchTheDesktop()
+    {
+        await using var fixture = await Fixture.CreateAsync("A");
+        var driver = new FakeLoginDriver();
+        var touches = 0;
+        var result = await new MultiAccountOrchestrator(fixture.Database, driver).ExecuteAsync(GameId.StarRail,
+            fixture.Accounts, Unified, (_, _) => throw new OperationCanceledException(),
+            (_, _, _) => throw new InvalidOperationException("must not run"), null, CancellationToken.None,
+            beforeDesktopMutation: () => touches++);
+        Assert.False(result.Completed);
+        Assert.Equal(0, touches);
+        Assert.Equal(0, driver.Stops);
+        Assert.Equal("stopped", Assert.Single(await fixture.Database.LoadRecentBatchesAsync()).State);
+    }
+
+    [Fact]
     public async Task UnexpectedDriverFailureStillFinalizesBatch()
     {
         await using var fixture = await Fixture.CreateAsync("A", "B");

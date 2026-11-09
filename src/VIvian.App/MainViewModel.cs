@@ -702,6 +702,7 @@ public sealed class MainViewModel : ObservableObject
 
         var accounts = selected.Select(r => r.Account).ToArray();
         var installPath = card.InstallPath;
+        IReadOnlyDictionary<string, string>? approvedSettings = null;
         if (approved is not null)
         {
             var provider = new StarRailAccountConfigurationProvider(Accounts.Database, _control, () => installPath,
@@ -713,6 +714,8 @@ public sealed class MainViewModel : ObservableObject
                 || Accounts.SelectedStarRail?.Id != approved.Target.AccountId || !Assistant.EnableScheduleProposals
                 || approved.Expires <= DateTimeOffset.UtcNow || card.InstallPath != installPath)
             { BatchStatus = "账号、任务或资源配置已变化，请重新生成运行计划。"; return; }
+            approvedSettings = current.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+                .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
         }
         using var cancellation = new CancellationTokenSource();
         _batchCts = cancellation;
@@ -735,8 +738,8 @@ public sealed class MainViewModel : ObservableObject
                 var plan = await Accounts.Database.LoadAccountTaskPlanAsync(account.Id, token);
                 if (!plan.DailyEnabled)
                     throw new InvalidOperationException($"「{account.Name}」的日常任务已关闭，请在游戏管理启用或在账号管理取消勾选。");
-                var snapshot = new Dictionary<string, string>(defaults, StringComparer.Ordinal);
-                if (account.Id != LegacyStarRail)
+                var snapshot = new Dictionary<string, string>(approvedSettings ?? defaults, StringComparer.Ordinal);
+                if (approvedSettings is null && account.Id != LegacyStarRail)
                 {
                     var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id, token);
                     foreach (var (key, value) in saved.Values) snapshot[key] = value;

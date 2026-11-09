@@ -26,7 +26,7 @@
 
 ## 配置与离线预览
 
-隔离版沿用 `%LOCALAPPDATA%\VIvian-M6-StarRailTest` 中的账号和任务计划。通过「账号管理 → 原神」建档，再在「游戏管理 → 原神」查看计划和 BetterGI 源档案。0.66.0 没有高级设置页深链，原软件中的入口为「一条龙」。
+合流隔离版 `7c98cdc` 沿用 `%LOCALAPPDATA%\VIvian-M6-StarRailTest` 中的账号和任务计划。通过「账号管理 → 原神」建档或绑定已有档案，再在「游戏管理 → 原神」查看计划和 BetterGI 源档案。0.66.0 没有高级设置页深链，原软件中的入口为「一条龙」。
 
 如需只读预览已导出的账号设置，使用普通 PowerShell 运行以下命令。JSON 只含账号任务参数，账号编号是 VIvian 的内部 GUID。
 
@@ -44,5 +44,6 @@ $dll = "$probe\bin\Release\net10.0-windows10.0.19041.0\VIvian.BetterGiProbe.dll"
 - 配置界面合流 `a504105` 的 Windows M5 回归 832 项通过。WPF 冒烟验证新增账号、保存、回读、原神账号隔离与星铁配置隔离。
 - 原神开发提交 `74167531f6b7349954297b668fe50f4b93228034` 通过 Windows M5 Release 全量回归 828 项。BetterGI 诊断工具和 WPF Release 均构建成功，0 警告、0 错误。
 - 原神开发提交 `def73a707a32731131249e06ee1c3319faed8cbe` 通过 Windows M5 Release 全量回归 858 项。前一开发提交 `acc0d23` 的 BetterGI 诊断工具和 WPF Release 构建通过，0 警告、0 错误。
+- 合流包 `7c98cdcf6777ae13e8f5de3424dce09add7225e2` 通过 Windows M5 Release 全量回归 923 项和 WPF 冒烟。1024×768 渲染检查使用临时数据，ZIP 摘要已核对。[合流 PR #57](https://github.com/zcwjxy1412/Vivian-cutar/pull/57)
 - 同一张用户照片验证新建、重复导入和绑定现有计划。测试库与正式数据隔离，原始照片与完整 OCR 未进入仓库。
 - 离线导出、只读预览、正确账号绑定、错账号阻断、摘要重算后的危险字段阻断已通过。恢复入口通过 18 项离线守卫检查。

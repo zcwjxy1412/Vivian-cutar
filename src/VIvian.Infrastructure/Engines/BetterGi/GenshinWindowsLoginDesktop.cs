@@ -1,0 +1,222 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
+using VIvian.Core.Accounts;
+using VIvian.Infrastructure.Accounts;
+using VIvian.Infrastructure.Engines;
+using VIvian.Infrastructure.Processes;
+
+namespace VIvian.Infrastructure.Engines.BetterGi;
+
+internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterGiProgram, GenshinLoginTemplates templates)
+    : IGenshinLoginDesktop
+{
+    private const string ClientProcessName = "YuanShen";
+    private readonly BetterGiProcessProbe _instances = new();
+    private GenshinDesktopFrame? _current;
+    private CapturedFrame? _pixels;
+    private long _readAt;
+    private bool _active = true;
+
+    public void Close()
+    {
+        _active = false;
+        _current = null;
+        _pixels = null;
+    }
+
+    public async Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var observed = Stopwatch.GetTimestamp();
+        _pixels = null;
+        var window = _active ? FindForeground() : null;
+        var view = new GenshinDesktopFrame(window, GenshinView.Unknown, [], null);
+        if (window is not null)
+        {
+            var (frame, check) = ScreenCapture.CaptureChecked(window, ClientProcessName);
+            if (frame is not null && frame.Width == window.ClientWidth && frame.Height == window.ClientHeight &&
+                CaptureVerdict.Evaluate(check).Accept)
+            {
+                var ocr = await WindowsOcrReader.ReadAsync(frame, ct).ConfigureAwait(false);
+                if (!ocr.Available) throw new InvalidOperationException(ocr.Error ?? "原神登录需要中文本地 OCR。");
+                view = Classify(window, frame, ocr.Lines, ct);
+                _pixels = frame;
+            }
+        }
+        if (!_active || FindForeground() != window) view = view with { Window = null };
+        _readAt = observed;
+        return _current = view;
+    }
+
+    public bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point)
+    {
+        var latest = Interlocked.Exchange(ref _current, null);
+        if (!_active || !ReferenceEquals(frame, latest) || frame.Window is not { } window ||
+            Stopwatch.GetElapsedTime(_readAt) > TimeSpan.FromSeconds(3) || FindForeground() != window ||
+            _instances.IsBusy(betterGiProgram))
+            return false;
+        if (point is null || point.X < 0 || point.Y < 0 || point.Right > window.ClientWidth ||
+            point.Bottom > window.ClientHeight || !StillMatches(window, point))
+            return false;
+
+        if (input == GenshinInput.OpenMenu)
+            return FindForeground() == window && SendPair(Key(0), Key(2));
+        var target = new WindowsNative.Point((int)(point.X + point.Width / 2), (int)(point.Y + point.Height / 2));
+        if (!WindowsNative.ClientToScreen(window.Handle, ref target) || !Owns(window.Handle, target) ||
+            !WindowsNative.SetCursorPos(target.X, target.Y) || !GetCursorPos(out var actual) ||
+            actual.X != target.X || actual.Y != target.Y || !Owns(window.Handle, target) || FindForeground() != window)
+            return false;
+        return SendPair(Mouse(WindowsNative.MouseEventLeftDown), Mouse(WindowsNative.MouseEventLeftUp));
+    }
+
+    private bool StillMatches(StarRailWindowInfo window, ScreenRegion point)
+    {
+        if (_pixels is not { } before) return false;
+        var x = (int)point.X;
+        var y = (int)point.Y;
+        var width = Math.Max(1, (int)point.Width);
+        var height = Math.Max(1, (int)point.Height);
+        var now = ScreenCapture.CaptureRegion(window.OriginX + x, window.OriginY + y, width, height, "input-recheck");
+        if (now is null) return false;
+        var changed = 0;
+        for (var dy = 0; dy < height; dy++)
+        for (var dx = 0; dx < width; dx++)
+        {
+            var oldIndex = ((y + dy) * before.Width + x + dx) * 4;
+            var newIndex = (dy * width + dx) * 4;
+            if (Math.Abs(before.Bgra[oldIndex] - now.Bgra[newIndex]) > 45 ||
+                Math.Abs(before.Bgra[oldIndex + 1] - now.Bgra[newIndex + 1]) > 45 ||
+                Math.Abs(before.Bgra[oldIndex + 2] - now.Bgra[newIndex + 2]) > 45)
+                changed++;
+        }
+        return changed * 10 <= width * height;
+    }
+
+    private GenshinDesktopFrame Classify(StarRailWindowInfo window, CapturedFrame frame, IReadOnlyList<RecognizedText> lines, CancellationToken ct)
+    {
+        var scale = frame.Height / 1080d;
+        ScreenRegion Region(double x, double y, double w, double h) => new(x * scale, y * scale, w * scale, h * scale);
+        ScreenRegion? Find(string file, ScreenRegion search) => templates.Find(frame, file, search, ct);
+        GenshinDesktopFrame View(GenshinView view, ScreenRegion? main = null, ScreenRegion? secondary = null, string? uid = null) =>
+            new(window, view, [], main, secondary, uid);
+
+        var card = GenshinLoginScreen.Analyze(frame.Width, frame.Height, lines);
+        if (card.State == GenshinLoginScreenState.NeedsUser) return View(GenshinView.NeedsUser);
+        var caret = Find("caret.png", Region(1045, 440, 225, 115));
+        if (card is { State: GenshinLoginScreenState.SavedAccountCard, Account: { } row })
+            return new(window, GenshinView.Card, [row], card.EnterLabel, caret);
+
+        var normalized = lines.Select(line => line with { Text = string.Concat(line.Text.Where(c => !char.IsWhiteSpace(c))) }).ToArray();
+        var masks = normalized.Where(line => GenshinLoginScreen.NormalizeExactMask(line.Text).Length != 0).ToArray();
+        // An expanded list can cover the original button labels. Require the pinned dropdown caret and brand.
+        var brand = Label(normalized, Region(835, 280, 250, 190), t => t.Equals("miHoYo", StringComparison.OrdinalIgnoreCase));
+        var accountList = Region(670, 460, 565, 515);
+        if (brand is not null && caret is not null && masks.Length >= 2 &&
+            masks.All(line => accountList.Contains(line.CenterX, line.CenterY)))
+        {
+            var rows = masks.OrderBy(line => line.CenterY).Select((line, index) => new LoginAccountObservation(
+                line.Text, GenshinLoginScreen.NormalizeExactMask(line.Text), index, line.X, line.Y,
+                line.Width, line.Height, .85, "")).ToArray();
+            if (rows.Zip(rows.Skip(1)).All(pair => pair.First.Y + pair.First.Height < pair.Second.Y))
+                return new(window, GenshinView.Dropdown, rows, null);
+        }
+        if (brand is not null || masks.Length > 0) return View(GenshinView.Unknown);
+
+        var dialog = Region(675, 365, 570, 370);
+        var leave = Label(normalized, dialog, t => t == "退出至登录界面");
+        if (leave is not null) return View(GenshinView.LeaveWorld, leave);
+        var confirmLogout = Label(normalized, dialog, t => t.Contains("退出登录", StringComparison.Ordinal) ||
+            t.Contains("退出当前账号", StringComparison.Ordinal));
+        if (confirmLogout is not null && Find("quit.png", dialog) is { } quit)
+            return View(GenshinView.ConfirmLogout, quit);
+
+        var gate = Label(normalized, Region(805, 945, 310, 135), t => t is "点击进入" or "点击进入游戏");
+        if (gate is not null && Find("logout.png", Region(1740, 895, 180, 185)) is { } logout)
+            return View(GenshinView.Gate, gate, logout);
+        if (normalized.Any(line => line.Text is "确定" or "确认" or "取消" ||
+            line.Text.Contains("退出", StringComparison.Ordinal) || line.Text.Contains("网络", StringComparison.Ordinal)))
+            return View(GenshinView.Unknown);
+
+        if (Find("paimon_cancel.png", Region(0, 0, 120, 120)) is not null &&
+            Label(normalized, Region(0, 190, 650, 790), t => t is "背包" or "图鉴" or "好友") is not null)
+            return View(GenshinView.Menu, Region(38, 1012, 24, 24));
+        if (Find("paimon_menu.png", Region(0, 0, 150, 150)) is not { } paimon)
+            return View(GenshinView.Unknown);
+
+        var hud = Region(1500, 1000, 420, 80);
+        var uid = GameUidParser.Find(normalized.Where(line => hud.Contains(line.CenterX, line.CenterY)));
+        return View(GenshinView.World, paimon, uid: uid);
+    }
+
+    private static ScreenRegion? Label(IEnumerable<RecognizedText> lines, ScreenRegion region, Func<string, bool> label)
+    {
+        var matches = lines.Where(line => region.Contains(line.CenterX, line.CenterY) && label(line.Text)).Take(2).ToArray();
+        return matches.Length == 1 ? new(matches[0].X, matches[0].Y, matches[0].Width, matches[0].Height) : null;
+    }
+
+    private StarRailWindowInfo? FindForeground()
+    {
+        WindowsNative.EnsureDpiAwareness();
+        var hwnd = WindowsNative.GetForegroundWindow();
+        if (hwnd == IntPtr.Zero || WindowsNative.IsIconic(hwnd) ||
+            !WindowsNative.GetClientRect(hwnd, out var rect) ||
+            rect.Height is < 720 or > 1440 || Math.Abs(rect.Width / (double)rect.Height - 16d / 9d) > .005)
+            return null;
+        var origin = new WindowsNative.Point(0, 0);
+        if (!WindowsNative.ClientToScreen(hwnd, ref origin)) return null;
+        WindowsNative.GetWindowThreadProcessId(hwnd, out var pid);
+        using var handle = NativeMethods.OpenProcess(0x1000, false, (int)pid);
+        var path = new StringBuilder(32768);
+        var length = (uint)path.Capacity;
+        if (handle.IsInvalid || !QueryFullProcessImageName(handle, 0, path, ref length) ||
+            !string.Equals(path.ToString(), gamePath, StringComparison.OrdinalIgnoreCase))
+            return null;
+        try
+        {
+            using var process = Process.GetProcessById((int)pid);
+            var start = StarRailWindow.StartTime(process);
+            return start is null ? null : new(hwnd, (int)pid, "", rect.Width, rect.Height, origin.X, origin.Y, start);
+        }
+        catch (ArgumentException) { return null; }
+    }
+
+    private static bool Owns(IntPtr hwnd, WindowsNative.Point point) =>
+        WindowsNative.GetAncestor(WindowsNative.WindowFromPoint(point), WindowsNative.GaRoot) == hwnd;
+
+    private static bool SendPair(NativeInput down, NativeInput up)
+    {
+        var size = Marshal.SizeOf<NativeInput>();
+        var sent = SendInput(2, [down, up], size);
+        if (sent == 1) SendInput(1, [up], size);
+        return sent == 2;
+    }
+
+    private static NativeInput Key(uint flags) => new() { Type = 1, Value = new() { Keyboard = new() { Key = 0x1B, Flags = flags } } };
+    private static NativeInput Mouse(uint flags) => new() { Value = new() { Mouse = new() { Flags = flags } } };
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeInput { public uint Type; public NativeInputValue Value; }
+    [StructLayout(LayoutKind.Explicit)]
+    private struct NativeInputValue
+    {
+        [FieldOffset(0)] public MouseInput Mouse;
+        [FieldOffset(0)] public KeyboardInput Keyboard;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KeyboardInput { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint SendInput(uint count, [In] NativeInput[] inputs, int size);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out WindowsNative.Point point);
+
+    [DllImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, StringBuilder path, ref uint length);
+}

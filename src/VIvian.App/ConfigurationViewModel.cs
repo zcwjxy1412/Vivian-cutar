@@ -94,12 +94,15 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
             if (!File.Exists(version)) { Status = "未找到星铁助手版本文件；请检查安装目录。"; return; }
             if (File.ReadAllText(version).Trim() != EngineCatalog.March7th.PinnedVersion)
             { Status = "星铁助手版本与当前适配版本不兼容，请先核对安装版本。"; return; }
+            if (_isRunning() || !string.Equals(path, _installPath(_game), StringComparison.OrdinalIgnoreCase))
+            { Status = "任务或安装目录已变化，请核对后再打开星铁助手。"; return; }
+            using var desktop = DesktopOperationLease.Acquire(_profileDirectory);
             VIvian.Infrastructure.Processes.WindowsProcessSupervisor.OpenUserInterface(path, "March7th Launcher.exe");
             Status = "已打开星铁助手主界面；此版本没有已核对的支援设置直达入口，请在原程序中打开详细设置。保存后会同步到这里。";
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
         { Status = "你在管理员确认里选了“否”，星铁助手没有打开。"; }
-        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or ArgumentException)
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException or ArgumentException or InvalidOperationException)
         { Status = "没能打开星铁助手：" + ex.Message; }
     }
 

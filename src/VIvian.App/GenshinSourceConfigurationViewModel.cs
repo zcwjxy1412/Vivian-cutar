@@ -62,7 +62,6 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
     public bool CanSave => CanOpen && !_readFailed && !_conflicted && HasDraft;
     public bool HasDraft => ProfileRows.Any(row => row.IsChanged);
     public bool IsIdle => !_busy;
-    public string? BoundInstallRoot => _binding?.InstallRoot;
     internal event Action? FieldsChanged;
     internal bool Manages(string path) => ProfileRows.Any(row => row.Path == path);
 

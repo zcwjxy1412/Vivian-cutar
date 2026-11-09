@@ -563,7 +563,7 @@ public partial class App : Application
             }
             finally { card.SavedInstallPath = oldPath; }
             var finishSourceWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var sourceWrite = vm.SerializeGenshinSourceWriteAsync(() => finishSourceWrite.Task);
+            var sourceWrite = vm.SerializeGenshinOperationAsync(() => finishSourceWrite.Task);
             try
             {
                 vm.SaveCommand.Execute(null);
@@ -577,12 +577,40 @@ public partial class App : Application
                 await sourceWrite;
             }
         }
+        if (RealExecutionPolicy.IsUnifiedInstall && !genshin.IsLoginVerificationAvailable)
+            throw new InvalidOperationException("The unified app must expose Genshin login verification");
         if (genshin.IsLoginVerificationAvailable)
         {
             main.GenshinSettingsTabs.SelectedIndex = 1;
             window.UpdateLayout();
-            if (main.VerifyGenshinLoginButton.Command != genshin.VerifyLoginCommand)
-                throw new InvalidOperationException("The isolated Genshin login verification is not bound");
+            if (main.VerifyGenshinLoginButton.Command != genshin.VerifyLoginCommand ||
+                !Equals(main.VerifyGenshinLoginButton.Content, "启动并验收登录"))
+                throw new InvalidOperationException("Genshin login verification must bind directly without a countdown");
+            var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var login = vm.SerializeGenshinOperationAsync(() => genshin.RunLoginOperationAsync(async token =>
+            {
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    cancelled.SetResult();
+                    throw;
+                }
+            }));
+            try
+            {
+                vm.Configuration.OpenUpstreamCommand.Execute(null);
+                if (!vm.Configuration.Status.Contains("任务运行中", StringComparison.Ordinal))
+                    throw new InvalidOperationException("The Star Rail launcher was not blocked during simulated Genshin login");
+                if (!genshin.IsVerifyingLogin || !vm.CanStopAll ||
+                    !await vm.WaitForDesktopOperationShutdownAsync(TimeSpan.FromSeconds(5)) ||
+                    !cancelled.Task.IsCompletedSuccessfully || vm.CanStopAll)
+                    throw new InvalidOperationException("The common stop and shutdown path did not cancel the simulated Genshin login");
+            }
+            finally
+            {
+                genshin.CancelLogin();
+                await login;
+            }
         }
         CaptureAccountScreens(main, Array.IndexOf(headers, "账号管理"), Array.IndexOf(headers, "游戏管理"), root);
         main.GenshinSettingsTabs.SelectedIndex = 0;
@@ -591,8 +619,9 @@ public partial class App : Application
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
-        return "three game account tabs isolated; unified Genshin editor picked the recognized account and checked late BetterGI discovery; " +
-            "Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
+        var loginReport = genshin.IsLoginVerificationAvailable ? " direct Genshin login entry and simulated stop verified;" : "";
+        return "three game account tabs isolated; unified Genshin editor picked the recognized account and checked late BetterGI discovery;" +
+            loginReport + " Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
     }
 
     private static void CaptureAccountScreens(MainWindow window, int accounts, int games, string root)

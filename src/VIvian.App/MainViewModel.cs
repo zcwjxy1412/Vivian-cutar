@@ -118,12 +118,10 @@ public sealed class MainViewModel : ObservableObject
     public bool BatchRunning
     {
         get => _batchRunning;
-        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); BatchRunningChanged?.Invoke(); }
+        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); }
     }
-    /// <summary>Raised when a multi-account batch starts or ends (the F10 key is held for the whole batch).</summary>
-    public event Action? BatchRunningChanged;
-    /// <summary>The home "停止" button and F10 stop whatever is running: a single run or a whole account batch.</summary>
-    public bool CanStopAll => BatchRunning || Queue.IsRunning;
+    /// <summary>The home stop button and F10 also cancel a login verification.</summary>
+    public bool CanStopAll => BatchRunning || Queue.IsRunning || GenshinConfiguration.IsVerifyingLogin;
     public RelayCommand StopAllCommand { get; private set; } = null!;
 
     /// <summary>Actual token of this process, shown on the home page instead of a fixed claim.</summary>
@@ -133,6 +131,7 @@ public sealed class MainViewModel : ObservableObject
 
     public void StopAll()
     {
+        GenshinConfiguration.CancelLogin();
         if (BatchRunning)
         {
             _batchCts?.Cancel();
@@ -333,13 +332,17 @@ public sealed class MainViewModel : ObservableObject
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
-            () => BatchRunning || Queue.IsRunning, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
+            () => CanStopAll, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
         GenshinConfiguration = new GenshinConfigurationViewModel(accounts.Database,
             new GenshinAccountConfigurationProvider(accounts.Database),
             () => IsIdle && !BatchRunning && !Queue.IsRunning, paths.DataDirectory,
             () => IsIdle && !BatchRunning && !Queue.IsRunning && !Queue.HasUnresolved && !_control.HasPendingConfigurationRestore,
-            () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinSourceWriteAsync);
+            () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinOperationAsync);
+        GenshinConfiguration.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin)) Raise(nameof(CanStopAll));
+        };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>
@@ -388,7 +391,7 @@ public sealed class MainViewModel : ObservableObject
             card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
             card.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(EngineCard.Compatibility)) RaiseHome(); };
         }
-        bool ConfigurationBlocked() => BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
+        bool ConfigurationBlocked() => CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
         var starRailConfiguration = new VIvian.Infrastructure.Assistant.StarRailAccountConfigurationProvider(
             accounts.Database, _control, () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath, ConfigurationBlocked,
             () => DesktopOperationLease.Acquire(paths.DataDirectory));
@@ -817,7 +820,7 @@ public sealed class MainViewModel : ObservableObject
         finally { Busy(false); _operation.Release(); }
     }
 
-    internal async Task SerializeGenshinSourceWriteAsync(Func<Task> action)
+    internal async Task SerializeGenshinOperationAsync(Func<Task> action)
     {
         // The main operation gate also owns saving and auto-discovering engine paths.
         if (!await _operation.WaitAsync(0))
@@ -826,12 +829,12 @@ public sealed class MainViewModel : ObservableObject
         finally { _operation.Release(); }
     }
 
-    internal async Task<bool> WaitForBatchShutdownAsync(TimeSpan timeout)
+    internal async Task<bool> WaitForDesktopOperationShutdownAsync(TimeSpan timeout)
     {
         StopAll();
         if (!await _operation.WaitAsync(timeout)) return false;
         _operation.Release();
-        return !BatchRunning && !Queue.IsRunning;
+        return !CanStopAll;
     }
 
     private async Task SaveAsync()

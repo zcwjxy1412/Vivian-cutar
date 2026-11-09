@@ -271,7 +271,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TabItem Header="登录验收" Visibility="{Binding IsLoginVerificationAvailable, Converter={StaticResource Visible}}">
 <StackPanel IsVisibleChanged="GenshinLoginVisibilityChanged">
 <TextBlock Text="原神账号登录验收" Style="{StaticResource H2}"/>
-<TextBlock Text="用管理员身份打开隔离测试版，退出 BetterGI，手动打开原神国服。验收只切换所选账号并核对入场，完成后保留游戏客户端。" Style="{StaticResource Small}"/>
+<TextBlock Text="从「启动 furina」打开 VIvian 并确认 Windows 授权，退出 BetterGI 后开始验收。程序会自动启动或接入已核验的原神国服客户端，按顺序登录所选账号。只核对登录与入场，结束后保留游戏客户端。" Style="{StaticResource Small}"/>
 <StackPanel IsEnabled="{Binding IsIdle}" Margin="0,10,0,0">
 <TextBlock Style="{StaticResource Small}"><Run Text="第一个账号 · "/><Run Text="{Binding SelectedAccount.Name, Mode=OneWay}"/></TextBlock>
 <WrapPanel Margin="0,4,0,8">
@@ -283,7 +283,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Button DockPanel.Dock="Right" Content="选择 YuanShen.exe" Click="BrowseGenshinExecutable" Margin="8,0,0,0"/>
 <TextBox Text="{Binding GameExecutable, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="原神国服程序路径"/>
 </DockPanel>
-<Button x:Name="VerifyGenshinLoginButton" Style="{StaticResource Primary}" Content="开始 5 秒倒计时" Command="{Binding VerifyLoginCommand}" HorizontalAlignment="Left"/>
+<Button x:Name="VerifyGenshinLoginButton" Style="{StaticResource Primary}" Content="启动并验收登录" Command="{Binding VerifyLoginCommand}" HorizontalAlignment="Left"/>
 </StackPanel>
 <Button Content="取消登录验收" Command="{Binding CancelLoginCommand}" Visibility="{Binding IsVerifyingLogin, Converter={StaticResource Visible}}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 <TextBlock Text="{Binding LoginStatus}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>

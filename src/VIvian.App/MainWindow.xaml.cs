@@ -21,18 +21,22 @@ public partial class MainWindow : Window
             _stopping = true;
             try
             {
-                if (viewModel.BatchRunning)
+                if (viewModel.BatchRunning || viewModel.GenshinConfiguration.IsVerifyingLogin)
                 {
-                    if (!await viewModel.WaitForBatchShutdownAsync(ShutdownStopTimeout)) return;
+                    if (!await viewModel.WaitForDesktopOperationShutdownAsync(ShutdownStopTimeout)) return;
                 }
                 else await viewModel.Queue.StopForShutdownAsync(ShutdownStopTimeout);
             }
-            catch (Exception ex) { Serilog.Log.Error("Shutdown stop failed: {ErrorType}", ex.GetType().Name); }
+            catch (Exception ex)
+            {
+                Serilog.Log.Error("Shutdown stop failed: {ErrorType}", ex.GetType().Name);
+                return;
+            }
             finally { _stopping = false; }
             _closeAfterStop = true;
             Close();
         };
-        // F10 stops a running queue from anywhere, even while the game is full-screen.
+        // F10 cancels the active operation even while the game is full-screen.
         SourceInitialized += (_, _) =>
         {
             _hotkey = new StopHotkey(this, () =>
@@ -41,7 +45,6 @@ public partial class MainWindow : Window
                 Serilog.Log.Information("Emergency stop requested by F10");
                 viewModel.StopAll();
             });
-            // Held for a single run and for a whole multi-account batch (including the switching between accounts).
             void Update()
             {
                 if (_hotkey is null) return;
@@ -53,8 +56,10 @@ public partial class MainWindow : Window
                     ? "游戏全屏时也可以按 F10 立即停止。"
                     : "F10 已被其他程序占用（例如星铁助手窗口开着），请用 VIvian 里的“紧急停止”按钮。";
             }
-            viewModel.Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Update(); };
-            viewModel.BatchRunningChanged += () => Dispatcher.BeginInvoke(Update);
+            viewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.CanStopAll)) Dispatcher.BeginInvoke(Update);
+            };
         };
         Closed += (_, _) =>
         {

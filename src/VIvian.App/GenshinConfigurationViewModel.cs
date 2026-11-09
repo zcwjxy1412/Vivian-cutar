@@ -6,6 +6,7 @@ using Microsoft.Win32;
 using VIvian.Core;
 using VIvian.Core.Engines;
 using VIvian.Infrastructure;
+using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.BetterGi;
 using VIvian.Infrastructure.Processes;
 
@@ -21,6 +22,7 @@ public sealed class GenshinConfigurationViewModel
     private readonly CancellationTokenSource _close = new();
     private readonly Func<bool> _desktopIdle;
     private readonly Func<string> _betterGiRoot;
+    private readonly Func<Func<Task>, Task> _serializeOperation;
     private readonly string _profileDirectory;
     private CancellationTokenSource? _verification;
     private AccountConfigurationView? _snapshot;
@@ -34,17 +36,18 @@ public sealed class GenshinConfigurationViewModel
     private bool _busy;
 
     public GenshinConfigurationViewModel(LocalDatabase database, IAccountConfigurationProvider provider, Func<bool> hostIdle,
-        string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot, Func<Func<Task>, Task> serializeSourceWrite)
+        string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot, Func<Func<Task>, Task> serializeOperation)
     {
         _database = database;
         _provider = provider;
         _hostIdle = hostIdle;
         _desktopIdle = desktopIdle;
         _betterGiRoot = betterGiRoot;
+        _serializeOperation = serializeOperation;
         _profileDirectory = profileDirectory;
         _import = new(database);
         Source = new(profileDirectory, desktopIdle, () => IsIdle && !Parameters.Any(row => row.IsChanged), betterGiRoot,
-            serializeSourceWrite);
+            serializeOperation);
         Source.FieldsChanged += () => Raise(nameof(VisiblePlanParameters));
         Source.PropertyChanged += (_, e) =>
         {
@@ -58,7 +61,7 @@ public sealed class GenshinConfigurationViewModel
         SaveCommand = new(SaveAsync, ReportError);
         ConnectSourceCommand = new(ConnectSourceAsync, ReportError);
         VerifyLoginCommand = new(VerifyLoginAsync, ex => LoginStatus = UserFacingError.Describe(ex));
-        CancelLoginCommand = new(_ => _verification?.Cancel());
+        CancelLoginCommand = new(_ => CancelLogin());
         ClearSecondLoginAccountCommand = new(_ => SecondLoginAccount = null);
     }
 
@@ -76,7 +79,7 @@ public sealed class GenshinConfigurationViewModel
     public AsyncCommand VerifyLoginCommand { get; }
     public RelayCommand<object> CancelLoginCommand { get; }
     public RelayCommand<object> ClearSecondLoginAccountCommand { get; }
-    public bool IsLoginVerificationAvailable => RealExecutionPolicy.IsM5DailyTest && !RealExecutionPolicy.IsUnifiedInstall;
+    public bool IsLoginVerificationAvailable => RealExecutionPolicy.IsM5DailyTest;
     public bool IsVerifyingLogin => _verification is not null;
     public string LoginStatus { get => _loginStatus; private set => Set(ref _loginStatus, value); }
     public string GameExecutable
@@ -114,7 +117,16 @@ public sealed class GenshinConfigurationViewModel
         _close.Cancel();
     }
 
-    internal async Task DiscoverGameExecutableAsync()
+    internal void CancelLogin()
+    {
+        if (_verification is not { IsCancellationRequested: false } verification) return;
+        LoginStatus = "正在停止原神登录验收…";
+        verification.Cancel();
+    }
+
+    internal Task DiscoverGameExecutableAsync() => DiscoverGameExecutableAsync(_close.Token);
+
+    private async Task DiscoverGameExecutableAsync(CancellationToken ct)
     {
         var root = _betterGiRoot();
         var previous = GameExecutable;
@@ -127,13 +139,13 @@ public sealed class GenshinConfigurationViewModel
         }
         try
         {
-            var executable = await BetterGiConfiguration.FindClientExecutableAsync(root, _close.Token);
-            if (_close.IsCancellationRequested || previous != GameExecutable || wasAuto != _gameExecutableAuto ||
+            var executable = await BetterGiConfiguration.FindClientExecutableAsync(root, ct);
+            if (ct.IsCancellationRequested || previous != GameExecutable || wasAuto != _gameExecutableAuto ||
                 root != _betterGiRoot()) return;
             _gameExecutableAuto = executable is not null;
             Set(ref _gameExecutable, executable ?? "", nameof(GameExecutable));
         }
-        catch (OperationCanceledException) when (_close.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or InvalidDataException
             or IOException or UnauthorizedAccessException or TimeoutException or System.Text.Json.JsonException)
         {
@@ -222,10 +234,18 @@ public sealed class GenshinConfigurationViewModel
         if (!_desktopIdle()) { LoginStatus = "请先结束正在运行的任务，并核对清理和恢复状态。"; return; }
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         {
-            LoginStatus = "登录验收需要以管理员身份打开隔离测试版。";
+            LoginStatus = "请重新打开 VIvian，并确认 Windows 管理员授权。";
             return;
         }
-        await DiscoverGameExecutableAsync();
+        try { await _serializeOperation(VerifySelectedAccountsAsync); }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or TimeoutException)
+        {
+            LoginStatus = ex.Message;
+        }
+    }
+
+    private async Task VerifySelectedAccountsAsync()
+    {
         if (!IsIdle || !Source.IsIdle || !_desktopIdle() || _close.IsCancellationRequested) return;
         if (SelectedAccount is not { LoginState: "recognized", Enabled: true } first ||
             SecondLoginAccount is { } second && (second.Id == first.Id || !second.Enabled || second.LoginState != "recognized"))
@@ -234,47 +254,60 @@ public sealed class GenshinConfigurationViewModel
             return;
         }
         var accounts = SecondLoginAccount is { } next ? new[] { first, next } : new[] { first };
-        var program = GameExecutable.Trim();
-        if (!Path.IsPathFullyQualified(program) || !File.Exists(program) ||
-            !string.Equals(Path.GetFileName(program), "YuanShen.exe", StringComparison.OrdinalIgnoreCase))
+        var betterGi = _betterGiRoot();
+        if (string.IsNullOrWhiteSpace(betterGi))
         {
-            LoginStatus = "请选择已安装的原神国服 YuanShen.exe。";
+            LoginStatus = "请先在「引擎与环境」保存 BetterGI 安装目录。";
             return;
         }
-        var betterGi = Source.BoundInstallRoot ?? _betterGiRoot();
-        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_close.Token);
-        _verification = cancel;
-        Raise(nameof(IsVerifyingLogin));
-        Raise(nameof(IsIdle));
-        Raise(nameof(CanEdit));
-        Raise(nameof(CanBindLoginScreenshot));
-        try
+        await RunLoginOperationAsync(async token =>
         {
-            for (var seconds = 5; seconds > 0; seconds--)
+            LoginStatus = "正在核对原神国服客户端…";
+            await DiscoverGameExecutableAsync(token);
+            token.ThrowIfCancellationRequested();
+            var program = GameExecutable.Trim();
+            if (!Path.IsPathFullyQualified(program) ||
+                !string.Equals(Path.GetFileName(program), "YuanShen.exe", StringComparison.OrdinalIgnoreCase) ||
+                !await ReadOnlyFileAccess.BoundedAsync(() =>
+                    new DriveInfo(Path.GetPathRoot(program)!).DriveType == DriveType.Fixed && File.Exists(program) &&
+                    ReadOnlyFileAccess.FindReparsePoint(program) is null, ReadOnlyFileAccess.QueryTimeout, token))
             {
-                LoginStatus = $"{seconds} 秒后开始。请切到已打开的原神国服前台。";
-                await Task.Delay(TimeSpan.FromSeconds(1), cancel.Token);
+                LoginStatus = "请选择安装在本地固定磁盘上的原神国服 YuanShen.exe。";
+                return;
             }
             if (!_desktopIdle()) { LoginStatus = "桌面或任务状态已变化，登录验收已取消。"; return; }
-            LoginStatus = "正在验收原神登录。";
-            var results = await GenshinLoginAcceptance.VerifyAsync(_database, accounts.Select(a => a.Id).ToArray(),
-                betterGi, program, _profileDirectory, cancel.Token);
+            LoginStatus = "正在启动或接入原神国服，并核对所选账号…";
+            var results = await Task.Run(() => GenshinLoginAcceptance.VerifyAsync(_database,
+                accounts.Select(a => a.Id).ToArray(), betterGi, program, _profileDirectory, token), token);
             LoginStatus = string.Join("\n", results.Select(result =>
                 $"{accounts.Single(a => a.Id == result.AccountId).Name} · {(result.Success ? "通过" : "未通过")} · {result.Detail}"));
-        }
-        catch (OperationCanceledException) when (cancel.IsCancellationRequested) { LoginStatus = "已取消登录验收。"; }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or TimeoutException)
+        });
+    }
+
+    internal async Task RunLoginOperationAsync(Func<CancellationToken, Task> action)
+    {
+        using var cancel = CancellationTokenSource.CreateLinkedTokenSource(_close.Token);
+        _verification = cancel;
+        RaiseLoginState();
+        try { await action(cancel.Token); }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
-            LoginStatus = ex.Message;
+            LoginStatus = "已停止登录验收。已打开的客户端仍保留。";
         }
         finally
         {
             _verification = null;
-            Raise(nameof(IsVerifyingLogin));
-            Raise(nameof(IsIdle));
-            Raise(nameof(CanEdit));
-            Raise(nameof(CanBindLoginScreenshot));
+            RaiseLoginState();
         }
+    }
+
+    private void RaiseLoginState()
+    {
+        Raise(nameof(IsVerifyingLogin));
+        Raise(nameof(IsIdle));
+        Raise(nameof(CanEdit));
+        Raise(nameof(CanConnect));
+        Raise(nameof(CanBindLoginScreenshot));
     }
 
     internal Task SaveAsync()

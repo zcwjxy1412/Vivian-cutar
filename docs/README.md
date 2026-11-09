@@ -2,6 +2,17 @@
 
 按用途分为四类。**“现行”** 是当前开发要遵守的依据；**“历史/证据”** 只用于追溯，内容可能指向旧提交，不代表当前状态；**“外部研究原文”** 是作者结论，以对应的审查记录为准。
 
+## 先看这里：M5.2
+
+| 文档 | 用途 |
+|---|---|
+| [`PROJECT_HANDOFF.md`](PROJECT_HANDOFF.md) | 整体目标、已验证状态、后续阶段、代码入口及新维护者首日流程 |
+| [`M5_2_DELIVERY.md`](M5_2_DELIVERY.md) | 当前版本怎么启动、扫描账号和执行多账号批次 |
+| [`M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md`](M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md) | 用户8张参考截图、状态识别与安全切换契约 |
+| [`M5_2_ACCEPTANCE.md`](M5_2_ACCEPTANCE.md) | Windows 双账号实机结果、自动化验证与剩余验收矩阵 |
+
+`M5_1_DELIVERY.md`、M4测试步骤及以下 M1–M3 材料是历史阶段记录，不应拿其中旧包、旧数据库版本或逐账号人工交接流程代替 M5.2 说明。原文、验收证据及其原有链接保留，避免因整理丢失设计依据。
+
 ## 1. 现行：产品、架构与规则
 
 | 文档 | 内容 |
@@ -12,9 +23,6 @@
 | [`M3_PREREQUISITES.md`](M3_PREREQUISITES.md) | 接入真实引擎之前必须满足的条件 |
 | [`evidence/EVIDENCE_INDEX.md`](evidence/EVIDENCE_INDEX.md) | M3 证据索引：已固定的上游源码事实与仍为 Pending 的实测项 |
 | [`RUN_ON_WINDOWS.md`](RUN_ON_WINDOWS.md) | 下载和运行 Windows 开发版（模拟引擎） |
-| [`M5_LOCAL_TEST_WORKFLOW.md`](M5_LOCAL_TEST_WORKFLOW.md) | 本机固定 M5 测试版的自动部署、反馈与回滚 |
-| [`M5_DAILY_WINDOWS_TEST.md`](M5_DAILY_WINDOWS_TEST.md) | 星铁 `daily` 的逐次授权与实测步骤 |
-| [`M3_DESKTOP_TEST_HANDOFF.md`](M3_DESKTOP_TEST_HANDOFF.md) | 预桌面阶段结束后交给 Codex 的桌面测试交接 |
 | [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md) | 故障排查 |
 
 ## 2. 验收记录（保留，不改写）
@@ -26,6 +34,9 @@
 | [`M2_ACCEPTANCE.md`](M2_ACCEPTANCE.md) | M2 自动化验收 |
 | [`RELEASE_NOTES/`](RELEASE_NOTES/) | 发布说明（发布工作流会自动读取） |
 | [`PR_DRAFT.md`](PR_DRAFT.md) | M1 当时的 PR 说明草稿（历史，M1 验收清单引用） |
+| [`M3_DESKTOP_TEST_HANDOFF.md`](M3_DESKTOP_TEST_HANDOFF.md) | M3 当时的桌面交接 |
+| [`M5_DAILY_WINDOWS_TEST.md`](M5_DAILY_WINDOWS_TEST.md) | M5 旧版逐次授权流程和当时的单账号证据 |
+| [`CLEANUP_2026_11_08.md`](CLEANUP_2026_11_08.md) | 11 月 8 日清理记录，旧版本和路径仅供追溯 |
 
 ## 3. 审查与历史输入
 
@@ -49,9 +60,9 @@
 
 [PR #32](https://github.com/zcwjxy1412/Vivian-cutar/pull/32) 带来四份较新的 Gemini 报告（`research/M3_UPSTREAM_RELEASE_VERIFICATION.md`、`research/M3_ENGINE_CLI_COMPATIBILITY.md`、`research/M3_ENGINE_PROCESS_AND_PRIVILEGE_RISKS.md`、`research/M3_ADAPTER_IMPLEMENTATION_REQUIREMENTS.md`）和一份勘误；勘误（[`research/M3_GEMINI_RESEARCH_ERRATA.md`](research/M3_GEMINI_RESEARCH_ERRATA.md)）优先于这些原文。原文中“VIvian 以管理员身份运行”“按安装路径或进程名清扫进程”两条与项目安全规则冲突，不予采用。
 
-## 5. 进行中的工作与安全门禁
+## 5. 历史 PR 与安全门禁
 
-以下表格保留 2026-11-04 的历史状态；当前 M5 分支依赖顺序为 PR #46 → #47 → #48，固定测试版与自动部署工作位于新的独立 PR。合并前须分别审查，不能直接把后续分支合并到 main。
+以下表格保留 2026-11-04 的历史状态。当前堆叠 PR、实机状态和发布条件见 [项目接手手册](PROJECT_HANDOFF.md)。
 
 | PR | 内容 | 状态 |
 | --- | --- | --- |
@@ -65,8 +76,4 @@
 | [#27](https://github.com/zcwjxy1412/Vivian-cutar/pull/27) | Claude 独立审查报告（历史） | 保留为记录 |
 | [#31](https://github.com/zcwjxy1412/Vivian-cutar/pull/31) | #30 + #20 组合验证 | 已关闭，未合并 |
 
-仍然开放的阻断项：[#16](https://github.com/zcwjxy1412/Vivian-cutar/issues/16)（桌面 UAC 与提权进程归属）、[#22](https://github.com/zcwjxy1412/Vivian-cutar/issues/22)（星铁只读 CLI 查询的实测）、[#25](https://github.com/zcwjxy1412/Vivian-cutar/issues/25)（官方发行包实际文件的独立核验）。
-
-整合后的安全基线（仅限模拟引擎范围）：有界的适配器调用与状态写入、按 RunId 发放的启动许可、停止时先撤销启动许可、会话安全门禁。CI 通过不是 UAC、提权进程或真实游戏的证明。
-
-main 上目前没有任何真实适配器；调度器还会用 `RealAdapterUnverified` 门禁阻断所有非模拟适配器，直到适配器通过独立审查。桌面 UAC、提权子进程、真实引擎和真实游戏都仍为 Pending。
+历史阻断记录见 [#16](https://github.com/zcwjxy1412/Vivian-cutar/issues/16)、[#22](https://github.com/zcwjxy1412/Vivian-cutar/issues/22) 和 [#25](https://github.com/zcwjxy1412/Vivian-cutar/issues/25)。

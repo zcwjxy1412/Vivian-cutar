@@ -7,9 +7,9 @@
 | 按数字自然排序分析全部截图 | 已通过 | 1.png～8.png；见 SCREEN_FLOW 文档 |
 | Windows 本地 OCR 识别参考原图 | 已通过 | InGame、InGame、Title、LogoutConfirm、LoginCard、AccountList、LoginCard、Title；图4保留标记=true，图6保存行=2 |
 | 账号模块自动化测试 | 已通过（模拟） | 111项基础账号用例及5项游戏路径回归；含两账号编排、三账号隔离/停止、验证码、重启、宿主断开、保存项确认 |
-| Windows 完整 M5 单元测试 | 已通过 | 本轮修订 733/733，无跳过；报告 `artifacts/m5-2-live-diagnostics/tests/m5-2-welcome-scope.trx` |
+| Windows 完整 M5 单元测试 | 已通过 | 733/733，无跳过；本机报告 `开发资料\测试证据\M5.2-2026-11-09\m5-2-live-diagnostics\tests\m5-2-welcome-scope.trx`（相对工作区根目录） |
 | WPF 冒烟 | `aff9a76` 本地通过 | 隔离数据库、界面渲染、模拟队列 3/3、停止 191ms、拒绝相同数据目录重复启动 |
-| Windows CI | M5 单测通过，M5.2 打包冒烟首次超时 | [功能版本检查](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/42591871033)；已重跑同一提交。上一个 `f6810df` 检查已通过 |
+| Windows CI | 已通过 | `aff9a76` 的 M5.2 打包冒烟首次超时，同一提交 [第二次](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/42591871033/attempts/2) 全部通过并上传包。文档基线 [`3512ca4`](https://github.com/zcwjxy1412/Vivian-cutar/actions/runs/42593911539) 也已通过 |
 | A 单账号真实 daily/暂停/继续/停止/恢复 | 用户确认既有daily已打通 | 本次不安排重复单账号实测；当前修订的暂停/继续/停止/恢复未重新实测 |
 | B A→B 零人工真实日常 | 已通过 | `aff9a76` r7 依序执行并记录 A、B 都成功，分别核对本次助手的 500 分证据。完成 2、失败 0，批次内人工操作及 UAC 0 次 |
 | C 三个及以上真实账号 | 待验证 | 参考截图只有两个保存账号，第三账号条件未确认 |

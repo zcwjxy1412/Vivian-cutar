@@ -431,6 +431,7 @@ public sealed class MainViewModel : ObservableObject
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
         await Accounts.ReloadAsync();
+        await Accounts.ReloadZenlessAsync();
         await GenshinConfiguration.LoadAsync();
         await RefreshLastRunsAsync();
         if (autoPrepare) await AutoDiscoverAsync(persist: true);

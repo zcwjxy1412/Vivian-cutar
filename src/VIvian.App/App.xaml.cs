@@ -425,6 +425,26 @@ public partial class App : Application
         if ((await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
             throw new InvalidOperationException("Game task setting was not saved");
         if (window is not MainWindow main) throw new InvalidOperationException("Missing main window");
+        var zenless = await database.AddAccountAsync(GameId.ZenlessZoneZero, "绝区零冒烟档案", "", null);
+        await vm.Accounts.ReloadZenlessAsync();
+        tabs.SelectedIndex = Array.IndexOf(headers, "账号管理");
+        window.UpdateLayout();
+        var gameHeaders = main.AccountTabs.Items.OfType<System.Windows.Controls.TabItem>().Select(t => t.Header as string);
+        if (!gameHeaders.SequenceEqual(new[] { "崩坏：星穹铁道", "原神", "绝区零" })
+            || vm.Accounts.Rows.Any(a => a.Account.Game != GameId.StarRail))
+            throw new InvalidOperationException("Account tabs or Star Rail filtering are incorrect");
+        main.AccountTabs.SelectedIndex = 1;
+        window.UpdateLayout();
+        if (!ReferenceEquals(main.GenshinAccountList.ItemsSource, vm.GenshinConfiguration.Accounts)
+            || vm.GenshinConfiguration.Accounts.Count == 0
+            || vm.GenshinConfiguration.Accounts.Any(a => a.Game != GameId.Genshin))
+            throw new InvalidOperationException("The Genshin account tab is not bound to Genshin accounts");
+        main.AccountTabs.SelectedIndex = 2;
+        window.UpdateLayout();
+        if (!ReferenceEquals(main.ZenlessAccountList.ItemsSource, vm.Accounts.ZenlessRows)
+            || vm.Accounts.ZenlessRows.Single().Id != zenless.Id)
+            throw new InvalidOperationException("The Zenless account tab is not bound to Zenless accounts");
+        main.AccountTabs.SelectedIndex = 0;
         tabs.SelectedIndex = Array.IndexOf(headers, "游戏管理");
         main.GameTabs.SelectedIndex = 1;
         window.UpdateLayout();
@@ -449,7 +469,7 @@ public partial class App : Application
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
-        return "account workflow pages verified; Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
+        return "three game account tabs isolated; Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
     }
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
     private static string SaveTabScreenshots(Window window, string root)

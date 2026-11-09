@@ -79,6 +79,29 @@ public sealed class AccountStoreTests
     }
 
     [Fact]
+    public async Task RecentBatchesAreFilteredByGameBeforeTheLimit()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "vivian-batch-filter-" + Guid.NewGuid().ToString("N") + ".db");
+        try
+        {
+            var db = new LocalDatabase(path);
+            await db.InitializeAsync();
+            var starRail = await db.BeginBatchAsync(GameId.StarRail);
+            await db.BeginBatchAsync(GameId.Genshin);
+            await db.BeginBatchAsync(GameId.ZenlessZoneZero);
+
+            var selected = await db.LoadRecentBatchesAsync(limit: 1, game: GameId.StarRail);
+            Assert.Equal(starRail.Id, Assert.Single(selected).Id);
+            Assert.Equal(3, (await db.LoadRecentBatchesAsync()).Count);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var file in Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + "*")) File.Delete(file);
+        }
+    }
+
+    [Fact]
     public async Task InterruptedBatchRemainsRecordedAndRequiresNewIdentityCheck()
     {
         var path = Path.Combine(Path.GetTempPath(), "vivian-batch-" + Guid.NewGuid().ToString("N") + ".db");

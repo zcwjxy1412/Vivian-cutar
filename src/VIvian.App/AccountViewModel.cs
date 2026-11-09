@@ -8,8 +8,6 @@ using VIvian.Infrastructure.Accounts;
 
 namespace VIvian.App;
 
-public sealed record AccountGameOption(GameId Id, string Name);
-
 /// <summary>One persisted account plus the login-screen binding that lets VIvian select it without a UID.</summary>
 public sealed class AccountRowViewModel : ObservableObject
 {
@@ -71,11 +69,15 @@ public sealed class AccountViewModel : ObservableObject
         MoveUpCommand = new(() => MoveAsync(-1), Error);
         MoveDownCommand = new(() => MoveAsync(1), Error);
         ReloadCommand = new(ReloadAsync, Error);
+        ReloadZenlessCommand = new(ReloadZenlessAsync, _ => ZenlessStatus = "暂时无法读取绝区零本机档案。");
     }
 
     public LocalDatabase Database => _database;
     public Func<Func<Action, Task>, Task> ExecuteScan { private get; set; } = action => action(() => { });
     public ObservableCollection<AccountRowViewModel> Rows { get; } = [];
+    public ObservableCollection<GameAccount> ZenlessRows { get; } = [];
+    private string _zenlessStatus = "实例绑定和截图导入待接入。";
+    public string ZenlessStatus { get => _zenlessStatus; private set => Set(ref _zenlessStatus, value); }
     public ObservableCollection<AccountBatch> RecentBatches { get; } = [];
     public ObservableCollection<AccountExecutionRecord> BatchResults { get; } = [];
     private AccountRowViewModel? _selectedRow;
@@ -113,6 +115,7 @@ public sealed class AccountViewModel : ObservableObject
     public AsyncCommand MoveUpCommand { get; }
     public AsyncCommand MoveDownCommand { get; }
     public AsyncCommand ReloadCommand { get; }
+    public AsyncCommand ReloadZenlessCommand { get; }
 
     public IReadOnlyList<AccountRowViewModel> SelectedRows => Rows
         .Where(r => r.IsSelected && r.Profile is not null)
@@ -146,13 +149,28 @@ public sealed class AccountViewModel : ObservableObject
         ExecutionSelectionChanged?.Invoke();
         var batchId = SelectedBatch?.Id;
         RecentBatches.Clear();
-        foreach (var batch in await _database.LoadRecentBatchesAsync()) RecentBatches.Add(batch);
+        foreach (var batch in await _database.LoadRecentBatchesAsync(game: GameId.StarRail)) RecentBatches.Add(batch);
         SelectedBatch = RecentBatches.FirstOrDefault(b => b.Id == batchId) ?? RecentBatches.FirstOrDefault();
         SelectedRow = Rows.FirstOrDefault(r => r.Id == selectedId) ?? Rows.FirstOrDefault();
         ConfigurationRow = Rows.FirstOrDefault(r => r.Id == configurationId) ?? Rows.FirstOrDefault();
         Status = Rows.Count == 0
             ? "尚无账号档案。请打开星铁登录界面并点击“扫描登录账号”。"
             : $"已读取 {Rows.Count} 个账号档案，其中 {Rows.Count(r => r.Profile is not null)} 个已绑定登录界面。";
+    }
+
+    internal async Task ReloadZenlessAsync()
+    {
+        try
+        {
+            var accounts = await _database.LoadAccountsAsync(GameId.ZenlessZoneZero);
+            ZenlessRows.Clear();
+            foreach (var account in accounts) ZenlessRows.Add(account);
+            ZenlessStatus = "当前仅显示本机档案。实例绑定和截图导入待接入。";
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException)
+        {
+            ZenlessStatus = "暂时无法读取绝区零本机档案。";
+        }
     }
 
     private async Task ScanAsync(Action beforeDesktopMutation)

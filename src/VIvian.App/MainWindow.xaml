@@ -1,5 +1,5 @@
 <Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-xmlns:local="clr-namespace:VIvian.App" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
+xmlns:local="clr-namespace:VIvian.App" xmlns:core="clr-namespace:VIvian.Core;assembly=VIvian.Core" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
 Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeight="720" Background="#DCE6FB" Foreground="{StaticResource Text}" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
 <Window.Resources>
 <Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
@@ -278,9 +278,12 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </TabControl></Grid></TabItem>
 
 <!-- ============ 账号管理 ============ -->
-<TabItem Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}" IsEnabled="{Binding IsIdle}"><StackPanel DataContext="{Binding Accounts}" MaxWidth="1050" HorizontalAlignment="Left">
+<TabItem Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}" IsEnabled="{Binding IsIdle}"><StackPanel MaxWidth="1050">
 <StackPanel Orientation="Horizontal"><TextBlock Text="账号管理" Style="{StaticResource H1}"/><TextBlock Text="アカウント" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="打开星铁登录界面后扫描，VIvian 会按脱敏手机号建立档案；运行时自动选择并登录，不需要填写 UID，也不需要为每个账号安装一份助手。" Style="{StaticResource Lead}"/>
+<TextBlock Text="各游戏的登录档案独立保存。选择游戏后可查看该游戏的账号和可用操作。" Style="{StaticResource Lead}"/>
+<TabControl x:Name="AccountTabs" Background="Transparent" BorderThickness="0" Padding="0,14,0,0" ItemContainerStyle="{StaticResource PillTab}">
+<TabItem Header="崩坏：星穹铁道">
+<StackPanel DataContext="{Binding Accounts}">
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="扫描登录账号" Style="{StaticResource H2}"/>
 <TextBlock Text="打开测试版时先完成管理员授权；扫描会自动返回登录界面并展开保存账号。图像只在本机内存处理，不上传或自动保存原图。" Style="{StaticResource Small}"/>
@@ -289,9 +292,9 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="已识别账号" Style="{StaticResource H2}"/>
+<TextBlock Text="星铁账号与运行顺序" Style="{StaticResource H2}"/>
 <TextBlock Text="勾选账号并调整列表顺序。在游戏管理保存各账号任务设置，随后从首页启动。" Style="{StaticResource Small}"/>
-<ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" MinHeight="260" BorderThickness="0" Background="Transparent" Margin="0,10,0,0">
+<ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}" MinHeight="140" MaxHeight="360" BorderThickness="0" Background="Transparent" Margin="0,10,0,0">
 <ListBox.ItemTemplate><DataTemplate><Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12" Margin="0,0,0,8"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <CheckBox IsChecked="{Binding IsSelected}" VerticalAlignment="Top" Margin="0,2,10,0" AutomationProperties.Name="{Binding Name, StringFormat=选择 {0}}"/>
 <StackPanel Grid.Column="1"><TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
@@ -299,11 +302,13 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding BindingDetail}" Style="{StaticResource Small}"/>
 <TextBlock Text="{Binding LastResult, StringFormat=上次结果：{0}}" Style="{StaticResource Small}"/></StackPanel>
 <TextBlock Grid.Column="2" Text="{Binding Verification}" Style="{StaticResource Small}" Foreground="{StaticResource Warn}" VerticalAlignment="Top"/></Grid></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
-<WrapPanel Margin="0,8,0,0"><Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
+<WrapPanel Margin="0,8,0,0">
+<TextBox Width="180" Margin="0,0,8,0" Text="{Binding SelectedRow.Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="所选星铁账号备注"/>
+<Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
 <Button Content="保存备注和勾选" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
 <TextBlock Text="备注只改 VIvian 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 </StackPanel></Border>
-<Border Style="{StaticResource Panel}" DataContext="{Binding Accounts}"><StackPanel><TextBlock Text="最近批次" Style="{StaticResource H2}"/>
+<Border Style="{StaticResource Panel}"><StackPanel><TextBlock Text="最近星铁批次" Style="{StaticResource H2}"/>
 <ListBox ItemsSource="{Binding RecentBatches}" SelectedItem="{Binding SelectedBatch}" BorderThickness="0" Background="Transparent"><ListBox.ItemTemplate><DataTemplate>
 <StackPanel Orientation="Horizontal" Margin="0,4,0,4"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:MM-dd HH:mm}}" Width="110"/>
 <TextBlock Text="{Binding Mode}" Width="90"/><TextBlock Text="{Binding State}" Width="100"/><TextBlock Text="{Binding Detail}"/></StackPanel>
@@ -313,8 +318,48 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <StackPanel Margin="0,4,0,8"><TextBlock Text="{Binding AccountName}" FontWeight="Bold"/>
 <TextBlock Text="{Binding Result}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Small}"/></StackPanel>
 </DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+</StackPanel></TabItem>
+<TabItem Header="原神">
+<StackPanel DataContext="{Binding GenshinConfiguration}" IsEnabled="{Binding IsIdle}">
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="原神档案" Style="{StaticResource H2}"/>
+<TextBlock Text="每个账号单独保存 VIvian 任务计划。" Style="{StaticResource Small}"/>
+<WrapPanel Margin="0,12,0,0">
+<TextBox Width="210" Text="{Binding NewAccountName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8" AutomationProperties.Name="新原神账号备注"/>
+<Button Content="手动建档" Command="{Binding AddAccountCommand}" Margin="0,0,8,8"/>
+<Button Content="刷新" Command="{Binding ReloadCommand}" Margin="0,0,8,8"/>
+</WrapPanel>
+<TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></Border>
+<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="选择原神账号" Style="{StaticResource H2}"/>
+<ListBox x:Name="GenshinAccountList" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
+         MinHeight="72" MaxHeight="320" BorderThickness="0" Background="Transparent" Margin="0,4,0,0">
+<ListBox.ItemTemplate><DataTemplate>
+<Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,0,0,6">
+<TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
+</Border>
+</DataTemplate></ListBox.ItemTemplate></ListBox>
+<Button Content="打开原神配置" Tag="{x:Static core:GameId.Genshin}" Click="OpenGameSettings" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+</StackPanel></Border>
+</StackPanel></TabItem>
+<TabItem Header="绝区零">
+<Border Style="{StaticResource Panel}" DataContext="{Binding Accounts}"><StackPanel>
+<DockPanel LastChildFill="True" Margin="0,0,0,6">
+<Button DockPanel.Dock="Right" Content="刷新档案" Command="{Binding ReloadZenlessCommand}"/>
+<TextBlock Text="绝区零本机档案" Style="{StaticResource H2}" VerticalAlignment="Center"/>
+</DockPanel>
+<TextBlock Text="{Binding ZenlessStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/>
+<ItemsControl x:Name="ZenlessAccountList" ItemsSource="{Binding ZenlessRows}" Margin="0,8,0,0">
+<ItemsControl.ItemTemplate><DataTemplate>
+<Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,0,0,6">
+<TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
+</Border>
+</DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+</StackPanel></Border>
+</TabItem>
+</TabControl>
 </StackPanel></ScrollViewer></TabItem>
-
 <!-- ============ 运行日志 ============ -->
 <TabItem Header="运行日志" Tag="&#xE9D2;"><Grid Margin="40,34,40,20" DataContext="{Binding Queue}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

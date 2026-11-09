@@ -274,12 +274,16 @@ public sealed partial class LocalDatabase
         tx.Commit();
     }
 
-    public async Task<IReadOnlyList<AccountBatch>> LoadRecentBatchesAsync(int limit = 20, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AccountBatch>> LoadRecentBatchesAsync(int limit = 20, CancellationToken ct = default, GameId? game = null)
     {
         if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,game,started_at,updated_at,state,current_account_id,detail,mode FROM batch_execution_records ORDER BY started_at DESC LIMIT $limit;";
+        cmd.CommandText = """
+            SELECT id,game,started_at,updated_at,state,current_account_id,detail,mode FROM batch_execution_records
+            WHERE ($game IS NULL OR game=$game) ORDER BY started_at DESC LIMIT $limit;
+            """;
+        cmd.Parameters.AddWithValue("$game", game is null ? DBNull.Value : (object)(int)game);
         cmd.Parameters.AddWithValue("$limit", limit);
         var result = new List<AccountBatch>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);

@@ -81,6 +81,70 @@ public sealed class BetterGiAccountPlansTests
     }
 
     [Theory]
+    [InlineData("领奖队")]
+    [InlineData("当前队伍")]
+    [InlineData("")]
+    public async Task DailyAcceptanceCopiesOnlyTheBoundSourceRewardTask(string party)
+    {
+        await using var fixture = new BetterGiFixture();
+        var id = Guid.NewGuid();
+        var name = BetterGiAccountPlan.SourceProfileName(id);
+        var user = Path.Combine(fixture.Root, "User");
+        var profile = Path.Combine(user, "OneDragon", name + ".json");
+        var original = JsonSerializer.Serialize(new
+        {
+            Name = name,
+            TaskEnabledList = new Dictionary<string, bool> { ["合成树脂"] = true, ["自动秘境"] = true, ["领取每日奖励"] = true },
+            CompletionAction = "无",
+            AdventurersGuildCountry = "璃月",
+            DailyRewardPartyName = party,
+            DomainName = "虹灵的净土",
+        });
+        File.WriteAllText(profile, original);
+        var source = await BetterGiConfiguration.InspectOneDragonAsync(fixture.Root, name);
+
+        var isolated = BetterGiAccountPlans.RenderDailyAcceptance(id, source, Client);
+        Assert.Equal(original, File.ReadAllText(profile));
+        await using var isolatedFixture = new BetterGiFixture();
+        var isolatedUser = Path.Combine(isolatedFixture.Root, "User");
+        File.WriteAllText(Path.Combine(isolatedUser, "OneDragon", isolated.ProfileName + ".json"), isolated.ProfileJson);
+        File.WriteAllText(Path.Combine(isolatedUser, "config.json"), isolated.SettingsJson);
+
+        Assert.Equal(name, isolated.ProfileName);
+        var effective = await BetterGiConfiguration.InspectOneDragonAsync(isolatedFixture.Root);
+        Assert.Equal(["领取每日奖励"], effective.EnabledTasks);
+        Assert.Equal("璃月", effective.AdventurersGuildCountry);
+        Assert.Equal(party, effective.DailyRewardPartyName);
+        Assert.Equal("关闭软件", effective.CompletionAction);
+        var domain = await BetterGiConfiguration.InspectDomainResinAsync(isolatedFixture.Root);
+        Assert.False(domain.SpecifyResinUse);
+        Assert.Equal((0, 0, 0, 0, 0, 0), (domain.Original, domain.Original20, domain.Original40, domain.Condensed,
+            domain.Transient, domain.Fragile));
+        using var settings = JsonDocument.Parse(isolated.SettingsJson);
+        var launch = settings.RootElement.GetProperty("genshinStartConfig");
+        Assert.False(launch.GetProperty("linkedStartEnabled").GetBoolean());
+        Assert.False(launch.GetProperty("startGameWithCmd").GetBoolean());
+        Assert.False(launch.GetProperty("autoEnterGameEnabled").GetBoolean());
+        var updates = settings.RootElement.GetProperty("scriptConfig");
+        Assert.False(updates.GetProperty("autoUpdateSubscribedScripts").GetBoolean());
+        Assert.False(updates.GetProperty("autoUpdateBeforeCommandLineRun").GetBoolean());
+    }
+
+    [Fact]
+    public void DailyAcceptanceRejectsUnboundProfilesAndProfilesWithoutDailyRewards()
+    {
+        var id = Guid.NewGuid();
+        var source = new BetterGiOneDragonPlan(BetterGiAccountPlan.SourceProfileName(id), ["合成树脂"], "无",
+            "枫丹", 0, "", "", false, "璃月", "");
+
+        var disabled = Assert.Throws<InvalidOperationException>(() =>
+            BetterGiAccountPlans.RenderDailyAcceptance(id, source, Client));
+        Assert.Contains("领取每日奖励", disabled.Message);
+        Assert.Throws<InvalidOperationException>(() =>
+            BetterGiAccountPlans.RenderDailyAcceptance(Guid.NewGuid(), source with { EnabledTasks = ["领取每日奖励"] }, Client));
+    }
+
+    [Theory]
     [InlineData("autoDomainConfig.autoArtifactSalvage", "true")]
     [InlineData("autoDomainConfig.fragileResinUseCount", "3")]
     [InlineData("autoDomainConfig.originalResin20UseCount", "-1")]

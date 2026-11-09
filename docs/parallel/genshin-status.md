@@ -26,7 +26,7 @@
 
 ## 配置与离线预览
 
-原神账号和计划当前位于 `%LOCALAPPDATA%\VIvian-M6-StarRailTest`。正式入口切换前，将其与现有崩铁库做一致性备份，并核对账号、计划、设置和回滚。单入口方案由合流分支维护。[单入口与数据合并](https://github.com/zcwjxy1412/Vivian-cutar/blob/integration/m6-dual-engine/docs/parallel/unified-entry.md)
+2026-11-09 已将统一版 `3242768` 安装到原 `E:\auto agent game\VIvian\VIvian.exe`。两处「启动 furina」仍指向这一路径。统一版从 `%LOCALAPPDATA%\VIvian-UserData` 读取合流库。旧 v6/v7 原库摘要和归档的旧正式程序摘要已核对。现场启动检查通过，两个原神账号的计划与各自 BetterGI 档案顺序一致。旧测试产物已可逆归档。[单入口与数据合并](https://github.com/zcwjxy1412/Vivian-cutar/blob/integration/m6-dual-engine/docs/parallel/unified-entry.md)
 
 如需只读预览已导出的账号设置，使用普通 PowerShell 运行以下命令。JSON 只含账号任务参数，账号编号是 VIvian 的内部 GUID。
 
@@ -47,5 +47,5 @@ $dll = "$probe\bin\Release\net10.0-windows10.0.19041.0\VIvian.BetterGiProbe.dll"
 - 合流包 `7c98cdcf6777ae13e8f5de3424dce09add7225e2` 通过 Windows M5 Release 全量回归 923 项和 WPF 冒烟。1024×768 渲染检查使用临时数据，ZIP 摘要已核对。[合流 PR #57](https://github.com/zcwjxy1412/Vivian-cutar/pull/57)
 - 同一张用户照片验证新建、重复导入和绑定现有计划。测试库与正式数据隔离，原始照片与完整 OCR 未进入仓库。
 - 3840×2160 展开列表截图在临时库成功导入两个账号，重导复用两条记录。截图导入、卡片识别和桌面登录定向回归 58 项通过。
-- 原神提交 `b92ba6e` 通过 Windows M5 Release 回归 866 项。定向验证从两份已有计划生成独立源档案、核对实际任务顺序、重复连接保留外部修改，以及文件冲突和引擎占用阻断。当前实机和正式入口切换暂停。
+- 原神提交 `a94a979` 通过 Windows M5 Release 回归 867 项。统一安装候选 `3242768` 通过 937 项回归、WPF 冒烟、同路径替换和回滚演练。此次只验收配置、安装和启动，原神实机任务未运行。
 - 离线导出、只读预览、正确账号绑定、错账号阻断、摘要重算后的危险字段阻断已通过。恢复入口通过 18 项离线守卫检查。

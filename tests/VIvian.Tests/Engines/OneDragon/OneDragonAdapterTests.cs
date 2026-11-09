@@ -351,6 +351,20 @@ public sealed class OneDragonLifecycleTests
     }
 
     [Fact]
+    public async Task DamagedStandardStreamCannotConfirmEvenAnApparentSuccess()
+    {
+        await using var f = new OneDragonFixture();
+        var (run, group) = await f.LaunchAsync(f.Adapter(contractVerified: true));
+        await using var _run = run;
+        group.Write(OdOut.SuccessfulRun());
+        group.Output.Writer.TryComplete(new IOException("simulated pipe failure"));
+        group.Exit(0);
+        var verdict = await Verdict(run);
+        Assert.Equal(RunOutcome.Indeterminate, verdict.Outcome);
+        Assert.Equal(ReasonCodes.NoCompletionEvidence, verdict.ReasonCode);
+    }
+
+    [Fact]
     public async Task ProductionContractNeverYieldsSuccess()
     {
         await using var f = new OneDragonFixture();
@@ -484,7 +498,8 @@ public sealed class OneDragonLifecycleTests
         var stop = await run.RequestStopAsync(StopMode.Emergency, default);
         Assert.Equal(CleanupState.Confirmed, stop.Cleanup);
         var verdict = await Verdict(run);
-        Assert.Equal(RunOutcome.Indeterminate, verdict.Outcome);
+        Assert.Equal(RunOutcome.Cancelled, verdict.Outcome);
+        Assert.Equal(ReasonCodes.UserStop, verdict.ReasonCode);
         Assert.Equal(CleanupState.Confirmed, await run.ReconcileAsync(default));
         await run.DisposeAsync();
         Assert.True(group.Disposed);

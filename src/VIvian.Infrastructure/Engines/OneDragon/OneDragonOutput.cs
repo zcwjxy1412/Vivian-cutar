@@ -127,14 +127,16 @@ public sealed class OneDragonRunEvidence(Guid runId, OneDragonTaskRequest reques
     /// <param name="exitCode">Launcher exit code, or null when unknown.</param>
     /// <param name="stoppedByVivian">VIvian terminated the launcher; its exit code is not engine evidence.</param>
     /// <param name="contractVerified">The completion signals were verified on the real release.</param>
-    public RunVerdict Evaluate(int? exitCode, bool stoppedByVivian, bool contractVerified, DateTimeOffset at)
+    /// <param name="outputComplete">Both supervised streams drained without interruption.</param>
+    public RunVerdict Evaluate(int? exitCode, bool stoppedByVivian, bool contractVerified, DateTimeOffset at,
+        bool outputComplete = true)
     {
         List<ObservedSignal> signals;
         lock (_gate)
         {
             signals = [.. _signals];
             var instancesOk = request.Instances.Count == 0 ? !_instancesMismatched : _instancesMatched && !_instancesMismatched;
-            var completionValid = _completions == 1 && !_completionBeforeStart && InProcessStartSeen && VersionMatched
+            var completionValid = outputComplete && !stoppedByVivian && _completions == 1 && !_completionBeforeStart && InProcessStartSeen && VersionMatched
                 && AutoUpdateSkipped && !AutoUpdateAttempted && instancesOk;
             if (completionValid) signals.Add(new(runId, SignalKind.CompletionMarker, "OneDragon 输出：一条龙执行成功", at));
             if (stoppedByVivian)

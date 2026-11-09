@@ -56,7 +56,7 @@ public sealed class OneDragonProcessProbe : IOneDragonProcessProbe
 /// </summary>
 public sealed class OneDragonAdapter : IGameAdapter
 {
-    public const string RuleVersionValue = "zzzod-v2.6.0-m4-r1";
+    public const string RuleVersionValue = "zzzod-v2.6.0-m6-r1";
 
     private readonly Func<string?> _installRoot;
     private readonly OneDragonTaskRequest _request;
@@ -108,9 +108,14 @@ public sealed class OneDragonAdapter : IGameAdapter
         if (_probe.CountRunning(report.ProgramPath) > 0)
             return PreflightResult.Block(ReasonCodes.ForeignProcess,
                 "发现已在运行的 OneDragon 启动器（可能来自用户或之前的运行）。VIvian 不会关闭它，已停止队列。");
+        if (report.Checks.FirstOrDefault(c => c.State == CheckState.Failed) is { } prerequisite)
+            return PreflightResult.Block(ReasonCodes.PreflightError, prerequisite.Message, blocksQueue: false);
         if (!ExecutionGateOpen)
             return PreflightResult.Block(ReasonCodes.RealAdapterUnverified,
                 $"OneDragon {OneDragonContract.PinnedTag} 的启动、进程归属、代码自动更新与完成证据尚未在 Windows 桌面验证，真实执行保持关闭。", blocksQueue: false);
+        var catalog = await OneDragonInstanceCatalog.ReadAsync(directory, ct).ConfigureAwait(false);
+        if (!catalog.ContainsExactlyOne(_request.Instances))
+            return PreflightResult.Block(ReasonCodes.NotConfigured, "请选择一个已保存且已核对的 OneDragon 脚本实例。", blocksQueue: false);
         return PreflightResult.Ok();
     }
 

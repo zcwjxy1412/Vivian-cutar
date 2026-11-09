@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text.Json;
@@ -5,6 +6,8 @@ using VIvian.Core;
 using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Simulation;
+
+[assembly: InternalsVisibleTo("VIvian.BetterGiProbe")]
 
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
@@ -90,7 +93,7 @@ public sealed class BetterGiProcessProbe : IBetterGiProcessProbe
 /// </summary>
 public sealed class BetterGiAdapter : IGameAdapter
 {
-    public const string RuleVersionValue = "bgi-v0.66.0-m4-r1";
+    public const string RuleVersionValue = "bgi-v0.66.0-m6-r1";
 
     private readonly Func<string?> _installRoot;
     private readonly BetterGiTaskRequest _request;
@@ -149,7 +152,7 @@ public sealed class BetterGiAdapter : IGameAdapter
                 "发现已在运行的 BetterGI（单实例程序，可能来自用户或之前的运行）。VIvian 不会关闭它，已停止队列。");
         try
         {
-            await BetterGiConfiguration.ResolveAsync(directory, _request, ct).ConfigureAwait(false);
+            await CheckLaunchPlanAsync(directory, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsConfigurationError(ex))
         {
@@ -192,7 +195,7 @@ public sealed class BetterGiAdapter : IGameAdapter
         BetterGiTaskRequest resolved;
         try
         {
-            resolved = await BetterGiConfiguration.ResolveAsync(directory, _request, ct).ConfigureAwait(false);
+            resolved = await CheckLaunchPlanAsync(directory, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (IsConfigurationError(ex))
         {
@@ -241,6 +244,20 @@ public sealed class BetterGiAdapter : IGameAdapter
         }
         return new BetterGiRun(context.RunId, group, log, resolved, _options, _time,
             cleanup => _registry.Release(context.RunId, cleanup));
+    }
+
+    private async Task<BetterGiTaskRequest> CheckLaunchPlanAsync(string directory, CancellationToken ct)
+    {
+        var resolved = await BetterGiConfiguration.ResolveAsync(directory, _request, ct).ConfigureAwait(false);
+        if (resolved.OneDragonPlan?.EnabledTasks.Contains("自动秘境") == true)
+        {
+            var domain = await BetterGiConfiguration.InspectDomainResinAsync(directory, ct).ConfigureAwait(false);
+            if (domain.AutoArtifactSalvage)
+                throw new InvalidDataException("BetterGI 自动秘境启用了分解圣遗物，已阻止启动。");
+            if (!domain.HasExplicitBudget)
+                throw new InvalidDataException("BetterGI 自动秘境未指定树脂使用次数，已阻止启动。");
+        }
+        return resolved;
     }
 
     private static bool IsConfigurationError(Exception ex) =>

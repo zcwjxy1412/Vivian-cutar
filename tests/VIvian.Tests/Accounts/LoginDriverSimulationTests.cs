@@ -36,6 +36,31 @@ public sealed class LoginDriverSimulationTests
     }
 
     [Fact]
+    public async Task VerifiedWorldWithoutReadableUidDoesNotWaitForTheFullDeadline()
+    {
+        var game = FakeGame.Standard();
+        game.WorldUid = null;
+
+        var outcome = await game.Driver().SwitchAsync(B(), Fast, CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Null(outcome.Uid);
+        Assert.Equal(2, game.VerifierCalls);
+    }
+
+    [Fact]
+    public async Task InitialLoginCanRecoverAfterTenUnreadableFrames()
+    {
+        var game = FakeGame.Standard();
+        game.UnreadableScans = 10;
+
+        var outcome = await game.Driver().EnsureLoginAsync(Fast, CancellationToken.None);
+
+        Assert.True(outcome.Ok, outcome.Detail);
+        Assert.Equal(new[] { "退出登录", "确定" }, game.ClickedTexts);
+    }
+
+    [Fact]
     public async Task UnknownScreenProducesNoClicksAndStops()
     {
         var game = FakeGame.Standard();
@@ -232,6 +257,9 @@ public sealed class LoginDriverSimulationTests
         public int Kills { get; private set; }
         public int Starts { get; private set; }
         public int OccludedScans { get; set; }
+        public int UnreadableScans { get; set; }
+        public string? WorldUid { get; set; } = "100000002";
+        public int VerifierCalls { get; private set; }
         public int ProcessGeneration { get; set; }
         public bool WindowVisible { get; set; } = true;
         public bool ProcessRunning { get; set; } = true;
@@ -268,7 +296,8 @@ public sealed class LoginDriverSimulationTests
                 return Task.FromResult(new LoginScreenView(LoginScanResult.Fail(LoginScanFailure.WindowOccluded, "被遮挡"),
                     null, Window, null));
             }
-            var lines = Screens[Screen];
+            var lines = UnreadableScans > 0 ? Screens["garbage"] : Screens[Screen];
+            if (UnreadableScans > 0) UnreadableScans--;
             var frame = new CapturedFrame(new byte[16], 2, 2, "test");
             var result = LoginScreenAnalyzer.Analyze(1920, 1080, lines);
             return Task.FromResult(new LoginScreenView(result, frame, Window, null) { Lines = lines });
@@ -337,10 +366,13 @@ public sealed class LoginDriverSimulationTests
         public bool IsSameProcessAlive(StarRailWindowInfo window) =>
             Screen != "none" && window.ProcessStartedAt == Window.ProcessStartedAt;
 
-        public Task<SessionVerification> VerifyAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(Screen == "world"
-                ? new SessionVerification(true, "100000002", 0.95, "已进入游戏")
+        public Task<SessionVerification> VerifyAsync(CancellationToken cancellationToken)
+        {
+            VerifierCalls++;
+            return Task.FromResult(Screen == "world"
+                ? new SessionVerification(true, WorldUid, 0.95, "已进入游戏")
                 : new SessionVerification(false, null, 0.2, "未进入"));
+        }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }

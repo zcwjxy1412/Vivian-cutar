@@ -15,12 +15,20 @@ public partial class MainWindow : Window
         // its final state before the window really closes.
         Closing += async (_, e) =>
         {
-            if (_closeAfterStop || !viewModel.Queue.IsRunning) return;
+            if (_closeAfterStop || !viewModel.CanStopAll) return;
             e.Cancel = true;
             if (_stopping) return; // a second close click while the stop is in progress
             _stopping = true;
-            try { await viewModel.Queue.StopForShutdownAsync(ShutdownStopTimeout); }
+            try
+            {
+                if (viewModel.BatchRunning)
+                {
+                    if (!await viewModel.WaitForBatchShutdownAsync(ShutdownStopTimeout)) return;
+                }
+                else await viewModel.Queue.StopForShutdownAsync(ShutdownStopTimeout);
+            }
             catch (Exception ex) { Serilog.Log.Error("Shutdown stop failed: {ErrorType}", ex.GetType().Name); }
+            finally { _stopping = false; }
             _closeAfterStop = true;
             Close();
         };

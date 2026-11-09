@@ -104,19 +104,6 @@ public sealed class MultiAccountOrchestrator
 
                 batch = await StageAsync(batch, account, BatchRunState.RecognizingLogin,
                     $"{index + 1}/{accounts.Count}：确认账号选择界面", progress, cancellationToken);
-                var ensured = await _driver.EnsureLoginAsync(policy, cancellationToken);
-                if (!ensured.Ok)
-                {
-                    failed++;
-                    await RecordAsync(batch, account, ensured.NeedsUser ? "needs_user" : "login_screen_failed",
-                        ensured.Detail, cancellationToken);
-                    progress?.Invoke(P(account, ensured.NeedsUser ? BatchRunState.ReauthorizationRequired
-                        : BatchRunState.Failed, ensured.Detail));
-                    aborted = true;
-                    stopReason = ensured.Detail;
-                    break;
-                }
-
                 batch = await StageAsync(batch, account, BatchRunState.SelectingAccount, "正在选择并核对账号",
                     progress, cancellationToken);
                 var target = new LoginTarget(profile.NormalizedPhone, profile.MaskedPhone, profile.RowOrder,

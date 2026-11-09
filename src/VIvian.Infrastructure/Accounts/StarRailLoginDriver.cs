@@ -60,6 +60,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     private readonly IGameWindowLocator _locator;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly LoginFlowBudget _budget;
+    private readonly LoginFlowBudget _loginBudget;
     private readonly Func<DateTimeOffset> _now;
     private readonly Func<IDisposable?>? _prepareLaunch;
     private readonly Func<LoginScreenView, string, Task>? _saveEvidence;
@@ -82,6 +83,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         _locator = locator ?? StarRailWindowLocator.Instance;
         _delay = delay ?? Task.Delay;
         _budget = budget ?? LoginFlowBudget.Default;
+        _loginBudget = budget ?? LoginFlowBudget.Default with { MaxUnknownStreak = 20 };
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
 
@@ -101,7 +103,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
 
     private async Task<LoginSwitchOutcome> ReadLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
     {
-        var session = new LoginFlowSession(LoginGoal.AccountSelectable, _budget);
+        var session = new LoginFlowSession(LoginGoal.AccountSelectable, _loginBudget);
         var (outcome, _) = await RunFlowAsync(session, policy.GameStart, null, cancellationToken).ConfigureAwait(false);
         return outcome with { Stage = outcome.Ok ? LoginSwitchStage.WaitingForLogin : outcome.Stage };
     }
@@ -219,10 +221,12 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
         // ---- verify the session belongs to the selected account ----
         SessionVerification verify = new(false, null, 0, "尚未校验。");
         var deadline = _now() + policy.InGame;
+        var consecutiveWorldFrames = 0;
         while (_now() < deadline)
         {
             verify = await _verifier.VerifyAsync(cancellationToken).ConfigureAwait(false);
-            if (verify.InGame && verify.Uid is not null) break;
+            consecutiveWorldFrames = verify.InGame ? consecutiveWorldFrames + 1 : 0;
+            if (verify.InGame && (verify.Uid is not null || consecutiveWorldFrames >= 2)) break;
             if (verify.InGame && _now() + Poll >= deadline) break;
             await _delay(Poll, cancellationToken).ConfigureAwait(false);
         }
@@ -328,7 +332,9 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
                 observation.Accounts.Any(a => a.NormalizedPhone != identity))
                 return (Fatal(LoginSwitchStage.VerifyingSession, "标题页欢迎账号与已选账号不一致，已停止。") with
                     { Trail = trail }, titlePassed);
-            if (expectedWindow is not null && !_locator.IsSameProcessAlive(expectedWindow))
+            if (expectedWindow is not null && (!_locator.IsSameProcessAlive(expectedWindow) ||
+                view.Window is { } observedWindow && (observedWindow.ProcessId != expectedWindow.ProcessId ||
+                    observedWindow.ProcessStartedAt != expectedWindow.ProcessStartedAt)))
                 return (Fatal(LoginSwitchStage.VerifyingSession, "选择账号后游戏进程已变化或退出，会话与所选账号的关联中断。") with
                     { Trail = trail }, titlePassed);
 
@@ -418,7 +424,7 @@ public sealed class StarRailLoginDriver : ILoginSwitchDriver
     /// <summary>Local-only screenshot of the frame that stopped the flow, so the screen can be inspected later.</summary>
     private async Task SaveEvidenceAsync(LoginScreenView view, string name)
     {
-        if (_saveEvidence is null || view.Frame is null) return;
+        if (_saveEvidence is null) return;
         try { await _saveEvidence(view, name).ConfigureAwait(false); }
         catch (Exception ex) when (ex is not OperationCanceledException) { _log?.Invoke("evidence not saved: " + ex.GetType().Name); }
     }

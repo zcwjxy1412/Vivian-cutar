@@ -13,7 +13,7 @@ public sealed record AccountGameOption(GameId Id, string Name);
 /// <summary>One persisted account plus the login-screen binding that lets VIvian select it without a UID.</summary>
 public sealed class AccountRowViewModel : ObservableObject
 {
-    private readonly GameAccount _account;
+    private GameAccount _account;
     private readonly LocalDatabase.AccountLoginProfile? _profile;
     private string _name;
     private bool _isSelected;
@@ -29,6 +29,7 @@ public sealed class AccountRowViewModel : ObservableObject
     }
 
     public GameAccount Account => _account;
+    public void UpdateSavedAccount(GameAccount account) => _account = account;
     public LocalDatabase.AccountLoginProfile? Profile => _profile;
     public Guid Id => _account.Id;
     public string Name { get => _name; set => Set(ref _name, value); }
@@ -65,6 +66,7 @@ public sealed class AccountViewModel : ObservableObject
         ScanCommand = new(() => ExecuteScan(ScanAsync), Error);
         ImportCommand = new(ImportAsync, Error);
         SaveNameCommand = new(SaveNameAsync, Error);
+        SaveDailyPlanCommand = new(SaveDailyPlanAsync, Error);
         DeleteCommand = new(DeleteAsync, Error);
         MoveUpCommand = new(() => MoveAsync(-1), Error);
         MoveDownCommand = new(() => MoveAsync(1), Error);
@@ -76,45 +78,23 @@ public sealed class AccountViewModel : ObservableObject
     public ObservableCollection<AccountRowViewModel> Rows { get; } = [];
     public ObservableCollection<AccountBatch> RecentBatches { get; } = [];
     public ObservableCollection<AccountExecutionRecord> BatchResults { get; } = [];
-    public AccountConfigurationMode ConfigurationMode { get; set; } = AccountConfigurationMode.Unified;
-    public bool IsUnified
-    {
-        get => ConfigurationMode == AccountConfigurationMode.Unified;
-        set { if (value) { ConfigurationMode = AccountConfigurationMode.Unified; Raise(); Raise(nameof(IsIndependent)); } }
-    }
-    public bool IsIndependent
-    {
-        get => ConfigurationMode == AccountConfigurationMode.Independent;
-        set { if (value) { ConfigurationMode = AccountConfigurationMode.Independent; Raise(); Raise(nameof(IsUnified)); } }
-    }
-
     private AccountRowViewModel? _selectedRow;
-    public AccountRowViewModel? SelectedRow
+    public AccountRowViewModel? SelectedRow { get => _selectedRow; set => Set(ref _selectedRow, value); }
+
+    private AccountRowViewModel? _configurationRow;
+    public AccountRowViewModel? ConfigurationRow
     {
-        get => _selectedRow;
+        get => _configurationRow;
         set
         {
-            Set(ref _selectedRow, value);
-            Raise(nameof(SelectedStarRail));
+            if (_configurationRow == value) return;
+            Set(ref _configurationRow, value);
             SelectionChanged?.Invoke();
         }
     }
-
-    /// <summary>Kept for the engine-page account selector. It always maps back to the same row.</summary>
-    public GameAccount? SelectedStarRail
-    {
-        get => SelectedRow?.Account;
-        set
-        {
-            if (value is null) return;
-            var row = Rows.FirstOrDefault(r => r.Id == value.Id);
-            if (row is not null) SelectedRow = row;
-        }
-    }
+    public GameAccount? SelectedStarRail => ConfigurationRow?.Account;
     public event Action? SelectionChanged;
-
-    /// <summary>Items for the game page's account selector (restored: the binding was left without a source).</summary>
-    public IReadOnlyList<GameAccount> StarRailAccounts => Rows.Select(r => r.Account).ToArray();
+    public event Action? ExecutionSelectionChanged;
 
     private AccountBatch? _selectedBatch;
     public AccountBatch? SelectedBatch
@@ -128,6 +108,7 @@ public sealed class AccountViewModel : ObservableObject
     public AsyncCommand ScanCommand { get; }
     public AsyncCommand ImportCommand { get; }
     public AsyncCommand SaveNameCommand { get; }
+    public AsyncCommand SaveDailyPlanCommand { get; }
     public AsyncCommand DeleteCommand { get; }
     public AsyncCommand MoveUpCommand { get; }
     public AsyncCommand MoveDownCommand { get; }
@@ -140,7 +121,8 @@ public sealed class AccountViewModel : ObservableObject
     public async Task ReloadAsync()
     {
         var selectedId = SelectedRow?.Id;
-        var selectedIds = Rows.Where(r => r.IsSelected).Select(r => r.Id).ToHashSet();
+        var configurationId = ConfigurationRow?.Id;
+        var selections = Rows.ToDictionary(r => r.Id, r => r.IsSelected);
         var names = Rows.ToDictionary(r => r.Id, r => r.Name);
         var daily = Rows.ToDictionary(r => r.Id, r => r.DailyEnabled);
         var accounts = await _database.LoadAccountsAsync(GameId.StarRail);
@@ -151,18 +133,23 @@ public sealed class AccountViewModel : ObservableObject
             var plan = await _database.LoadAccountTaskPlanAsync(account.Id);
             var row = new AccountRowViewModel(account, profiles.GetValueOrDefault(account.Id), plan);
             if (names.TryGetValue(account.Id, out var name) && !string.IsNullOrWhiteSpace(name)) row.Name = name;
-            if (selectedIds.Contains(account.Id)) row.IsSelected = true;
+            if (row.Profile is not null && selections.TryGetValue(account.Id, out var selected)) row.IsSelected = selected;
             if (daily.TryGetValue(account.Id, out var dailyEnabled)) row.DailyEnabled = dailyEnabled;
+            row.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(AccountRowViewModel.IsSelected)) ExecutionSelectionChanged?.Invoke();
+            };
             rows.Add(row);
         }
         Rows.Clear();
         foreach (var row in rows) Rows.Add(row);
-        Raise(nameof(StarRailAccounts));
+        ExecutionSelectionChanged?.Invoke();
         var batchId = SelectedBatch?.Id;
         RecentBatches.Clear();
         foreach (var batch in await _database.LoadRecentBatchesAsync()) RecentBatches.Add(batch);
         SelectedBatch = RecentBatches.FirstOrDefault(b => b.Id == batchId) ?? RecentBatches.FirstOrDefault();
         SelectedRow = Rows.FirstOrDefault(r => r.Id == selectedId) ?? Rows.FirstOrDefault();
+        ConfigurationRow = Rows.FirstOrDefault(r => r.Id == configurationId) ?? Rows.FirstOrDefault();
         Status = Rows.Count == 0
             ? "尚无账号档案。请打开星铁登录界面并点击“扫描登录账号”。"
             : $"已读取 {Rows.Count} 个账号档案，其中 {Rows.Count(r => r.Profile is not null)} 个已绑定登录界面。";
@@ -210,11 +197,26 @@ public sealed class AccountViewModel : ObservableObject
         if (SelectedRow is null) { Status = "请先选择账号。"; return; }
         var name = SelectedRow.Name.Trim();
         if (name.Length is 0 or > 80) { Status = "账号备注须为 1–80 个字符。"; return; }
-        var saved = await _database.SaveAccountAsync(SelectedRow.Account with { Name = name, AutoRun = SelectedRow.IsSelected });
-        var plan = await _database.LoadAccountTaskPlanAsync(saved.Id);
-        await _database.SaveAccountTaskPlanAsync(plan with { DailyEnabled = SelectedRow.DailyEnabled });
-        await ReloadAsync();
-        Status = "账号备注、执行勾选与任务计划已保存。";
+        var row = SelectedRow;
+        row.UpdateSavedAccount(await _database.SaveAccountAsync(row.Account with { Name = name }));
+        await SaveSelectionsAsync(CancellationToken.None);
+        Status = "已保存账号备注和执行勾选。";
+    }
+
+    public async Task SaveSelectionsAsync(CancellationToken cancellationToken)
+    {
+        foreach (var row in Rows.Where(r => r.Profile is not null && r.Account.AutoRun != r.IsSelected).ToArray())
+            row.UpdateSavedAccount(await _database.SaveAccountAsync(row.Account with { AutoRun = row.IsSelected }, cancellationToken));
+    }
+
+    public async Task SaveDailyPlanAsync()
+    {
+        if (ConfigurationRow is not { } row) return;
+        var enabled = row.DailyEnabled;
+        var plan = await _database.LoadAccountTaskPlanAsync(row.Id);
+        if (plan.DailyEnabled != enabled)
+            await _database.SaveAccountTaskPlanAsync(plan with { DailyEnabled = enabled });
+        Status = $"已保存「{row.Name}」的星铁日常任务开关。";
     }
 
     private async Task DeleteAsync()

@@ -224,7 +224,7 @@ public partial class App : Application
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
                         var engineReport = await SmokeEngineDiscoveryAsync(vm, root);
-                        var tasksReport = await SmokeTasksAndDiagnosticsAsync(vm, database);
+                        var tasksReport = await SmokeAccountWorkflowAsync(window, vm, database);
                         var contrastReport = SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
                             "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + engineReport + " " + tasksReport + " " + contrastReport);
@@ -349,27 +349,31 @@ public partial class App : Application
         return "engine readiness: 原神=版本未知, 星铁=待桌面验证, 绝区零=未设置 (read-only fixtures).";
     }
 
-    /// <summary>Smoke check: task plans persist and stay non-executable; a redacted diagnostic bundle is exported.</summary>
-    private static async Task<string> SmokeTasksAndDiagnosticsAsync(MainViewModel vm, LocalDatabase database)
+    private static async Task<string> SmokeAccountWorkflowAsync(Window window, MainViewModel vm, LocalDatabase database)
     {
-        var plan = vm.TaskPlans.Single(p => p.Game == GameId.StarRail);
-        vm.SelectedPlan = plan;
-        plan.Rows[1].Enabled = true;
-        plan.Selected = plan.Rows[1];
-        plan.Move(-1);
-        plan.Selected = null; // no list selection highlight in the screenshots
-        if (!plan.Validation.StartsWith("不能执行", StringComparison.Ordinal))
-            throw new InvalidOperationException("A selected candidate task was shown as executable");
-        await vm.SaveTasksCommandAsync();
-        var stored = (await database.LoadTaskPlansAsync()).Single(p => p.Game == GameId.StarRail);
-        if (stored.Revision != 1 || !stored.Entries[0].Enabled || stored.Entries[0].TaskId != EngineCatalog.March7th.Tasks[1].Id)
-            throw new InvalidOperationException("Task plan was not persisted in order");
+        var tabs = FindTabControl(window) ?? throw new InvalidOperationException("TabControl not found");
+        var headers = tabs.Items.OfType<System.Windows.Controls.TabItem>().Select(t => t.Header as string).ToArray();
+        if (!headers.Contains("账号管理") || !headers.Contains("游戏管理") ||
+            headers.Contains("日常任务") || headers.Contains("任务计划"))
+            throw new InvalidOperationException("Account workflow pages do not match the home-start layout");
+
+        if (RealExecutionPolicy.IsM5DailyTest)
+        {
+            await vm.OneClickAsync();
+            if (!vm.BatchStatus.Contains("勾选", StringComparison.Ordinal) || vm.BatchRunning)
+                throw new InvalidOperationException("Home start did not require selected accounts");
+        }
+
+        var row = vm.Accounts.ConfigurationRow ?? throw new InvalidOperationException("Missing Star Rail configuration account");
+        row.DailyEnabled = false;
+        await vm.Accounts.SaveDailyPlanAsync();
+        if ((await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
+            throw new InvalidOperationException("Game task setting was not saved");
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
-        return "task plan persisted (non-executable); diagnostic bundle exported.";
+        return "account workflow pages verified; game task setting saved; diagnostic bundle exported.";
     }
-
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
     private static string SaveTabScreenshots(Window window, string root)
     {

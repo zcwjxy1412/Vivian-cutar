@@ -22,26 +22,155 @@ public sealed class GenshinDesktopLoginTests
             Frame(GenshinView.Card, A.NormalizedPhone),
             Frame(GenshinView.Gate),
             Frame(GenshinView.World), Frame(GenshinView.World),
+            Frame(GenshinView.World),
             Frame(GenshinView.World), Frame(GenshinView.Menu), Frame(GenshinView.LeaveWorld),
             Frame(GenshinView.Gate), Frame(GenshinView.ConfirmLogout), Frame(GenshinView.Card, A.NormalizedPhone),
             Frame(GenshinView.Card, A.NormalizedPhone),
             Frame(GenshinView.Dropdown, A.NormalizedPhone, B.NormalizedPhone),
             Frame(GenshinView.Card, B.NormalizedPhone), Frame(GenshinView.Gate),
-            Frame(GenshinView.World, uid: B.ObservedUid), Frame(GenshinView.World, uid: B.ObservedUid));
+            Frame(GenshinView.World, uid: B.ObservedUid), Frame(GenshinView.World, uid: B.ObservedUid),
+            Frame(GenshinView.World, uid: B.ObservedUid));
         var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
 
         Assert.True((await driver.EnsureLoginAsync(Policy, default)).Ok);
         Assert.Equal("verified", (await driver.SwitchAsync(A, Policy, default)).Evidence?.Verdict);
+        var firstId = Guid.NewGuid();
+        var firstWorld = await driver.ConfirmWorldAsync(firstId, A.NormalizedPhone, A.ObservedUid, default);
+        Assert.Equal(firstId, firstWorld.AccountId);
+        Assert.Null(firstWorld.Uid);
         Assert.True((await driver.RestartToLoginAsync(Policy, default)).Ok);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            driver.ConfirmWorldAsync(firstId, A.NormalizedPhone, A.ObservedUid, default));
         Assert.Equal(1, desktop.PrepareCalls);
         var second = await driver.SwitchAsync(B, Policy, default);
         Assert.True(second.Ok, second.Detail);
         Assert.Equal(B.ObservedUid, second.Uid);
+        var secondId = Guid.NewGuid();
+        var secondWorld = await driver.ConfirmWorldAsync(secondId, B.NormalizedPhone, B.ObservedUid, default);
+        Assert.Equal(secondId, secondWorld.AccountId);
+        Assert.Equal(B.ObservedUid, secondWorld.Uid);
+        Assert.Equal(Window.Handle, secondWorld.WindowHandle);
+        Assert.Equal(Window.ProcessId, secondWorld.ProcessId);
+        Assert.Equal(Window.ProcessStartedAt, secondWorld.ProcessStartedAt);
+        Assert.Equal(firstWorld.WindowHandle, secondWorld.WindowHandle);
         Assert.Equal([GenshinInput.OpenDropdown, GenshinInput.ChooseAccount,
             GenshinInput.EnterAccount, GenshinInput.OpenGate, GenshinInput.OpenMenu,
             GenshinInput.LeaveMenu, GenshinInput.ConfirmLeave, GenshinInput.LogoutGate, GenshinInput.ConfirmLogout,
             GenshinInput.OpenDropdown, GenshinInput.ChooseAccount, GenshinInput.EnterAccount, GenshinInput.OpenGate],
             desktop.Actions);
+    }
+
+    [Theory]
+    [InlineData("handle")]
+    [InlineData("pid")]
+    [InlineData("started")]
+    [InlineData("foreground")]
+    [InlineData("gate")]
+    [InlineData("uid")]
+    [InlineData("missing-uid")]
+    public async Task DailyHandoffStopsImmediatelyAndRevokesProofWhenTheWorldChanges(string change)
+    {
+        var frame = Frame(GenshinView.World, uid: B.ObservedUid);
+        var changed = change switch
+        {
+            "handle" => frame with { Window = Window with { Handle = (IntPtr)999 } },
+            "pid" => frame with { Window = Window with { ProcessId = Window.ProcessId + 1 } },
+            "started" => frame with { Window = Window with { ProcessStartedAt = Window.ProcessStartedAt!.Value.AddSeconds(1) } },
+            "foreground" => frame with { Window = null },
+            "gate" => frame with { View = GenshinView.Gate },
+            "uid" => frame with { Uid = "234567899" },
+            "missing-uid" => frame with { Uid = null },
+            _ => throw new InvalidOperationException(),
+        };
+        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Dropdown, B.NormalizedPhone), Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Gate), frame, frame, changed, frame);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        var id = Guid.NewGuid();
+        Assert.True((await driver.SwitchAsync(B, Policy, default)).Ok);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            driver.ConfirmWorldAsync(id, B.NormalizedPhone, B.ObservedUid, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            driver.ConfirmWorldAsync(id, B.NormalizedPhone, B.ObservedUid, default));
+        Assert.False((await driver.RestartToLoginAsync(Policy, default)).Ok);
+        Assert.Equal(7, desktop.ReadCalls);
+        Assert.Equal(4, desktop.Actions.Count);
+    }
+
+    [Fact]
+    public async Task AVerifiedWorldCanBeRecheckedOnlyForItsBoundAccount()
+    {
+        var world = Frame(GenshinView.World, uid: B.ObservedUid);
+        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Dropdown, B.NormalizedPhone), Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Gate), world, world, world, world, world);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        var id = Guid.NewGuid();
+        Assert.True((await driver.SwitchAsync(B, Policy, default)).Ok);
+
+        var first = await driver.ConfirmWorldAsync(id, B.NormalizedPhone, B.ObservedUid, default);
+        var second = await driver.ConfirmWorldAsync(id, B.NormalizedPhone, B.ObservedUid, default);
+        Assert.Equal(first, second);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            driver.ConfirmWorldAsync(Guid.NewGuid(), B.NormalizedPhone, B.ObservedUid, default));
+        Assert.Equal(8, desktop.ReadCalls);
+    }
+
+    [Fact]
+    public async Task ANewlyReadableUidCannotBeThePreviousAccount()
+    {
+        var target = B with { ObservedUid = null };
+        var world = Frame(GenshinView.World);
+        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Dropdown, B.NormalizedPhone), Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Gate), world, world, world with { Uid = B.PreviousUid });
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        Assert.True((await driver.SwitchAsync(target, Policy, default)).Ok);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            driver.ConfirmWorldAsync(Guid.NewGuid(), B.NormalizedPhone, null, default));
+    }
+
+    [Fact]
+    public async Task AUidReadAtHandoffStillGuardsTheNextSwitch()
+    {
+        var firstUid = B.PreviousUid;
+        var firstWorld = Frame(GenshinView.World, uid: firstUid);
+        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Dropdown, A.NormalizedPhone), Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Gate), Frame(GenshinView.World), Frame(GenshinView.World), firstWorld,
+            firstWorld, Frame(GenshinView.Menu), Frame(GenshinView.LeaveWorld), Frame(GenshinView.Gate),
+            Frame(GenshinView.ConfirmLogout), Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Card, A.NormalizedPhone), Frame(GenshinView.Dropdown, A.NormalizedPhone, B.NormalizedPhone),
+            Frame(GenshinView.Card, B.NormalizedPhone), Frame(GenshinView.Gate), firstWorld, firstWorld);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        var first = await driver.SwitchAsync(A, Policy, default);
+        Assert.True(first.Ok);
+        Assert.Null(first.Uid);
+        Assert.Equal(firstUid, (await driver.ConfirmWorldAsync(Guid.NewGuid(), A.NormalizedPhone, null, default)).Uid);
+        Assert.True((await driver.RestartToLoginAsync(Policy, default)).Ok);
+
+        var second = await driver.SwitchAsync(B with { ObservedUid = null, PreviousUid = null }, Policy, default);
+
+        Assert.False(second.Ok);
+        Assert.Equal("mismatch", second.Evidence?.Verdict);
+    }
+
+    [Fact]
+    public async Task ReturningForTheNextAccountRequiresSeeingThePreviousWorldBeforeLogout()
+    {
+        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Dropdown, A.NormalizedPhone), Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Gate), Frame(GenshinView.World), Frame(GenshinView.World),
+            Frame(GenshinView.Card, B.NormalizedPhone));
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        Assert.True((await driver.SwitchAsync(A, Policy, default)).Ok);
+
+        var returned = await driver.RestartToLoginAsync(Policy, default);
+
+        Assert.False(returned.Ok);
+        Assert.Equal(4, desktop.Actions.Count);
     }
 
     [Fact]
@@ -135,13 +264,18 @@ public sealed class GenshinDesktopLoginTests
         private readonly Queue<GenshinDesktopFrame> _frames = new(frames);
         public List<GenshinInput> Actions { get; } = [];
         public int PrepareCalls { get; private set; }
+        public int ReadCalls { get; private set; }
         public string? PrepareError { get; init; }
         public Task PrepareAsync(TimeSpan timeout, CancellationToken ct)
         {
             PrepareCalls++;
             return PrepareError is null ? Task.CompletedTask : Task.FromException(new InvalidOperationException(PrepareError));
         }
-        public Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct) => Task.FromResult(_frames.Dequeue());
+        public Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct)
+        {
+            ReadCalls++;
+            return Task.FromResult(_frames.Dequeue());
+        }
         public bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point)
         {
             Actions.Add(input);

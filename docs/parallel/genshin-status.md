@@ -1,6 +1,6 @@
 # M6 原神 BetterGI 接入 · 精简交接
 
-**共同基线** `c44dde18c8fbb21caba770f8799d33b880f8f843`。原神分支 `feature/m6-genshin-bettergi`，草稿 [PR #55](https://github.com/zcwjxy1412/Vivian-cutar/pull/55)。配置界面由共享层接入 [合流 PR #57](https://github.com/zcwjxy1412/Vivian-cutar/pull/57)。已安装统一版为 `3242768`，使用合流 v7；旧崩铁 v6 保留用于回滚。冷启动登录是后续源码增量，尚未部署。
+**共同基线** `c44dde18c8fbb21caba770f8799d33b880f8f843`。原神分支 `feature/m6-genshin-bettergi`，草稿 [PR #55](https://github.com/zcwjxy1412/Vivian-cutar/pull/55)。统一程序由共享层接入 [合流 PR #57](https://github.com/zcwjxy1412/Vivian-cutar/pull/57)。星铁功能以 `aff9a76` 为实机基线，保留 SQLite schema v6 原库，合流程序读取统一库。
 
 ## 当前可用
 
@@ -25,6 +25,13 @@
 - 登录入口使用国服已打开的 16∶9 客户区和固定版本模板。模板来自本机 BetterGI 脚本仓库，代码记录已核对的摘要，不运行第三方脚本。[脚本来源](https://github.com/babalae/bettergi-scripts-list/tree/16737383d1e770e3f0f7c2b4186ac875c1770c70/repo/js/%E5%88%87%E6%8D%A2%E8%B4%A6%E5%8F%B7Dropdown)
 - 0.66.0 的自动秘境在没有树脂选择弹窗时可能绕过指定次数。可编辑和预览秘境配置，实机执行维持关闭。合成树脂日志只有尝试或跳过，结果缺少入包证据时保持未确认。[秘境源码](https://github.com/babalae/better-genshin-impact/blob/0af68c28f6b0e714d5304625ce644736d508022e/BetterGenshinImpact/GameTask/AutoDomain/AutoDomainTask.cs) · [合成源码](https://github.com/babalae/better-genshin-impact/blob/0af68c28f6b0e714d5304625ce644736d508022e/BetterGenshinImpact/GameTask/Common/Job/GoToCraftingBenchTask.cs)
 - 正式原神调度、暂停和继续保持关闭。恢复报告尚未落盘时需要人工对账。登录 A→B 和任务清理后的 A→B 分开验收。
+
+## 首页执行接入
+
+- `BetterGiAccountBatch.ExecuteSavedDailyAsync` 使用已保存的账号顺序和 BetterGI 专属源档案。所有账号预检通过后才自动启动游戏。引擎启动前再次核对源档案和入场身份。收尾经过进程清理、原配置摘要和协议读回；完成结果或恢复未确认会阻断续账号。
+- 目前只接受源档案中唯一启用的内建「领取每日奖励」。本机两个源档案同时启用了合成浓缩树脂，因此首页直接运行会在启动游戏前说明阻断，保存的设置不改动。合成结果仍缺同一会话的入包证据，秘境缺所有领取界面的消费上限证据。
+- 隔离安装从本机固定摘要的 BetterGI 0.66.0 官方归档准备。任务报告在管理员隔离目录，统一运行日志记入结果和报告路径。原神恢复使用专属锁标记，通用星铁交接流程不会清除它。
+- 合流与实机仍待验证。当前安装 `0f41e2e` 的首页原神卡片保持「接入中」，登录验收已从同一程序支持自动启动。此记录只证明代码与离线测试，未在游戏中点击、领奖或消耗树脂。
 
 ## 配置与离线预览
 

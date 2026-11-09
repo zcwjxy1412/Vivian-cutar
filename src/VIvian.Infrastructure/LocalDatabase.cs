@@ -8,11 +8,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
 {
     private readonly string _connectionString;
     private readonly string _databasePath;
-    public LocalDatabase(string path)
+    public LocalDatabase(string path, bool createIfMissing = true)
     {
         _databasePath = Path.GetFullPath(path);
         _connectionString = new SqliteConnectionStringBuilder
-        { DataSource = _databasePath, Mode = SqliteOpenMode.ReadWriteCreate,
+        { DataSource = _databasePath, Mode = createIfMissing ? SqliteOpenMode.ReadWriteCreate : SqliteOpenMode.ReadWrite,
           DefaultTimeout = 5, Pooling = false }.ToString();
     }
 

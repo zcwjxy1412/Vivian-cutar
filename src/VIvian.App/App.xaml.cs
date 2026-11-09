@@ -41,6 +41,7 @@ public partial class App : Application
         }
         _smoke = e.Args.Contains("--smoke-test");
         _startupCheck = e.Args.Contains("--startup-check");
+        var preparingProfile = e.Args.FirstOrDefault() == "--prepare-unified-profile";
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Fatal("Unhandled UI error: {ErrorType}; {Stack}", args.Exception.GetType().Name,
@@ -57,30 +58,52 @@ public partial class App : Application
             var screenTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-ScreenTest.marker"));
             var manualTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-F1-ManualTest.marker"));
             var m5Daily = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M5-DailyTest.marker"));
+            var unified = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-UnifiedInstall.marker"));
+            if (unified != RealExecutionPolicy.IsUnifiedInstall)
+                throw new InvalidOperationException("程序与合流安装标记不匹配，拒绝启动。");
             // Each real-execution build must carry its own marker (and only its own): its data stays isolated.
             if (RealExecutionPolicy.IsOneShotScreenTest && (!screenTest || manualTest))
                 throw new InvalidOperationException("单次测试包缺少隔离数据标记，拒绝启动。");
             if (RealExecutionPolicy.IsReusableManualTest && !RealExecutionPolicy.IsM5DailyTest && (!manualTest || screenTest || m5Daily))
                 throw new InvalidOperationException("手动实测版缺少隔离数据标记，拒绝启动。");
-            if (RealExecutionPolicy.IsM5DailyTest && (!m5Daily || manualTest || screenTest))
+            if (RealExecutionPolicy.IsM5DailyTest && (m5Daily == unified || manualTest || screenTest))
                 throw new InvalidOperationException("M5 每日实训包缺少独立标记，拒绝启动。");
             if (!RealExecutionPolicy.BuildPermitsRealExecution && manualTest)
                 throw new InvalidOperationException("普通构建不能使用手动实测版的数据目录。");
             var threeEnginePreview = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-ThreeEngine-Preview.marker"));
             if (threeEnginePreview && RealExecutionPolicy.BuildPermitsRealExecution)
                 throw new InvalidOperationException("三引擎预览包不允许真实执行许可。");
+            if (preparingProfile)
+            {
+                _stage = "准备正式合流库";
+                if (!unified) throw new InvalidOperationException("请使用合流安装候选程序准备正式数据。");
+                if (_smoke)
+                {
+                    var fixture = SmokeDataDirectory(e.Args);
+                    await Task.Run(() => PrepareSmokeProfileAsync(fixture));
+                }
+                else
+                {
+                    if (e.Args.Length != 2 || !Path.IsPathFullyQualified(e.Args[1]))
+                        throw new ArgumentException("请指定尚不存在的绝对暂存目录。");
+                    await Task.Run(() => UnifiedProfilePreparation.PrepareFromExistingProfilesAsync(e.Args[1], CancellationToken.None));
+                }
+                Shutdown(0);
+                return;
+            }
             var preview = e.Args.Contains("--m4-preview")
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
                 ? SmokeDataDirectory(e.Args)
+                : unified ? UnifiedProfilePreparation.InstalledDirectory
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     RealExecutionPolicy.IsM5DailyTest ? "VIvian-M6-StarRailTest"
                     : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M6-ManualTest"
                     : screenTest ? "VIvian-M6-ScreenTest" : threeEnginePreview ? "VIvian-M6-ThreeEngine-Preview"
                     : preview ? "VIvian-M6-Preview" : "VIvian-M6-Development");
-            _dataRoot = root;
+            var usePreparedProfile = unified && (!_smoke || _startupCheck);
             _stage = "创建数据目录";
-            Directory.CreateDirectory(root);
+            if (!usePreparedProfile) Directory.CreateDirectory(root);
             // Smoke runs must never write into the user's screenshot-feedback folder.
             if (_smoke) Environment.SetEnvironmentVariable("VIVIAN_FEEDBACK_DIR", Path.Combine(root, "no-feedback-folder"));
             // One instance per data directory, decided before the database or logs are touched.
@@ -112,13 +135,19 @@ public partial class App : Application
                 Shutdown(_instance.Result == InstanceLockResult.AccessDenied ? 3 : 2);
                 return;
             }
+            if (usePreparedProfile)
+            {
+                _stage = "校验正式合流库";
+                await Task.Run(() => UnifiedProfilePreparation.VerifyPrepared(root));
+            }
+            _dataRoot = root;
             Log.Logger = new LoggerConfiguration().MinimumLevel.Information()
                 .WriteTo.File(Path.Combine(root, "logs", "vivian-.log"), rollingInterval: RollingInterval.Day,
                     retainedFileCountLimit: 14, fileSizeLimitBytes: 5_000_000, rollOnFileSizeLimit: true).CreateLogger();
             if (_instance.Result == InstanceLockResult.AcquiredAfterAbandoned)
                 Log.Warning("Previous instance exited without releasing the instance lock");
             _stage = "打开数据库";
-            var database = new LocalDatabase(Path.Combine(root, "vivian.db"));
+            var database = new LocalDatabase(Path.Combine(root, "vivian.db"), createIfMissing: !usePreparedProfile);
             _host = Host.CreateDefaultBuilder().UseSerilog().ConfigureServices(services =>
             {
                 services.AddSingleton(database);
@@ -174,7 +203,7 @@ public partial class App : Application
             }).Build();
             await _host.StartAsync();
             await Task.Run(() => database.InitializeAsync());
-            if (_smoke)
+            if (_smoke && !_startupCheck)
             {
                 var recognized = await database.AddAccountAsync(GameId.Genshin, "原神识别样例", "", null);
                 await database.SaveLoginProfileAsync(recognized.Id, "130******00", "130****00", 0, .9, null, "测试数据");
@@ -250,7 +279,9 @@ public partial class App : Application
             if (!_smoke) _activation = WindowActivation.Listen(root, window);
             // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
             Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
-                RealExecutionPolicy.IsM5DailyTest
+                RealExecutionPolicy.IsUnifiedInstall
+                    ? "Unified install with prepared profile. Genshin and Zenless real execution remain gated."
+                    : RealExecutionPolicy.IsM5DailyTest
                     ? "M5 daily manual-test build: per-run consent, pinned identity and cleanup admission."
                     : RealExecutionPolicy.IsReusableManualTest
                     ? "Manual-test build: March7thAssistant screen_test only, each run confirmed by the user; no scheduled or unattended real runs."
@@ -263,7 +294,7 @@ public partial class App : Application
             Log.Error("Startup failed at {Stage}: {ErrorType}; {Stack}", _stage, ex.GetType().Name,
                 Redactor.ForCurrentUser().Redact(ex.ToString()));
             var report = StartupDiagnostics.Write(ex, _dataRoot, _stage);
-            if (!_smoke)
+            if (!_smoke && !_startupCheck && !preparingProfile)
                 MessageBox.Show($"VIvian 启动失败（阶段：{_stage}）。\n\n{StartupDiagnostics.Explain(ex)}\n\n" +
                     (report is null ? "无法写入诊断报告。" : $"诊断报告：{report}") + "\n原数据不会被删除或修改。", "VIvian");
             Shutdown(1);
@@ -285,6 +316,31 @@ public partial class App : Application
             || !Directory.Exists(directory) || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
             throw new InvalidOperationException("Invalid isolated smoke directory");
         return directory;
+    }
+
+    private static async Task PrepareSmokeProfileAsync(string fixture)
+    {
+        var oldPath = Path.Combine(fixture, "v6.db");
+        var importedPath = Path.Combine(fixture, "v7.db");
+        if (!File.Exists(oldPath) && !File.Exists(importedPath))
+        {
+            var old = new LocalDatabase(oldPath);
+            await old.InitializeAsync();
+            await old.AddAccountAsync(GameId.StarRail, "崩铁切换样例", "", null);
+            using (var database = new Microsoft.Data.Sqlite.SqliteConnection(
+                new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = oldPath, Pooling = false }.ToString()))
+            {
+                database.Open();
+                using var command = database.CreateCommand();
+                command.CommandText = "DROP TABLE account_configuration_audit; PRAGMA user_version=6;";
+                command.ExecuteNonQuery();
+            }
+            var imported = new LocalDatabase(importedPath);
+            await imported.InitializeAsync();
+            await imported.AddAccountAsync(GameId.Genshin, "原神切换样例", "", null);
+        }
+        await UnifiedProfilePreparation.PrepareAsync(oldPath, importedPath, Path.Combine(fixture, "vivian-smoke-prepared"),
+            CancellationToken.None);
     }
 
     private static async Task<string> SmokeAssistantIsolationAsync(Window owner, MainViewModel vm, LocalDatabase database)
@@ -516,7 +572,7 @@ public partial class App : Application
                 await sourceWrite;
             }
         }
-        if (RealExecutionPolicy.IsM5DailyTest)
+        if (genshin.IsLoginVerificationAvailable)
         {
             main.GenshinSettingsTabs.SelectedIndex = 1;
             window.UpdateLayout();

@@ -33,3 +33,11 @@ Task<BetterGiSourceSettings> ConnectAccountProfileAsync(
 3. 用正式库副本核对原有账号、设置、历史和固定引擎路径。核对两个原神账号的登录绑定、计划和审计可读，并验证失败回滚、重复导入和安装中断。现有 `%LOCALAPPDATA%\VIvian` 已有旧库，正式合流数据目录暂定 `%LOCALAPPDATA%\VIvian-UserData`。核对无同名数据后再发布。正式构建只接受已准备并校验的目标库，缺失时提示恢复，避免误启动到空库。
 4. 合流版通过 Windows 门禁及约定的实机验收后，校验自包含包并在同一盘暂存。将正式安装目录整体移入回滚归档，再将新包放进原 `E:\auto agent game\VIvian`，让现有快捷方式自动进入同一程序。切换失败时恢复旧目录。回滚到 `aff9a76` 时继续使用原 v6 库，保留合流版新增数据以便后续恢复。
 5. 单入口验收后再清理已核对的重复测试包和多余快捷方式。正式依赖、素材、数据库、唯一回滚副本和验收证据列入保留清单。
+
+## 离线候选与复验
+
+开发侧构建使用 `scripts/Build-M5_2Test.ps1 -UnifiedInstall -Target <新目录>`。仅这个构建接受 `VIvian-UnifiedInstall.marker`。正常启动固定读 `%LOCALAPPDATA%\VIvian-UserData\vivian.db`，同时检查 v7 版本、合流标识及 SQLite 完整性。缺库或只放入普通 v7 库时拒绝启动。
+
+两套源程序退出并且桌面交接完成后，可用合流候选的 `VIvian.exe --prepare-unified-profile <尚不存在的绝对暂存目录>` 生成可切换的数据。来源固定为上文 v6 和 v7 目录，输入只读。准备过程中同时持有两个来源的单实例锁和桌面锁。冲突、未清理运行或未完成的恢复会阻断；成功通过检查后才出现指定暂存目录。切换前需再核对两套源库没有被其他程序重新打开或修改。
+
+开发侧用 `scripts/Test-UnifiedCutover.ps1 -PreviousPackageDirectory <旧程序目录> -CandidatePackageDirectory <合流候选目录>` 重跑。脚本只在临时目录复制程序、创建快捷方式和假数据，验证原入口路径启动、模拟替换失败恢复、缺库阻断、有准备库启动和回滚。该脚本产出的候选路径不作为用户入口。

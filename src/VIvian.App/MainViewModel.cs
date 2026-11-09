@@ -72,7 +72,7 @@ public sealed class MainViewModel : ObservableObject
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
-        + (RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
+        + (RealExecutionPolicy.IsUnifiedInstall ? "VIvian 合流版" : RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
             : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
             : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
     public string ExecutionBanner => RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次 · 首页启动"
@@ -911,7 +911,7 @@ public sealed class MainViewModel : ObservableObject
         Status = $"设置已保存。已按新的保留期清理 {removed.Count} 个旧日志文件。";
     }
 
-    private static string BuildKind => RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
+    private static string BuildKind => RealExecutionPolicy.IsUnifiedInstall ? "VIvian 合流版" : RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
         : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版"
         : RealExecutionPolicy.BuildPermitsRealExecution ? "M4-D 单次测试包" : "开发版（模拟）";
 

@@ -192,6 +192,15 @@ public sealed record ExecutionDecision(bool Allowed, string ReasonCode, string E
 /// </summary>
 public static class RealExecutionPolicy
 {
+#if VIvian_UNIFIED_INSTALL && !M5_DAILY_TEST
+#error 合流安装版须保留现有崩铁日常构建模式。
+#endif
+#if VIvian_UNIFIED_INSTALL
+    public static bool IsUnifiedInstall => true;
+#else
+    public static bool IsUnifiedInstall => false;
+#endif
+
 #if (M4_SCREEN_TEST && M4_MANUAL_TEST) || (M5_DAILY_TEST && (M4_SCREEN_TEST || M4_MANUAL_TEST))
 #error 单次测试包与可重复手动实测版不能同时启用。
 #endif

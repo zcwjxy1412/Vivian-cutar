@@ -1,0 +1,105 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$PreviousPackageDirectory,
+    [Parameter(Mandatory)][string]$CandidatePackageDirectory
+)
+$ErrorActionPreference = 'Stop'
+$previous = (Resolve-Path -LiteralPath $PreviousPackageDirectory).Path
+$candidate = (Resolve-Path -LiteralPath $CandidatePackageDirectory).Path
+if (!(Test-Path -LiteralPath (Join-Path $candidate 'VIvian-UnifiedInstall.marker') -PathType Leaf) -or
+    (Test-Path -LiteralPath (Join-Path $previous 'VIvian-UnifiedInstall.marker'))) {
+    throw '请提供现有版本及合流安装候选的完整程序目录。'
+}
+$root = [IO.Directory]::CreateTempSubdirectory('vivian-smoke-cutover-').FullName
+$previousSmokeRoot = $env:VIVIAN_SMOKE_DATA
+$install = Join-Path $root 'VIvian'
+$staged = Join-Path $root 'candidate'
+$rollback = Join-Path $root 'rollback'
+$shortcutPath = Join-Path $root '启动 furina.lnk'
+$entry = Join-Path $install 'VIvian.exe'
+
+function Move-TestDirectory([string]$From, [string]$To) {
+    $fromPath = (Resolve-Path -LiteralPath $From).Path
+    $toPath = [IO.Path]::GetFullPath($To)
+    if (([IO.Path]::GetDirectoryName($fromPath) -ne $root) -or ([IO.Path]::GetDirectoryName($toPath) -ne $root) -or
+        ((Get-Item -LiteralPath $fromPath).Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        (Test-Path -LiteralPath $toPath)) {
+        throw '演练只允许在临时目录内移动未占用的子目录。'
+    }
+    [IO.Directory]::Move($fromPath, $toPath)
+}
+
+function Install-TestCandidate([string]$Package) {
+    Move-TestDirectory $install $rollback
+    try { Move-TestDirectory $Package $install }
+    catch {
+        Move-TestDirectory $rollback $install
+        throw
+    }
+}
+
+function Invoke-TestEntry([string]$Mode, [string]$Profile, [int]$ExpectedExit) {
+    $link = $shell.CreateShortcut($shortcutPath)
+    if ($link.TargetPath -ne $entry) { throw '演练快捷方式目标发生变化。' }
+    $env:VIVIAN_SMOKE_DATA = $Profile
+    $arguments = @($Mode, '--smoke-test', '--smoke-data', ('"' + $Profile + '"'))
+    $proc = Start-Process -FilePath $link.TargetPath -WorkingDirectory $install -WindowStyle Hidden -PassThru -ArgumentList $arguments
+    if (!$proc.WaitForExit(30000)) {
+        $proc.Kill()
+        throw "演练入口超时。阶段 $Mode"
+    }
+    if ($proc.ExitCode -ne $ExpectedExit) {
+        $report = Join-Path $install 'VIvian-启动失败报告.txt'
+        if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report -Tail 14 | Write-Host }
+        throw "演练入口退出码 $($proc.ExitCode)，预期 $ExpectedExit。阶段 $Mode"
+    }
+    if ($Mode -eq '--startup-check' -and $ExpectedExit -eq 0 -and
+        !(Test-Path -LiteralPath (Join-Path $Profile 'startup.ok') -PathType Leaf)) {
+        throw '演练入口未生成启动证据。'
+    }
+}
+
+try {
+    Copy-Item -LiteralPath $previous -Destination $install -Recurse
+    Copy-Item -LiteralPath $candidate -Destination $staged -Recurse
+    $oldHash = (Get-FileHash -LiteralPath $entry).Hash
+    $newHash = (Get-FileHash -LiteralPath (Join-Path $staged 'VIvian.exe')).Hash
+    $shell = New-Object -ComObject WScript.Shell
+    $link = $shell.CreateShortcut($shortcutPath)
+    $link.TargetPath = $entry
+    $link.WorkingDirectory = $install
+    $link.Save()
+
+    $oldProfile = (New-Item -ItemType Directory -Path (Join-Path $root 'vivian-smoke-previous')).FullName
+    Invoke-TestEntry '--startup-check' $oldProfile 0
+    $failed = $false
+    try { Install-TestCandidate (Join-Path $root 'intentionally-missing') }
+    catch { $failed = $true }
+    if (!$failed -or (Get-FileHash -LiteralPath $entry).Hash -ne $oldHash) { throw '失败替换未恢复旧程序。' }
+    Invoke-TestEntry '--startup-check' $oldProfile 0
+
+    Install-TestCandidate $staged
+    if ((Get-FileHash -LiteralPath $entry).Hash -ne $newHash) { throw '入口未指向候选程序。' }
+    $empty = (New-Item -ItemType Directory -Path (Join-Path $root 'vivian-smoke-empty')).FullName
+    Invoke-TestEntry '--startup-check' $empty 1
+    if (Test-Path -LiteralPath (Join-Path $empty 'vivian.db')) { throw '缺库检查误建了数据库。' }
+    $fixture = (New-Item -ItemType Directory -Path (Join-Path $root 'vivian-smoke-fixture')).FullName
+    Invoke-TestEntry '--prepare-unified-profile' $fixture 0
+    $prepared = Join-Path $fixture 'vivian-smoke-prepared'
+    Invoke-TestEntry '--startup-check' $prepared 0
+
+    Move-TestDirectory $install $staged
+    Move-TestDirectory $rollback $install
+    if ((Get-FileHash -LiteralPath $entry).Hash -ne $oldHash) { throw '回滚后程序哈希不符。' }
+    Invoke-TestEntry '--startup-check' $oldProfile 0
+    Write-Output 'Same shortcut target started the old and new builds. Missing prepared DB was rejected without creating a DB. Failed replacement and final rollback both restored the old executable and its startup.'
+}
+finally {
+    $env:VIVIAN_SMOKE_DATA = $previousSmokeRoot
+    $resolved = (Resolve-Path -LiteralPath $root).Path
+    $temp = [IO.Path]::TrimEndingDirectorySeparator((Resolve-Path -LiteralPath ([IO.Path]::GetTempPath())).Path)
+    if ([IO.Path]::GetDirectoryName($resolved) -eq $temp -and
+        [IO.Path]::GetFileName($resolved).StartsWith('vivian-smoke-cutover-', [StringComparison]::Ordinal)) {
+        Remove-Item -LiteralPath $resolved -Recurse -Force
+    }
+}

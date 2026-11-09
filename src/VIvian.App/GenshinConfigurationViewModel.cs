@@ -76,7 +76,7 @@ public sealed class GenshinConfigurationViewModel
     public AsyncCommand VerifyLoginCommand { get; }
     public RelayCommand<object> CancelLoginCommand { get; }
     public RelayCommand<object> ClearSecondLoginAccountCommand { get; }
-    public bool IsLoginVerificationAvailable => RealExecutionPolicy.IsM5DailyTest;
+    public bool IsLoginVerificationAvailable => RealExecutionPolicy.IsM5DailyTest && !RealExecutionPolicy.IsUnifiedInstall;
     public bool IsVerifyingLogin => _verification is not null;
     public string LoginStatus { get => _loginStatus; private set => Set(ref _loginStatus, value); }
     public string GameExecutable

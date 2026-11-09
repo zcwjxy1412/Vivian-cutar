@@ -99,6 +99,15 @@ public sealed class AssistantConnectionTests
             new ChatCompletionsClient(http).TestToolRoundTripAsync(Endpoint, CancellationToken.None));
     }
 
+    [Fact]
+    public void DraftNeverReusesAStoredKeyForADifferentDestination()
+    {
+        Assert.Equal("test-key", Endpoint.WithDraft("https://example.invalid/v1", "new-model", "").ApiKey);
+        Assert.Empty(Endpoint.WithDraft("https://other.invalid/v1", "new-model", "").ApiKey);
+        Assert.Empty(Endpoint.WithDraft("https://example.invalid/another-route", "new-model", "").ApiKey);
+        Assert.Equal("new-key", Endpoint.WithDraft("https://other.invalid/v1", "new-model", "new-key").ApiKey);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => send(request, ct);

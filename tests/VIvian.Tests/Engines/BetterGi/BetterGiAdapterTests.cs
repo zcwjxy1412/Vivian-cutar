@@ -322,10 +322,32 @@ public sealed class BetterGiLifecycleTests
         var lines = BgiLog.SuccessfulRun(group.RootProcessId, old).Concat(BgiLog.SuccessfulRun(9999, old));
         var verdict = await FinishAsync(f, run, group, lines, 0);
         Assert.Equal(RunOutcome.Indeterminate, verdict.Outcome);
-        Assert.Equal(ReasonCodes.NoCompletionEvidence, verdict.ReasonCode); // exit 0 alone is never success
+        Assert.Equal(ReasonCodes.CleanupUnconfirmed, verdict.ReasonCode); // no attributable startup
         Assert.Equal(10, run.Evidence.IgnoredRecords);
         Assert.False(run.Evidence.ForeignActivitySeen);
-        Assert.Equal(CleanupState.Confirmed, await run.ReconcileAsync(default));
+        Assert.Equal(CleanupState.Unconfirmed, await run.ReconcileAsync(default));
+    }
+
+    [Theory]
+    [InlineData(false, RunOutcome.Indeterminate)]
+    [InlineData(true, RunOutcome.Success)]
+    public async Task DailyRewardsRequireTheirOwnPostTaskVerification(bool observed, RunOutcome expected)
+    {
+        await using var f = new BetterGiFixture();
+        var path = Path.Combine(f.Root, "User", "OneDragon", "日常.json");
+        File.WriteAllText(path, """{ "Name": "日常", "TaskEnabledList": { "领取每日奖励": true }, "CompletionAction": "关闭软件" }""");
+        var request = BetterGiArguments.OneDragon("日常").Request;
+        var (run, group) = await f.LaunchAsync(f.Adapter(request, contractVerified: true));
+        await using var owned = run;
+
+        var lines = BgiLog.Record(group.RootProcessId, Own(group), "启用一条龙配置：日常")
+            .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙任务执行: 1/1"));
+        if (observed)
+            lines = lines.Concat(BgiLog.Record(group.RootProcessId, Own(group), "检查每日奖励结果：今日奖励已领取",
+                source: "BetterGenshinImpact.GameTask.Common.Job.CheckRewardsTask"));
+        lines = lines.Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙和配置组任务结束"));
+        var verdict = await FinishAsync(f, run, group, lines, 0);
+        Assert.Equal(expected, verdict.Outcome);
     }
 
     [Fact]
@@ -443,7 +465,7 @@ public sealed class BetterGiLifecycleTests
         var stop = await run.RequestStopAsync(StopMode.Emergency, default);
         Assert.Equal(CleanupState.Unconfirmed, stop.Cleanup);
         await run.DisposeAsync();
-        Assert.True(f.Registry.IsBusy(f.Root)); // the installation stays locked for this session
+        Assert.True(f.Registry.IsBusy); // the installation stays locked for this session
     }
 
     [Fact]
@@ -472,7 +494,7 @@ public sealed class BetterGiLifecycleTests
         Assert.Equal(CleanupState.Confirmed, await run.ReconcileAsync(default));
         await run.DisposeAsync();
         Assert.True(group.Disposed);
-        Assert.False(f.Registry.IsBusy(f.Root));
+        Assert.False(f.Registry.IsBusy);
     }
 
     [Fact]
@@ -505,7 +527,7 @@ public sealed class BetterGiLifecycleTests
         group.TerminateThrows = true;
         Assert.Equal(CleanupState.Unconfirmed, (await run.RequestStopAsync(StopMode.Emergency, default)).Cleanup);
         await run.DisposeAsync();
-        Assert.True(f.Registry.IsBusy(f.Root));
+        Assert.True(f.Registry.IsBusy);
     }
 
     [Fact]
@@ -521,11 +543,10 @@ public sealed class BetterGiLifecycleTests
         var pre = await f.Adapter(inspect: BetterGiFixture.Report(CompatibilityClass.PendingValidation)).PreflightAsync(other, default);
         Assert.Equal(ReasonCodes.ForeignProcess, pre.ReasonCode);
 
-        group.Exit(0);
-        await run.WaitForVerdictAsync(new CancellationTokenSource(TimeSpan.FromSeconds(10)).Token);
+        await FinishAsync(f, run, group, BgiLog.SuccessfulRun(group.RootProcessId, Own(group)), 0);
         Assert.Equal(CleanupState.Confirmed, await run.ReconcileAsync(default));
         await run.DisposeAsync();
-        Assert.False(f.Registry.IsBusy(f.Root));
+        Assert.False(f.Registry.IsBusy);
     }
 
     [Fact]
@@ -536,7 +557,7 @@ public sealed class BetterGiLifecycleTests
         var ex = await Assert.ThrowsAsync<EngineStartException>(() => f.Adapter().LaunchAsync(f.Context, f.Supervisor, default));
         Assert.True(ex.NothingStarted);
         Assert.Equal(0, f.Supervisor.Calls);
-        Assert.False(f.Registry.IsBusy(f.Root));
+        Assert.False(f.Registry.IsBusy);
 
         await using var missing = new BetterGiFixture(createInstall: false);
         var ex2 = await Assert.ThrowsAsync<EngineStartException>(() => missing.Adapter().LaunchAsync(missing.Context, missing.Supervisor, default));

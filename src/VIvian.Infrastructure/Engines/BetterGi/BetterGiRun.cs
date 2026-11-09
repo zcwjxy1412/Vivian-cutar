@@ -115,8 +115,8 @@ internal sealed class BetterGiRun : IEngineRun
         var kind = accepted.Marker.Kind switch
         {
             BetterGiMarkerKind.Progress or BetterGiMarkerKind.Activated or BetterGiMarkerKind.ArgumentConfig => RunEventKind.Progress,
-            BetterGiMarkerKind.Completed or BetterGiMarkerKind.Cancelled or BetterGiMarkerKind.NothingDone => RunEventKind.Evidence,
-            BetterGiMarkerKind.Failure or BetterGiMarkerKind.Fatal or BetterGiMarkerKind.ConfigNotFound => RunEventKind.Warning,
+            BetterGiMarkerKind.Completed or BetterGiMarkerKind.Cancelled or BetterGiMarkerKind.NothingDone or BetterGiMarkerKind.DailyRewardVerified => RunEventKind.Evidence,
+            BetterGiMarkerKind.Failure or BetterGiMarkerKind.Fatal or BetterGiMarkerKind.ConfigNotFound or BetterGiMarkerKind.DailyRewardUnverified => RunEventKind.Warning,
             _ => RunEventKind.Output,
         };
         Emit(kind, $"[{record.Level}] {Truncate(record.Message)}");
@@ -160,6 +160,12 @@ internal sealed class BetterGiRun : IEngineRun
         if (last is not null) Handle(last);
         await _readers.CancelAsync().ConfigureAwait(false);
 
+        if (exitCode is (0 or BetterGiContract.SingleInstanceOrIntegrationExitCode) && !_evidence.OwnedPrimarySeen)
+        {
+            _detached = true;
+            Emit(RunEventKind.Warning, "BetterGI 退出前未留下本次主实例日志，可能已把命令转发给外部实例。");
+        }
+
         var verdict = _evidence.Evaluate(exitCode, _stoppedByVivian, _detached, _options.CompletionContractVerified, _time.GetUtcNow());
         Emit(RunEventKind.Output, $"BetterGI 主进程已退出，退出码 {exitCode?.ToString() ?? "未知"}（退出码不作为成功依据）。");
         _events.Writer.TryComplete();
@@ -173,7 +179,8 @@ internal sealed class BetterGiRun : IEngineRun
         {
             var now = _time.GetTimestamp();
             if (_time.GetElapsedTime(started, now) >= _options.LogDrainLimit) return;
-            if (_time.GetElapsedTime(Interlocked.Read(ref _lastLogTimestamp), now) >= _options.LogQuietPeriod) return;
+            var lastActivity = Math.Max(started, Interlocked.Read(ref _lastLogTimestamp));
+            if (_time.GetElapsedTime(lastActivity, now) >= _options.LogQuietPeriod) return;
             await Task.Delay(TimeSpan.FromMilliseconds(50), _time).ConfigureAwait(false);
         }
     }
@@ -198,6 +205,8 @@ internal sealed class BetterGiRun : IEngineRun
         try
         {
             cleanup = _group.ActiveProcessCount == 0 ? CleanupState.Confirmed : await TerminateOwnedAsync(ct).ConfigureAwait(false);
+            if (cleanup == CleanupState.Confirmed)
+                await _verdict.WaitAsync(ct).ConfigureAwait(false);
         }
         catch (Exception)
         {
@@ -220,7 +229,7 @@ internal sealed class BetterGiRun : IEngineRun
         if (cleanup != CleanupState.Confirmed) return CleanupState.Unconfirmed;
         if (_detached || _evidence.ForeignActivitySeen)
         {
-            Emit(RunEventKind.Warning, "作业内的进程已结束，但存在不属于本次运行的 BetterGI 进程（提权重启或其他实例）：清理未确认，队列保持阻断。");
+            Emit(RunEventKind.Warning, "作业内的进程已结束，但无法排除 BetterGI 在作业外执行（提权重启或 IPC 转发）：清理未确认，队列保持阻断。");
             return CleanupState.Unconfirmed;
         }
         return CleanupState.Confirmed;

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -18,6 +19,89 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     private CapturedFrame? _pixels;
     private long _readAt;
     private bool _active = true;
+    private (int Pid, DateTimeOffset Started)? _client;
+
+    public async Task PrepareAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(timeout);
+        try
+        {
+            EnsureDesktopAvailable();
+            using var file = ReadOnlyFileAccess.OpenForStableRead(gamePath);
+            await Task.Run(() => GenshinGameExecutable.Verify(gamePath, file), limit.Token).ConfigureAwait(false);
+            limit.Token.ThrowIfCancellationRequested();
+            EnsureDesktopAvailable();
+            _client = FindExistingClient();
+            if (_client is null)
+            {
+                using var started = WindowsProcessSupervisor.StartUserProcess(gamePath, Path.GetDirectoryName(gamePath)!)
+                    ?? throw new InvalidOperationException("Windows 没有返回本次启动的原神进程。");
+                _client = VerifyClient(started);
+            }
+
+            while (true)
+            {
+                limit.Token.ThrowIfCancellationRequested();
+                EnsureDesktopAvailable();
+                if (_client != FindExistingClient())
+                    throw new InvalidOperationException("原神启动进程已退出或发生变化，已停止登录。");
+                if (FindForeground() is not null) return;
+                using var game = Process.GetProcessById(_client.Value.Pid);
+                var hwnd = game.MainWindowHandle;
+                if (hwnd != IntPtr.Zero && TryFindWindow(hwnd) is not null)
+                {
+                    if (WindowsNative.IsIconic(hwnd)) WindowsNative.ShowWindow(hwnd, WindowsNative.SwRestore);
+                    WindowsNative.SetForegroundWindow(hwnd);
+                }
+                await Task.Delay(450, limit.Token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("未等到本次原神客户端的 16∶9 前台窗口，已停止登录。");
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            throw new InvalidOperationException("Windows 未确认原神启动授权。", ex);
+        }
+        catch (Exception ex) when (ex is Win32Exception or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            throw new InvalidOperationException("原神客户端无法启动或核对。" + ex.Message, ex);
+        }
+    }
+
+    private void EnsureDesktopAvailable()
+    {
+        if (_instances.IsBusy(betterGiProgram) || StarRailWindow.IsProcessRunning())
+            throw new InvalidOperationException("BetterGI 或崩铁正在使用桌面，原神登录已停止。");
+    }
+
+    private (int Pid, DateTimeOffset Started)? FindExistingClient()
+    {
+        var clients = Process.GetProcessesByName(ClientProcessName);
+        try
+        {
+            return clients.Length switch
+            {
+                0 => null,
+                1 => VerifyClient(clients[0]),
+                _ => throw new InvalidOperationException("有多个原神国服客户端，无法安全选择。"),
+            };
+        }
+        finally
+        {
+            foreach (var client in clients) client.Dispose();
+        }
+    }
+
+    private (int Pid, DateTimeOffset Started) VerifyClient(Process game)
+    {
+        using var current = Process.GetCurrentProcess();
+        if (game.SessionId != current.SessionId || StarRailWindow.StartTime(game) is not { } start || !MatchesExecutable(game.Id))
+            throw new InvalidOperationException("原神进程的路径、会话或启动时间无法核对。");
+        return (game.Id, start);
+    }
 
     public void Close()
     {
@@ -55,7 +139,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         var latest = Interlocked.Exchange(ref _current, null);
         if (!_active || !ReferenceEquals(frame, latest) || frame.Window is not { } window ||
             Stopwatch.GetElapsedTime(_readAt) > TimeSpan.FromSeconds(3) || FindForeground() != window ||
-            _instances.IsBusy(betterGiProgram))
+            _instances.IsBusy(betterGiProgram) || StarRailWindow.IsProcessRunning())
             return false;
         if (point is null || point.X < 0 || point.Y < 0 || point.Right > window.ClientWidth ||
             point.Bottom > window.ClientHeight || !StillMatches(window, point))
@@ -158,28 +242,37 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
 
     private StarRailWindowInfo? FindForeground()
     {
-        WindowsNative.EnsureDpiAwareness();
         var hwnd = WindowsNative.GetForegroundWindow();
-        if (hwnd == IntPtr.Zero || WindowsNative.IsIconic(hwnd) ||
+        return WindowsNative.IsIconic(hwnd) ? null : TryFindWindow(hwnd);
+    }
+
+    private StarRailWindowInfo? TryFindWindow(IntPtr hwnd)
+    {
+        WindowsNative.EnsureDpiAwareness();
+        if (_client is not { } client || hwnd == IntPtr.Zero ||
             !WindowsNative.GetClientRect(hwnd, out var rect) ||
-            rect.Height is < 720 or > 1440 || Math.Abs(rect.Width / (double)rect.Height - 16d / 9d) > .005)
+            rect.Height is < 720 or > 2160 || Math.Abs(rect.Width / (double)rect.Height - 16d / 9d) > .005)
             return null;
         var origin = new WindowsNative.Point(0, 0);
         if (!WindowsNative.ClientToScreen(hwnd, ref origin)) return null;
         WindowsNative.GetWindowThreadProcessId(hwnd, out var pid);
-        using var handle = NativeMethods.OpenProcess(0x1000, false, (int)pid);
-        var path = new StringBuilder(32768);
-        var length = (uint)path.Capacity;
-        if (handle.IsInvalid || !QueryFullProcessImageName(handle, 0, path, ref length) ||
-            !string.Equals(path.ToString(), gamePath, StringComparison.OrdinalIgnoreCase))
-            return null;
+        if (pid != client.Pid || !MatchesExecutable(client.Pid)) return null;
         try
         {
             using var process = Process.GetProcessById((int)pid);
             var start = StarRailWindow.StartTime(process);
-            return start is null ? null : new(hwnd, (int)pid, "", rect.Width, rect.Height, origin.X, origin.Y, start);
+            return start != client.Started ? null : new(hwnd, client.Pid, "", rect.Width, rect.Height, origin.X, origin.Y, start);
         }
         catch (ArgumentException) { return null; }
+    }
+
+    private bool MatchesExecutable(int pid)
+    {
+        using var handle = NativeMethods.OpenProcess(0x1000, false, pid);
+        var path = new StringBuilder(32768);
+        var length = (uint)path.Capacity;
+        return !handle.IsInvalid && QueryFullProcessImageName(handle, 0, path, ref length) &&
+            string.Equals(path.ToString(), gamePath, StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool Owns(IntPtr hwnd, WindowsNative.Point point) =>

@@ -33,6 +33,7 @@ public sealed class GenshinDesktopLoginTests
         Assert.True((await driver.EnsureLoginAsync(Policy, default)).Ok);
         Assert.Equal("verified", (await driver.SwitchAsync(A, Policy, default)).Evidence?.Verdict);
         Assert.True((await driver.RestartToLoginAsync(Policy, default)).Ok);
+        Assert.Equal(1, desktop.PrepareCalls);
         var second = await driver.SwitchAsync(B, Policy, default);
         Assert.True(second.Ok, second.Detail);
         Assert.Equal(B.ObservedUid, second.Uid);
@@ -87,6 +88,19 @@ public sealed class GenshinDesktopLoginTests
     }
 
     [Fact]
+    public async Task ColdStartFailureStopsBeforeReadingOrClickingTheDesktop()
+    {
+        var desktop = new Desktop { PrepareError = "原神启动后没有出现受控窗口。" };
+        var result = await new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero).EnsureLoginAsync(Policy, default);
+
+        Assert.False(result.Ok);
+        Assert.True(result.Fatal);
+        Assert.Equal(desktop.PrepareError, result.Detail);
+        Assert.Equal(1, desktop.PrepareCalls);
+        Assert.Empty(desktop.Actions);
+    }
+
+    [Fact]
     public void TemplateMatcherRequiresUniqueVisualEvidence()
     {
         var icon = new CapturedFrame(new byte[18 * 12 * 4], 18, 12, "test-icon");
@@ -120,6 +134,13 @@ public sealed class GenshinDesktopLoginTests
     {
         private readonly Queue<GenshinDesktopFrame> _frames = new(frames);
         public List<GenshinInput> Actions { get; } = [];
+        public int PrepareCalls { get; private set; }
+        public string? PrepareError { get; init; }
+        public Task PrepareAsync(TimeSpan timeout, CancellationToken ct)
+        {
+            PrepareCalls++;
+            return PrepareError is null ? Task.CompletedTask : Task.FromException(new InvalidOperationException(PrepareError));
+        }
         public Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct) => Task.FromResult(_frames.Dequeue());
         public bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point)
         {

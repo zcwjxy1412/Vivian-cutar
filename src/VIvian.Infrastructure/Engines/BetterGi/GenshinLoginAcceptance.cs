@@ -26,7 +26,7 @@ public static class GenshinLoginAcceptance
             GenshinLoginScreen.NormalizeExactMask(profile.MaskedPhone) != profile.NormalizedPhone))
             throw new InvalidOperationException("所选原神档案须已启用，并各自绑定唯一的脱敏登录标识。");
 
-        return await GenshinDesktopLoginDriver.WithForegroundClientAsync(betterGiRoot, gameExecutable, profileDirectory,
+        return await GenshinDesktopLoginDriver.WithClientAsync(betterGiRoot, gameExecutable, profileDirectory,
             async (driver, token) =>
             {
                 var results = new List<GenshinLoginCheck>(selected.Length);

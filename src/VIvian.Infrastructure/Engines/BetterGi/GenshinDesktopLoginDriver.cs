@@ -21,6 +21,7 @@ internal sealed record GenshinDesktopFrame(StarRailWindowInfo? Window, GenshinVi
 
 internal interface IGenshinLoginDesktop
 {
+    Task PrepareAsync(TimeSpan timeout, CancellationToken ct);
     Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct);
     bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point);
 }
@@ -38,13 +39,13 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         _poll = poll;
     }
 
-    /// <summary>Runs a login-only operation on the open foreground CN client under the shared desktop lease.</summary>
-    public static async Task<T> WithForegroundClientAsync<T>(string betterGiRoot, string gameExecutable,
+    /// <summary>Runs a login-only operation on the configured CN client under the shared desktop lease.</summary>
+    public static async Task<T> WithClientAsync<T>(string betterGiRoot, string gameExecutable,
         string profileDirectory, Func<IGenshinLoginSwitchDriver, CancellationToken, Task<T>> operation, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(operation);
         if (!OperatingSystem.IsWindows() || !WindowsProcessSupervisor.IsCurrentProcessElevated())
-            throw new InvalidOperationException("原神桌面验收需要以管理员身份打开隔离测试版。");
+            throw new InvalidOperationException("Windows 未授予原神自动登录所需的管理员权限。");
         if (!Path.IsPathFullyQualified(gameExecutable) ||
             !string.Equals(Path.GetFileName(gameExecutable), "YuanShen.exe", StringComparison.OrdinalIgnoreCase) ||
             !File.Exists(gameExecutable) || ReadOnlyFileAccess.FindReparsePoint(gameExecutable) is not null)
@@ -69,8 +70,18 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         }
     }
 
-    public Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken) =>
-        ReachCardAsync(policy.LoginScreen, cancellationToken);
+    public async Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _desktop.PrepareAsync(policy.GameStart, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Failed(LoginSwitchStage.ReturningToLogin, ex.Message);
+        }
+        return await ReachCardAsync(policy.LoginScreen, cancellationToken).ConfigureAwait(false);
+    }
 
     public Task<LoginSwitchOutcome> RestartToLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken) =>
         ReachCardAsync(policy.LoginScreen, cancellationToken);

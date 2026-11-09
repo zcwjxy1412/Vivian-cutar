@@ -74,7 +74,7 @@ public sealed class AccountViewModel : ObservableObject
     }
 
     public LocalDatabase Database => _database;
-    public Func<Func<Task>, Task> ExecuteScan { private get; set; } = action => action();
+    public Func<Func<Action, Task>, Task> ExecuteScan { private get; set; } = action => action(() => { });
     public ObservableCollection<AccountRowViewModel> Rows { get; } = [];
     public ObservableCollection<AccountBatch> RecentBatches { get; } = [];
     public ObservableCollection<AccountExecutionRecord> BatchResults { get; } = [];
@@ -155,14 +155,14 @@ public sealed class AccountViewModel : ObservableObject
             : $"已读取 {Rows.Count} 个账号档案，其中 {Rows.Count(r => r.Profile is not null)} 个已绑定登录界面。";
     }
 
-    private async Task ScanAsync()
+    private async Task ScanAsync(Action beforeDesktopMutation)
     {
         Status = "正在识别星铁登录界面（本地 OCR）：VIvian 会暂时最小化，截图只在本机处理…";
         AccountRecognitionService.RegistrationResult result;
         // VIvian runs unelevated and must not raise the elevated game; it steps aside instead and verifies that the
         // captured pixels belong to the game window before reading them.
         await using (await _shield.HideAsync(CancellationToken.None))
-            result = await _recognition.ScanAndRegisterAsync(CancellationToken.None);
+            result = await _recognition.ScanAndRegisterAsync(CancellationToken.None, beforeDesktopMutation);
         await ReloadAsync();
         var where = result.View?.Evidence is { } evidence
             ? $"（游戏窗口 pid {evidence.ProcessId}，{evidence.ClientWidth}x{evidence.ClientHeight}，{(evidence.Check.Method == "print" ? "窗口渲染" : $"屏幕截取 {evidence.Check.SamplesOwnedByGame}/{evidence.Check.Samples} 校验点")}）"

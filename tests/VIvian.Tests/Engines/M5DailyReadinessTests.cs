@@ -105,6 +105,20 @@ public sealed class M5DailyReadinessTests : IDisposable
     }
 
     [Fact]
+    public void ThirdValueDuringTemporaryOverrideBlocksTheNextAccountUntilResolved()
+    {
+        File.AppendAllText(Config, "instance_type: 拟造花萼（金）\ninstance_names:\n  拟造花萼（金）: 回忆之蕾\n  饰品提取: 永恒笑剧\n");
+        var snapshot = _control.ReadConfiguration(GameId.StarRail, _root);
+        var changes = TemporaryConfigurationManager.Plan(snapshot, new Dictionary<string, string> { ["instance_type"] = "饰品提取" });
+        var manager = NewManager();
+        manager.Apply(snapshot, changes, _root, "routine");
+        File.WriteAllText(Config, File.ReadAllText(Config).Replace("instance_type: 饰品提取", "instance_type: 侵蚀隧洞"));
+        Assert.Equal(RestoreState.Blocked, manager.Restore().State);
+        Assert.True(manager.HasPending);
+        Assert.Contains("instance_type: 侵蚀隧洞", File.ReadAllText(Config));
+    }
+
+    [Fact]
     public void SecondTemporaryChangeIsRefusedWhileOneIsPending()
     {
         var manager = NewManager();

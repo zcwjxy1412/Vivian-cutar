@@ -71,12 +71,12 @@ public partial class App : Application
             var preview = e.Args.Contains("--m4-preview")
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
             var root = _smoke
-                ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
+                ? SmokeDataDirectory(e.Args)
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    RealExecutionPolicy.IsM5DailyTest ? "VIvian-M5-DailyTest"
-                    : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M4-ManualTest"
-                    : screenTest ? "VIvian-M4A-ScreenTest-R3" : threeEnginePreview ? "VIvian-M4-ThreeEngine-Preview"
-                    : preview ? "VIvian-M4A-Preview" : "VIvian");
+                    RealExecutionPolicy.IsM5DailyTest ? "VIvian-M6-StarRailTest"
+                    : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M6-ManualTest"
+                    : screenTest ? "VIvian-M6-ScreenTest" : threeEnginePreview ? "VIvian-M6-ThreeEngine-Preview"
+                    : preview ? "VIvian-M6-Preview" : "VIvian-M6-Development");
             _dataRoot = root;
             _stage = "创建数据目录";
             Directory.CreateDirectory(root);
@@ -222,7 +222,7 @@ public partial class App : Application
                             throw new InvalidOperationException("Manual-test page does not report the unverified installation");
                         using (var second = SingleInstanceGuard.Acquire(root))
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
-                        var queueReport = await SmokeQueueAsync(vm.Queue, database);
+                        var queueReport = await SmokeAssistantIsolationAsync(window, vm, database);
                         var engineReport = await SmokeEngineDiscoveryAsync(vm, root);
                         var tasksReport = await SmokeAccountWorkflowAsync(window, vm, database);
                         var contrastReport = SaveTabScreenshots(window, root);
@@ -267,6 +267,61 @@ public partial class App : Application
     /// Smoke check for M2: runs a simulation queue through the real view model, scheduler and SQLite journal while a
     /// background probe measures how long the UI thread takes to answer; then checks the emergency stop.
     /// </summary>
+    private static string SmokeDataDirectory(string[] args)
+    {
+        // UAC can start the real-test package with a fresh environment.
+        var index = Array.IndexOf(args, "--smoke-data");
+        if (index < 0) return Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA")
+            ?? throw new InvalidOperationException("Missing smoke directory");
+        if (index + 1 >= args.Length) throw new InvalidOperationException("Missing smoke directory");
+        var directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[index + 1]));
+        if (!Path.GetFileName(directory).StartsWith("vivian-smoke-", StringComparison.OrdinalIgnoreCase)
+            || !Directory.Exists(directory) || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+            throw new InvalidOperationException("Invalid isolated smoke directory");
+        return directory;
+    }
+
+    private static async Task<string> SmokeAssistantIsolationAsync(Window owner, MainViewModel vm, LocalDatabase database)
+    {
+        var assistant = vm.Assistant;
+        if (assistant.StatusLine != "未配置")
+            throw new InvalidOperationException("Corrupt assistant settings should leave AI unconfigured.");
+
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        assistant.BaseUrl = $"http://127.0.0.1:{((System.Net.IPEndPoint)listener.LocalEndpoint).Port}/v1";
+        assistant.Model = "smoke-only";
+        assistant.NewApiKey = "smoke-only";
+        if (assistant.StatusLine != "未测试") throw new InvalidOperationException("New settings were not marked untested.");
+
+        using (var authDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+        {
+            assistant.TestConnectionCommand.Execute(null);
+            using var denied = await listener.AcceptTcpClientAsync(authDeadline.Token);
+            await denied.GetStream().WriteAsync("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray(), authDeadline.Token);
+            while (assistant.IsBusy) await Task.Delay(20, authDeadline.Token);
+            if (assistant.StatusLine != "测试失败" || !assistant.SettingsStatus.Contains("401", StringComparison.Ordinal))
+                throw new InvalidOperationException("AI authentication failure was not isolated.");
+        }
+
+        var floating = new AssistantWindow(assistant) { Owner = owner };
+        floating.Show();
+        try
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            assistant.TestConnectionCommand.Execute(null);
+            using var stalled = await listener.AcceptTcpClientAsync(deadline.Token);
+            var queue = await SmokeQueueAsync(vm.Queue, database);
+            if (!assistant.IsBusy) throw new InvalidOperationException("The AI request did not overlap the queue smoke test.");
+            floating.Hide();
+            while (assistant.IsBusy) await Task.Delay(20, deadline.Token);
+            if (assistant.StatusLine != "未测试" || !assistant.SettingsStatus.Contains("取消", StringComparison.Ordinal))
+                throw new InvalidOperationException("Hiding the assistant did not cancel its request.");
+            return queue + " corrupt AI settings, 401, and closing a stalled AI request isolated.";
+        }
+        finally { floating.Close(); }
+    }
+
     private static async Task<string> SmokeQueueAsync(QueueViewModel queue, LocalDatabase database)
     {
         queue.Step = TimeSpan.FromMilliseconds(60);

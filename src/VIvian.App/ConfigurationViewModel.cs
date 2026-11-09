@@ -4,6 +4,7 @@ using System.Windows;
 using VIvian.Core;
 using VIvian.Core.Engines;
 using VIvian.Infrastructure;
+using VIvian.Infrastructure.Processes;
 
 namespace VIvian.App;
 
@@ -44,6 +45,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     private readonly Func<GameId, string> _installPath;
     private readonly Func<bool> _isRunning;
     private readonly string _auditDirectory;
+    private readonly string _profileDirectory;
     private readonly LocalDatabase _accounts;
     private readonly Func<GameAccount?> _selectedAccount;
     private AccountSettingsSnapshot? _accountSettings;
@@ -65,9 +67,10 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public int PendingCount => Parameters.Count(p => p.IsChanged);
 
     public ConfigurationViewModel(IConfigurationControl control, Func<GameId, string> installPath,
-        Func<bool> isRunning, string auditDirectory, LocalDatabase accounts, Func<GameAccount?> selectedAccount)
+        Func<bool> isRunning, string profileDirectory, LocalDatabase accounts, Func<GameAccount?> selectedAccount)
     {
-        _control = control; _installPath = installPath; _isRunning = isRunning; _auditDirectory = auditDirectory;
+        _control = control; _installPath = installPath; _isRunning = isRunning; _profileDirectory = profileDirectory;
+        _auditDirectory = Path.Combine(profileDirectory, "configuration-audit");
         _accounts = accounts; _selectedAccount = selectedAccount;
         ReadCommand = new(ReadAsync, Error);
         ImportUpstreamCommand = new(ImportUpstreamAsync, Error);
@@ -125,9 +128,16 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     public async Task ReadAsync()
     {
         var selectedId = _selectedAccount()?.Id;
-        if (selectedId is not null && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002")
-            && (_isRunning() || _control is IUnifiedTaskControl { HasPendingConfigurationRestore: true }))
+        var independent = selectedId is not null && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002");
+        if (independent && (_isRunning() || _control is IUnifiedTaskControl { HasPendingConfigurationRestore: true }))
         { Status = "此账号正在运行或临时配置尚未恢复；结束后再读取。"; return; }
+        DesktopOperationLease? lease = null;
+        if (independent)
+        {
+            try { lease = DesktopOperationLease.Acquire(_profileDirectory); }
+            catch (InvalidOperationException ex) { Status = ex.Message; return; }
+        }
+        using var desktop = lease;
         var path = _installPath(_game);
         if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return; }
         var snapshot = _control.ReadConfiguration(_game, path);
@@ -188,12 +198,16 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         { Status = "任务运行中或仍有未保存修改；暂不导入原项目设置。"; return; }
         if (MessageBox.Show("从所选账号的 March7thAssistant 导入已登记参数并覆盖该账号在 VIvian 中保存的这些值？",
                 "导入账号设置", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        var upstream = _control.ReadConfiguration(GameId.StarRail, _installPath(GameId.StarRail));
-        var current = await _accounts.LoadAccountSettingsAsync(account.Id);
-        var merged = new Dictionary<string, string>(current.Values);
-        foreach (var value in upstream.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null))
-            merged[value.Schema.Path] = value.Value!;
-        await _accounts.SaveAccountSettingsAsync(current with { Values = merged });
+        using (DesktopOperationLease.Acquire(_profileDirectory))
+        {
+            var upstream = _control.ReadConfiguration(GameId.StarRail, _installPath(GameId.StarRail));
+            var current = await _accounts.LoadAccountSettingsAsync(account.Id);
+            if (_selectedAccount()?.Id != account.Id) return;
+            var merged = new Dictionary<string, string>(current.Values);
+            foreach (var value in upstream.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null))
+                merged[value.Schema.Path] = value.Value!;
+            await _accounts.SaveAccountSettingsAsync(current with { Values = merged });
+        }
         await ReadAsync();
         Status = "已从所选账号原项目导入已登记参数；高级设置仍留在该账号专属安装目录。";
     }
@@ -239,7 +253,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
     /// written now because a task is running stay queued and are retried every few seconds.
     /// Returns true when nothing is left pending.
     /// </summary>
-    public bool TryApplyPending(bool interactive)
+    public bool TryApplyPending(bool interactive, DesktopOperationLease? heldDesktop = null)
     {
         if (_snapshot is null || _applying) return PendingCount == 0;
         var values = Parameters.Where(p => p.IsChanged).ToDictionary(p => p.Path, p => p.Current);
@@ -291,6 +305,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
                     return PendingCount == 0;
                 }
             }
+            using var desktop = heldDesktop is null ? DesktopOperationLease.Acquire(_profileDirectory) : null;
             var result = _control.ApplyChanges(proposal, _auditDirectory, _isRunning());
             _snapshot = result.Snapshot;
             Show(result.Snapshot, null);
@@ -345,6 +360,7 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
                 return true; // Temporary per-run values must never be imported as persistent account settings.
             try
             {
+                using var desktop = DesktopOperationLease.Acquire(_profileDirectory);
                 var upstream = _control.ReadConfiguration(_game, _installPath(_game));
                 if (_upstreamSnapshot?.Revision == upstream.Revision) return true;
                 var externalChanged = upstream.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null

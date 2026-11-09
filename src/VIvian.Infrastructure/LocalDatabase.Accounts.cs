@@ -13,7 +13,7 @@ public sealed record AccountTaskPlan(Guid AccountId, bool DailyEnabled, long Rev
 public sealed record AccountBatch(Guid Id, GameId Game, DateTimeOffset StartedAt, DateTimeOffset UpdatedAt,
     string State, Guid? CurrentAccountId, string Detail, string Mode = "unified");
 public sealed record AccountExecutionRecord(Guid Id, Guid BatchId, string AccountName, Guid? RunId,
-    DateTimeOffset At, string Result, string Detail);
+    DateTimeOffset At, string Result, string Detail, Guid? AccountId = null);
 
 public sealed partial class LocalDatabase
 {
@@ -39,7 +39,7 @@ public sealed partial class LocalDatabase
         return result;
     }
 
-    private static Guid LegacyId(GameId game) => game switch
+    internal static Guid LegacyId(GameId game) => game switch
     {
         GameId.Genshin => Guid.Parse("00000000-0000-4000-8000-000000000001"),
         GameId.StarRail => Guid.Parse("00000000-0000-4000-8000-000000000002"),
@@ -199,11 +199,7 @@ public sealed partial class LocalDatabase
 
     public async Task<AccountSettingsSnapshot> SaveAccountSettingsAsync(AccountSettingsSnapshot settings, CancellationToken ct = default)
     {
-        var allowed = EngineCatalog.March7th.Parameters.Where(p => p.Access == ParameterAccess.VerifiedReadWrite)
-            .ToDictionary(p => p.Path);
-        foreach (var (key, value) in settings.Values)
-            if (!allowed.TryGetValue(key, out var parameter) || !ParameterRules.IsValid(parameter, value))
-                throw new ArgumentException("账号设置包含不支持的字段或值：" + key);
+        ValidateStarRailAccountSettings(settings.Values);
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
         cmd.CommandText = "UPDATE account_settings SET settings_json=$json,revision=revision+1 WHERE account_id=$id AND revision=$revision;";
@@ -214,20 +210,35 @@ public sealed partial class LocalDatabase
         return settings with { Revision = settings.Revision + 1 };
     }
 
-    public async Task<AccountBatch> BeginBatchAsync(GameId game, string mode = "unified", CancellationToken ct = default)
+    private static void ValidateStarRailAccountSettings(IReadOnlyDictionary<string, string> values)
+    {
+        var allowed = EngineCatalog.March7th.Parameters.Where(p => p.Access == ParameterAccess.VerifiedReadWrite)
+            .ToDictionary(p => p.Path);
+        foreach (var (key, value) in values)
+            if (!allowed.TryGetValue(key, out var parameter) || !ParameterRules.IsValid(parameter, value))
+                throw new ArgumentException("账号设置包含不支持的字段或值：" + key);
+    }
+
+    public async Task<AccountBatch> BeginBatchAsync(GameId game, string mode = "unified", CancellationToken ct = default,
+        Guid? actionId = null)
     {
         if (mode is not ("unified" or "independent")) throw new ArgumentOutOfRangeException(nameof(mode));
         var now = DateTimeOffset.UtcNow;
-        var batch = new AccountBatch(Guid.NewGuid(), game, now, now, "running", null, "等待账号登录", mode);
-        await SaveBatchAsync(batch, ct);
+        if (actionId == Guid.Empty) throw new ArgumentException("运行计划标识无效。", nameof(actionId));
+        var batch = new AccountBatch(actionId ?? Guid.NewGuid(), game, now, now, "running", null, "等待账号登录", mode);
+        await WriteBatchAsync(batch, ct, createOnly: actionId.HasValue);
         return batch;
     }
 
-    public async Task SaveBatchAsync(AccountBatch batch, CancellationToken ct = default)
+    public Task SaveBatchAsync(AccountBatch batch, CancellationToken ct = default) => WriteBatchAsync(batch, ct, createOnly: false);
+
+    private async Task WriteBatchAsync(AccountBatch batch, CancellationToken ct, bool createOnly)
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO batch_execution_records(id,game,started_at,updated_at,state,current_account_id,detail,mode) VALUES($id,$game,$start,$update,$state,$account,$detail,$mode) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,state=excluded.state,current_account_id=excluded.current_account_id,detail=excluded.detail,mode=excluded.mode;";
+        const string insert = "INSERT INTO batch_execution_records(id,game,started_at,updated_at,state,current_account_id,detail,mode) VALUES($id,$game,$start,$update,$state,$account,$detail,$mode)";
+        cmd.CommandText = insert + (createOnly ? " ON CONFLICT(id) DO NOTHING;" :
+            " ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,state=excluded.state,current_account_id=excluded.current_account_id,detail=excluded.detail,mode=excluded.mode;");
         cmd.Parameters.AddWithValue("$id", batch.Id.ToString("D"));
         cmd.Parameters.AddWithValue("$game", (int)batch.Game);
         cmd.Parameters.AddWithValue("$start", batch.StartedAt.ToString("O"));
@@ -236,7 +247,8 @@ public sealed partial class LocalDatabase
         cmd.Parameters.AddWithValue("$account", batch.CurrentAccountId is null ? DBNull.Value : (object)DatabaseId(batch.CurrentAccountId.Value));
         cmd.Parameters.AddWithValue("$detail", batch.Detail);
         cmd.Parameters.AddWithValue("$mode", batch.Mode);
-        await cmd.ExecuteNonQueryAsync(ct);
+        if (await cmd.ExecuteNonQueryAsync(ct) != 1)
+            throw new InvalidOperationException("此运行计划已经提交，请查看批次记录。");
     }
 
     public async Task RecordAccountResultAsync(Guid batchId, Guid accountId, Guid? runId, string result,
@@ -280,18 +292,26 @@ public sealed partial class LocalDatabase
         return result;
     }
 
-    public async Task<IReadOnlyList<AccountExecutionRecord>> LoadBatchResultsAsync(Guid batchId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AccountExecutionRecord>> LoadBatchResultsAsync(Guid batchId, CancellationToken ct = default,
+        int limit = -1)
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT h.id,COALESCE(a.display_name,'已删除档案'),h.run_id,h.at,h.result,h.detail FROM account_execution_history h LEFT JOIN game_accounts a ON a.account_id=h.account_id WHERE h.batch_id=$batch ORDER BY h.at,h.id;";
+        cmd.CommandText = """
+            SELECT h.id,COALESCE(a.display_name,'已删除档案'),h.run_id,h.at,h.result,h.detail,h.account_id,b.game
+            FROM account_execution_history h JOIN batch_execution_records b ON b.id=h.batch_id
+            LEFT JOIN game_accounts a ON a.account_id=h.account_id
+            WHERE h.batch_id=$batch ORDER BY h.at,h.id LIMIT $limit;
+            """;
         cmd.Parameters.AddWithValue("$batch", batchId.ToString("D"));
+        cmd.Parameters.AddWithValue("$limit", limit);
         var result = new List<AccountExecutionRecord>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
             result.Add(new(Guid.Parse(reader.GetString(0)), batchId, reader.GetString(1),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
-                reader.GetString(4), reader.GetString(5)));
+                reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null :
+                    Guid.TryParse(reader.GetString(6), out var id) ? id : LegacyId((GameId)reader.GetInt32(7))));
         return result;
     }
 

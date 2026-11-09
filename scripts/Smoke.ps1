@@ -3,10 +3,11 @@ param([Parameter(Mandatory=$true)][string]$ExePath)
 $ErrorActionPreference = 'Stop'
 $root = Join-Path ([IO.Path]::GetTempPath()) ('vivian-smoke-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root | Out-Null
+Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'assistant.json') -Value '{broken smoke fixture'
 $previous = $env:VIVIAN_SMOKE_DATA
 try {
     $env:VIVIAN_SMOKE_DATA = $root
-    $process = Start-Process -FilePath $ExePath -ArgumentList '--smoke-test' -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $ExePath -ArgumentList @('--smoke-test', '--smoke-data', ('"' + $root + '"')) -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(30000)) {
         # Only the exact process created by this test is stopped.
         $process.Kill()

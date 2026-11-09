@@ -11,7 +11,7 @@ $commit = if ($env:VIVIAN_SOURCE_COMMIT) { $env:VIVIAN_SOURCE_COMMIT.Trim() } el
 dotnet publish src/VIvian.App/VIvian.App.csproj -c Release -r win-x64 --self-contained true -p:RestoreLockedMode=true -p:M5DailyTestBuild=true "-p:InformationalVersion=0.5.2-dev+$commit" -o $Target
 if ($LASTEXITCODE -ne 0) { throw 'M5.2 实测版编译失败' }
 if (-not (Test-Path "$Target/VIvian.exe") -or -not (Test-Path "$Target/coreclr.dll")) { throw '自包含产物不完整' }
-# Same marker and data directory as M5/M5.1: existing accounts, settings and history are kept, never replaced.
+# The marker selects the existing execution mode. This branch uses a separate M6 data directory.
 'VIvian M5 daily test; isolated data; elevation before batch' | Set-Content "$Target/VIvian-M5-DailyTest.marker" -Encoding ascii
 Copy-Item 'docs/M5_2_DELIVERY.md' "$Target/使用说明-M5.2.md"
 Copy-Item 'docs/M5_2_ACCEPTANCE.md' "$Target/验收状态-M5.2.md"
@@ -25,7 +25,7 @@ Copy-Item 'docs/M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md' "$Target/账号切换截图�
   "SDK: $(dotnet --version)"
   "真实任务: March7thAssistant v2026.10.31 日常（预先配置，一键批次无逐项确认）"
   "多账号: 已保存账号切换；打开程序时由本人完成 UAC；批次内不提权；身份不明即停止"
-  "数据目录: %LOCALAPPDATA%\VIvian-M5-DailyTest（沿用，不覆盖；数据库无结构变更）"
+  "数据目录: %LOCALAPPDATA%\VIvian-M6-StarRailTest（隔离档案，SQLite schema v7）"
 ) | Set-Content "$Target/BUILD-INFO.txt" -Encoding utf8
 if (-not $SkipSmoke) { & "$PSScriptRoot/Smoke.ps1" -ExePath (Join-Path (Get-Location) "$Target/VIvian.exe") }
 $archive = "$(Split-Path $Target -Parent)/$name.zip"

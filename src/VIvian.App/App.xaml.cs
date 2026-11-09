@@ -73,10 +73,10 @@ public partial class App : Application
             var root = _smoke
                 ? Environment.GetEnvironmentVariable("VIVIAN_SMOKE_DATA") ?? throw new InvalidOperationException("Missing smoke directory")
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    RealExecutionPolicy.IsM5DailyTest ? "VIvian-M5-DailyTest"
-                    : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M4-ManualTest"
-                    : screenTest ? "VIvian-M4A-ScreenTest-R3" : threeEnginePreview ? "VIvian-M4-ThreeEngine-Preview"
-                    : preview ? "VIvian-M4A-Preview" : "VIvian");
+                    RealExecutionPolicy.IsM5DailyTest ? "VIvian-M6-StarRailTest"
+                    : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M6-ManualTest"
+                    : screenTest ? "VIvian-M6-ScreenTest" : threeEnginePreview ? "VIvian-M6-ThreeEngine-Preview"
+                    : preview ? "VIvian-M6-Preview" : "VIvian-M6-Development");
             _dataRoot = root;
             _stage = "创建数据目录";
             Directory.CreateDirectory(root);

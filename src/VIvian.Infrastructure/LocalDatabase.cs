@@ -30,7 +30,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 6;
+    public const int CurrentSchemaVersion = 7;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -129,6 +129,14 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         PRAGMA user_version=6;
         """;
 
+    private const string SchemaV7 = """
+        CREATE TABLE account_configuration_audit(
+            proposal_id TEXT PRIMARY KEY, game INTEGER NOT NULL CHECK(game BETWEEN 0 AND 2),
+            account_id TEXT NOT NULL, before_revision INTEGER NOT NULL, after_revision INTEGER NOT NULL,
+            before_json TEXT NOT NULL, after_json TEXT NOT NULL, applied_at TEXT NOT NULL);
+        PRAGMA user_version=7;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -144,7 +152,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
             versionCommand.CommandText = "PRAGMA user_version;";
             var oldVersion = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(ct));
             var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak"
-                : oldVersion == 5 ? ".pre-v6.bak" : ".pre-m5.1.bak");
+                : oldVersion == 5 ? ".pre-v6.bak" : oldVersion == 6 ? ".pre-v7.bak" : ".pre-m5.1.bak");
             if (oldVersion is > 0 and < CurrentSchemaVersion && !File.Exists(backupPath))
             {
                 await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -192,6 +200,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 5)
         {
             command.CommandText = SchemaV6;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 6)
+        {
+            command.CommandText = SchemaV7;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

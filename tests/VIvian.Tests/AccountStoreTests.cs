@@ -64,7 +64,7 @@ public sealed class AccountStoreTests
             {
                 await c.OpenAsync();
                 using var cmd = c.CreateCommand();
-                cmd.CommandText = "DROP TABLE account_scan_sessions; DROP TABLE account_login_profiles; ALTER TABLE batch_execution_records DROP COLUMN mode; ALTER TABLE game_accounts DROP COLUMN install_path; PRAGMA user_version=4;";
+                cmd.CommandText = "DROP TABLE account_configuration_audit; DROP TABLE account_scan_sessions; DROP TABLE account_login_profiles; ALTER TABLE batch_execution_records DROP COLUMN mode; ALTER TABLE game_accounts DROP COLUMN install_path; PRAGMA user_version=4;";
                 await cmd.ExecuteNonQueryAsync();
             }
             await db.InitializeAsync();

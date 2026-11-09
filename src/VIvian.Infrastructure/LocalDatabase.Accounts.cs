@@ -13,7 +13,7 @@ public sealed record AccountTaskPlan(Guid AccountId, bool DailyEnabled, long Rev
 public sealed record AccountBatch(Guid Id, GameId Game, DateTimeOffset StartedAt, DateTimeOffset UpdatedAt,
     string State, Guid? CurrentAccountId, string Detail, string Mode = "unified");
 public sealed record AccountExecutionRecord(Guid Id, Guid BatchId, string AccountName, Guid? RunId,
-    DateTimeOffset At, string Result, string Detail);
+    DateTimeOffset At, string Result, string Detail, Guid? AccountId = null);
 
 public sealed partial class LocalDatabase
 {
@@ -285,18 +285,26 @@ public sealed partial class LocalDatabase
         return result;
     }
 
-    public async Task<IReadOnlyList<AccountExecutionRecord>> LoadBatchResultsAsync(Guid batchId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<AccountExecutionRecord>> LoadBatchResultsAsync(Guid batchId, CancellationToken ct = default,
+        int limit = -1)
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT h.id,COALESCE(a.display_name,'已删除档案'),h.run_id,h.at,h.result,h.detail FROM account_execution_history h LEFT JOIN game_accounts a ON a.account_id=h.account_id WHERE h.batch_id=$batch ORDER BY h.at,h.id;";
+        cmd.CommandText = """
+            SELECT h.id,COALESCE(a.display_name,'已删除档案'),h.run_id,h.at,h.result,h.detail,h.account_id,b.game
+            FROM account_execution_history h JOIN batch_execution_records b ON b.id=h.batch_id
+            LEFT JOIN game_accounts a ON a.account_id=h.account_id
+            WHERE h.batch_id=$batch ORDER BY h.at,h.id LIMIT $limit;
+            """;
         cmd.Parameters.AddWithValue("$batch", batchId.ToString("D"));
+        cmd.Parameters.AddWithValue("$limit", limit);
         var result = new List<AccountExecutionRecord>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
             result.Add(new(Guid.Parse(reader.GetString(0)), batchId, reader.GetString(1),
                 reader.IsDBNull(2) ? null : Guid.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
-                reader.GetString(4), reader.GetString(5)));
+                reader.GetString(4), reader.GetString(5), reader.IsDBNull(6) ? null :
+                    Guid.TryParse(reader.GetString(6), out var id) ? id : LegacyId((GameId)reader.GetInt32(7))));
         return result;
     }
 

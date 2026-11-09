@@ -116,6 +116,27 @@ public sealed class AssistantTests : IDisposable
         Assert.Null(await ReadAuditAsync(proposal.Id));
     }
 
+    [Fact]
+    public async Task DiagnosticsUseStoredRunLinksAndOmitRawAccountAndFailureDetails()
+    {
+        var (db, _, tools, a, b) = await SetupAsync();
+        var batch = await db.BeginBatchAsync(GameId.StarRail);
+        var runId = Guid.NewGuid();
+        const string secret = "private-path-and-credentials";
+        await db.PublishAsync(new RunUpdate(runId, Guid.NewGuid(), GameId.StarRail, "test", false,
+            RunPhase.Finished, RunOutcome.Failed, CleanupState.Confirmed, ReasonCodes.ReportedFailure, DateTimeOffset.UtcNow), Ct);
+        await db.RecordAccountResultAsync(batch.Id, a.Id, runId, "failed", secret);
+
+        var run = Assert.Single(JsonNode.Parse((await tools.InvokeAsync("get_run_status", TargetArgs(a.Id), Ct)).Content)!.AsArray());
+        Assert.Equal(runId.ToString("D"), run!["run_id"]!.GetValue<string>());
+        Assert.Equal("Confirmed", run["cleanup"]!.GetValue<string>());
+        Assert.Empty(JsonNode.Parse((await tools.InvokeAsync("get_run_status", TargetArgs(b.Id), Ct)).Content)!.AsArray());
+        var progress = (await tools.InvokeAsync("get_batch_progress", "{}", Ct)).Content;
+        Assert.Contains(a.Id.ToString("D"), progress);
+        Assert.DoesNotContain(secret, progress);
+        Assert.DoesNotContain(a.Name, progress);
+    }
+
     private async Task<(LocalDatabase Db, StarRailAccountConfigurationProvider Provider, AssistantTools Tools, GameAccount A, GameAccount B)>
         SetupAsync(Func<bool>? busy = null)
     {

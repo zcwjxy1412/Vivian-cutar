@@ -49,7 +49,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
      {"type":"function","function":{"name":"list_tasks","description":"列出某款游戏的任务目录（每日/每周/按需）及当前能否真实执行。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"]}}},
      {"type":"function","function":{"name":"read_configuration","description":"读取指定游戏和内部账号的登记配置、版本和取值规则。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"}},"required":["game","account_id"],"additionalProperties":false}}},
      {"type":"function","function":{"name":"propose_changes","description":"用刚读取的同一游戏、账号和 revision 生成提案。只能使用 read_configuration 登记的参数路径和字符串值，写入需本机确认。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"revision":{"type":"string"},"changes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["game","account_id","revision","changes"],"additionalProperties":false}}},
-     {"type":"function","function":{"name":"get_run_status","description":"读取最近的运行记录：结果、清理状态、原因代码与时间。","parameters":{"type":"object","properties":{"limit":{"type":"integer","minimum":1,"maximum":20}}}}}
+     {"type":"function","function":{"name":"get_run_status","description":"读取真实记录或有标记的模拟结果。按账号查询时同时提供 game 和 account_id，尚未关联的运行不会猜测归属。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}},"additionalProperties":false}}}
      ,{"type":"function","function":{"name":"list_accounts","description":"列出指定游戏的内部账号 ID、顺序和核对状态。目标不明确时先询问用户。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"],"additionalProperties":false}}}
      ,{"type":"function","function":{"name":"get_batch_progress","description":"读取最近多账号批次的进度、状态和失败原因。","parameters":{"type":"object","properties":{}}}}
     ]
@@ -174,12 +174,20 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
 
     private async Task<string> RunStatusAsync(JsonObject args, CancellationToken ct)
     {
-        var limit = Math.Clamp(args["limit"]?.GetValue<int>() ?? 5, 1, 20);
-        var runs = await history(ct).ConfigureAwait(false);
-        return Serialize(runs.Take(limit).Select(r => new
+        var limit = args["limit"]?.GetValue<int>() ?? 5;
+        var game = args["game"] is null ? (GameId?)null : ParseGame(args);
+        Guid? account = args["account_id"] is null ? null : ParseTarget(args).AccountId;
+        if (account is not null && (accountDatabase is null
+            || !(await accountDatabase.LoadAccountsAsync(game, ct).ConfigureAwait(false)).Any(a => a.Id == account)))
+            return Error("没有此游戏的目标账号。");
+
+        var runs = game is { } g && accountDatabase is not null
+            ? await accountDatabase.ReadBoundRunsAsync(g, account, limit, ct).ConfigureAwait(false)
+            : await history(ct).ConfigureAwait(false);
+        return Serialize(runs.Where(r => game is null || r.Game == game).Take(limit).Select(r => new
         {
-            run_id = r.RunId, game = Key(r.Game), phase = r.Phase.ToString(), outcome = r.Outcome?.ToString(),
-            cleanup = r.Cleanup.ToString(), reason = RunPresentation.Reason(r.ReasonCode),
+            run_id = r.RunId, game = Key(r.Game), account_id = account, phase = r.Phase.ToString(),
+            outcome = r.Outcome?.ToString(), cleanup = r.Cleanup.ToString(), reason = RunPresentation.Reason(r.ReasonCode),
             simulation = r.IsSimulation, updated = r.UpdatedAt,
         }));
     }
@@ -192,7 +200,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
         {
             account_id = a.Id, game = Key(a.Game), slot = a.Order + 1, a.Enabled, a.AutoRun,
             verification = a.VerificationState is "verified" or "manual_verified" ? "verified" : "unverified",
-            last_result = a.LastResult switch { "success" or "failed" or "needs_user" => a.LastResult, null => null, _ => "other" },
+            last_result = ResultCode(a.LastResult),
         }));
     }
 
@@ -200,10 +208,30 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
     {
         if (accountDatabase is null) return Error("账号数据尚未连接。");
         var batches = await accountDatabase.LoadRecentBatchesAsync(5, ct).ConfigureAwait(false);
-        return Serialize(batches.Select(b => new { batch_id = b.Id, game = Key(b.Game),
-            current_account_id = b.CurrentAccountId, state = b.State is "running" or "finished" or "failed" or "stopped" or "interrupted" ? b.State : "unknown",
-            b.StartedAt, b.UpdatedAt }));
+        var summaries = new List<object>();
+        foreach (var batch in batches)
+        {
+            var results = await accountDatabase.LoadBatchResultsAsync(batch.Id, ct, limit: 20).ConfigureAwait(false);
+            summaries.Add(new
+            {
+                batch_id = batch.Id, game = Key(batch.Game), current_account_id = batch.CurrentAccountId,
+                state = batch.State is "running" or "finished" or "failed" or "stopped" or "interrupted" ? batch.State : "unknown",
+                batch.StartedAt, batch.UpdatedAt, account_results = results.Select(r => new
+                {
+                    account_id = r.AccountId, run_id = r.RunId, result = ResultCode(r.Result), r.At,
+                }),
+            });
+        }
+        return Serialize(summaries);
     }
+
+    private static string? ResultCode(string? code) => code switch
+    {
+        null => null,
+        "success" or "failed" or "needs_user" or "login_screen_failed" or "login_profile_missing"
+            or "identity_uncertain" or "switch_failed" or "uac_refused" or "input_host_unavailable" or "batch_exception" => code,
+        _ => "unknown",
+    };
 
     private static AccountConfigurationTarget ParseTarget(JsonObject args)
     {

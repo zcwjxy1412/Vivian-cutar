@@ -337,7 +337,9 @@ public sealed class MainViewModel : ObservableObject
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
         GenshinConfiguration = new GenshinConfigurationViewModel(accounts.Database,
             new GenshinAccountConfigurationProvider(accounts.Database),
-            () => IsIdle && !BatchRunning && !Queue.IsRunning);
+            () => IsIdle && !BatchRunning && !Queue.IsRunning, paths.DataDirectory,
+            () => IsIdle && !BatchRunning && !Queue.IsRunning && !Queue.HasUnresolved && !_control.HasPendingConfigurationRestore,
+            () => Engines.Single(e => e.Id == GameId.Genshin).InstallPath.Trim().Trim('"'));
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>

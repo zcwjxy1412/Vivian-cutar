@@ -34,6 +34,17 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
         { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
     }
 
+    /// <summary>Reveals an existing executable in Explorer so an elevated caller does not start it as a child.</summary>
+    public static void RevealExecutable(string executable)
+    {
+        if (!Path.IsPathFullyQualified(executable) || executable.Contains('"') ||
+            !executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(executable))
+            throw new ArgumentException("请选择已存在的程序。", nameof(executable));
+        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(explorer,
+            $"/select,\"{executable}\""));
+    }
+
     /// <summary>Starts a user-facing game through the shell and returns its process, if the shell exposes one.</summary>
     public static System.Diagnostics.Process? StartUserProcess(string fileName, string workingDirectory)
     {

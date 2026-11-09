@@ -56,7 +56,11 @@ public partial class MainWindow : Window
             viewModel.Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Update(); };
             viewModel.BatchRunningChanged += () => Dispatcher.BeginInvoke(Update);
         };
-        Closed += (_, _) => _hotkey?.Dispose();
+        Closed += (_, _) =>
+        {
+            _hotkey?.Dispose();
+            viewModel.GenshinConfiguration.Close();
+        };
     }
 
     private StopHotkey? _hotkey;
@@ -103,6 +107,31 @@ public partial class MainWindow : Window
         {
             VIvian.Core.GameId.StarRail => 0, VIvian.Core.GameId.Genshin => 1, _ => 2,
         };
+    }
+
+    private void GenshinSourceVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.GenshinConfiguration.Source.SetVisible(e.NewValue is true);
+    }
+
+    private void BrowseBetterGiSource(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "选择 BetterGI 安装目录", Multiselect = false };
+        if (dialog.ShowDialog(this) == true) vm.GenshinConfiguration.Source.InstallRoot = dialog.FolderName;
+    }
+
+    private void BrowseGenshinExecutable(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel vm) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择原神国服 YuanShen.exe",
+            Filter = "原神国服程序 (YuanShen.exe)|YuanShen.exe",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) == true) vm.GenshinConfiguration.GameExecutable = dialog.FileName;
     }
 
     /// <summary>Creates the assets folder and copies its path (VIvian starts no external processes outside the supervisor).</summary>

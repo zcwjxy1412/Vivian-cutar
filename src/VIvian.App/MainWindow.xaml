@@ -234,25 +234,34 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </ItemsControl></ScrollViewer></DockPanel></Border></TabItem>
 <TabItem Header="原神"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="原神" Style="{StaticResource H1}"/><TextBlock Text="げんしん" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="按原神账号分别设置日常、合成树脂和秘境任务。计划保存在 VIvian 本机档案，真实运行入口关闭。" Style="{StaticResource Lead}"/>
+<TextBlock Text="选择原神账号后可编辑 VIvian 本机任务计划，或绑定并同步一个现有 BetterGI 一条龙档案。" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}" DataContext="{Binding Engines[0]}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
 <TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
-<Border Style="{StaticResource Panel}" IsEnabled="{Binding IsIdle}"><StackPanel DataContext="{Binding GenshinConfiguration}">
-<TextBlock Text="账号任务计划" Style="{StaticResource H2}"/>
+<Border Style="{StaticResource Panel}" IsEnabled="{Binding IsIdle}"><StackPanel DataContext="{Binding GenshinConfiguration}" IsVisibleChanged="GenshinSourceVisibilityChanged">
 <WrapPanel Margin="0,4,0,8" IsEnabled="{Binding IsIdle}">
 <TextBlock Text="原神账号" VerticalAlignment="Center" Margin="0,0,8,0"/>
 <ComboBox Width="230" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}" DisplayMemberPath="Name" AutomationProperties.Name="原神账号"/>
 <Button Content="重新读取" Command="{Binding ReloadCommand}" Margin="8,0,0,0"/>
 </WrapPanel>
-<WrapPanel Margin="0,0,0,8" IsEnabled="{Binding IsIdle}">
-<TextBox Width="230" Text="{Binding NewAccountName, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="新原神账号备注"/>
-<Button Content="新增原神档案" Command="{Binding AddAccountCommand}" Margin="8,0,0,0"/>
-</WrapPanel>
-<TextBlock Text="档案备注用于区分本机设置，登录身份将在实机阶段另行核对。" Style="{StaticResource Small}"/>
+<TabControl x:Name="GenshinSettingsTabs" Background="Transparent" BorderThickness="0" Padding="0,12,0,0" ItemContainerStyle="{StaticResource PillTab}">
+<TabItem Header="VIvian 本机计划"><StackPanel IsEnabled="{Binding IsIdle}">
+<TextBlock Text="这些设置保存在 VIvian。原神真实运行待验收。" Style="{StaticResource Small}"/>
+<StackPanel Visibility="{Binding Source.CanOpen, Converter={StaticResource Visible}}" Margin="0,12,0,6">
+<TextBlock Text="BetterGI 实时预览" Style="{StaticResource H2}"/>
+<TextBlock Text="以下字段由源档案管理。请在「BetterGI 源档案」编辑。真实调度暂未接入源档案。" Style="{StaticResource Small}"/>
+<TextBlock Text="{Binding Source.Status}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/>
+<ItemsControl ItemsSource="{Binding Source.ProfileRows}" Margin="0,6,0,0">
+<ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+<ItemsControl.ItemTemplate><DataTemplate>
+<Border Background="#EAF0FF" CornerRadius="8" Padding="8,4" Margin="0,0,6,6">
+<TextBlock Style="{StaticResource Small}"><Run Text="{Binding Title, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding DisplayValue, Mode=OneWay}"/></TextBlock>
+</Border>
+</DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+</StackPanel>
 <ItemsControl ItemTemplate="{StaticResource AccountConfigurationField}" IsEnabled="{Binding CanEdit}">
-<ItemsControl.Resources><CollectionViewSource x:Key="GenshinGrouped" Source="{Binding Parameters}">
+<ItemsControl.Resources><CollectionViewSource x:Key="GenshinGrouped" Source="{Binding VisiblePlanParameters}">
 <CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions>
 </CollectionViewSource></ItemsControl.Resources>
 <ItemsControl.ItemsSource><Binding Source="{StaticResource GenshinGrouped}"/></ItemsControl.ItemsSource>
@@ -260,6 +269,55 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </ItemsControl>
 <Button x:Name="SaveGenshinPlanButton" Style="{StaticResource Primary}" Content="保存原神计划" Command="{Binding SaveCommand}" IsEnabled="{Binding CanEdit}" HorizontalAlignment="Left" Margin="0,12,0,0"/>
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></TabItem>
+<TabItem Header="BetterGI 源档案">
+<Border IsEnabled="{Binding IsIdle}"><StackPanel DataContext="{Binding Source}">
+<TextBlock Text="{Binding BindingLabel}" Style="{StaticResource H2}"/>
+<TextBlock Text="先在 BetterGI 创建一条龙档案，再按原名称绑定。写入仅作用于当前绑定档案。" Style="{StaticResource Small}"/>
+<Grid Margin="0,10,0,0" IsEnabled="{Binding CanBind}">
+<Grid.ColumnDefinitions><ColumnDefinition Width="140"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<TextBlock Text="BetterGI 安装目录" VerticalAlignment="Center" Margin="0,0,8,8"/>
+<TextBox Grid.Column="1" Text="{Binding InstallRoot, UpdateSourceTrigger=PropertyChanged}" MinWidth="260" Margin="0,0,8,8" AutomationProperties.Name="BetterGI 安装目录"/>
+<Button Grid.Column="2" Content="浏览…" Click="BrowseBetterGiSource" Margin="0,0,0,8"/>
+<TextBlock Grid.Row="1" Text="一条龙配置名称" VerticalAlignment="Center" Margin="0,0,8,0"/>
+<TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ProfileName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0" AutomationProperties.Name="BetterGI 一条龙配置名称"/>
+<Button Grid.Row="1" Grid.Column="2" Content="绑定并读取" Command="{Binding BindCommand}"/>
+</Grid>
+<WrapPanel Margin="0,12,0,0">
+<Button x:Name="OpenBetterGiButton" Content="打开 BetterGI 设置" Command="{Binding OpenCommand}" IsEnabled="{Binding CanOpen}" Margin="0,0,8,0"/>
+<Button Content="重新读取源档案" Command="{Binding ReloadCommand}" IsEnabled="{Binding CanBind}"/>
+</WrapPanel>
+<TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,10" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="一条龙档案设置" Style="{StaticResource H2}"/>
+<TextBlock Text="BetterGI 外部修改会自动读回。退出 BetterGI 后，编辑停顿约 1 秒会自动写入。遇到运行占用或版本冲突时会保留草稿。" Style="{StaticResource Small}"/>
+<ItemsControl ItemsSource="{Binding ProfileRows}" ItemTemplate="{StaticResource AccountConfigurationField}" IsEnabled="{Binding CanOpen}"/>
+<Button x:Name="SaveBetterGiButton" Style="{StaticResource Primary}" Content="写入 BetterGI 源档案" Command="{Binding SaveCommand}" IsEnabled="{Binding CanSave}" HorizontalAlignment="Left" Margin="0,12,0,14"/>
+<TextBlock Text="安装级共享树脂设置" Style="{StaticResource H2}"/>
+<TextBlock Text="同一 BetterGI 安装内的所有档案共用以下设置。可在 BetterGI 中修改，此处只读。" Style="{StaticResource Small}"/>
+<ItemsControl ItemsSource="{Binding SharedRows}" ItemTemplate="{StaticResource AccountConfigurationField}"/>
+</StackPanel></Border></TabItem>
+<TabItem Header="登录验收" Visibility="{Binding IsLoginVerificationAvailable, Converter={StaticResource Visible}}">
+<StackPanel>
+<TextBlock Text="原神账号登录验收" Style="{StaticResource H2}"/>
+<TextBlock Text="用管理员身份打开隔离测试版，退出 BetterGI，手动打开原神国服。验收只切换所选账号并核对入场，完成后保留游戏客户端。" Style="{StaticResource Small}"/>
+<StackPanel IsEnabled="{Binding IsIdle}" Margin="0,10,0,0">
+<TextBlock Style="{StaticResource Small}"><Run Text="第一个账号 · "/><Run Text="{Binding SelectedAccount.Name, Mode=OneWay}"/></TextBlock>
+<WrapPanel Margin="0,4,0,8">
+<TextBlock Text="第二个账号（可选）" VerticalAlignment="Center" Margin="0,0,8,0"/>
+<ComboBox Width="210" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SecondLoginAccount}" DisplayMemberPath="Name" AutomationProperties.Name="第二个原神账号"/>
+<Button Content="清空" Command="{Binding ClearSecondLoginAccountCommand}" Margin="8,0,0,0"/>
+</WrapPanel>
+<DockPanel Margin="0,0,0,8">
+<Button DockPanel.Dock="Right" Content="选择 YuanShen.exe" Click="BrowseGenshinExecutable" Margin="8,0,0,0"/>
+<TextBox Text="{Binding GameExecutable, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="原神国服程序路径"/>
+</DockPanel>
+<Button x:Name="VerifyGenshinLoginButton" Style="{StaticResource Primary}" Content="开始 5 秒倒计时" Command="{Binding VerifyLoginCommand}" HorizontalAlignment="Left"/>
+</StackPanel>
+<Button Content="取消登录验收" Command="{Binding CancelLoginCommand}" Visibility="{Binding IsVerifyingLogin, Converter={StaticResource Visible}}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+<TextBlock Text="{Binding LoginStatus}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel></TabItem>
+</TabControl>
 </StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 <TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
@@ -323,8 +381,9 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <StackPanel DataContext="{Binding GenshinConfiguration}" IsEnabled="{Binding IsIdle}">
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="原神档案" Style="{StaticResource H2}"/>
-<TextBlock Text="每个账号单独保存 VIvian 任务计划。" Style="{StaticResource Small}"/>
+<TextBlock Text="导入显示脱敏账号的原神登录截图或照片，使用本机 OCR 建档。也可手动建立一个未绑定档案。" Style="{StaticResource Small}"/>
 <WrapPanel Margin="0,12,0,0">
+<Button x:Name="ImportGenshinButton" Style="{StaticResource Primary}" Content="导入登录截图" Command="{Binding ImportCommand}" Margin="0,0,8,8"/>
 <TextBox Width="210" Text="{Binding NewAccountName, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8" AutomationProperties.Name="新原神账号备注"/>
 <Button Content="手动建档" Command="{Binding AddAccountCommand}" Margin="0,0,8,8"/>
 <Button Content="刷新" Command="{Binding ReloadCommand}" Margin="0,0,8,8"/>
@@ -337,10 +396,19 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
          MinHeight="72" MaxHeight="320" BorderThickness="0" Background="Transparent" Margin="0,4,0,0">
 <ListBox.ItemTemplate><DataTemplate>
 <Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,0,0,6">
+<StackPanel>
 <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
+<TextBlock><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}">
+<Setter Property="Text" Value="未绑定登录截图"/>
+<Style.Triggers><DataTrigger Binding="{Binding LoginState}" Value="recognized"><Setter Property="Text" Value="已从登录截图识别"/></DataTrigger></Style.Triggers>
+</Style></TextBlock.Style></TextBlock>
+</StackPanel>
 </Border>
 </DataTemplate></ListBox.ItemTemplate></ListBox>
-<Button Content="打开原神配置" Tag="{x:Static core:GameId.Genshin}" Click="OpenGameSettings" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+<WrapPanel Margin="0,8,0,0">
+<Button x:Name="BindGenshinLoginButton" Content="为所选档案绑定登录截图" Command="{Binding BindLoginScreenshotCommand}" IsEnabled="{Binding CanBindLoginScreenshot}" Margin="0,0,8,0"/>
+<Button Content="打开原神配置" Tag="{x:Static core:GameId.Genshin}" Click="OpenGameSettings"/>
+</WrapPanel>
 </StackPanel></Border>
 </StackPanel></TabItem>
 <TabItem Header="绝区零">

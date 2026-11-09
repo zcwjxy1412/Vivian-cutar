@@ -224,7 +224,7 @@ public partial class App : Application
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeAssistantIsolationAsync(window, vm, database);
                         var engineReport = await SmokeEngineDiscoveryAsync(vm, root);
-                        var tasksReport = await SmokeAccountWorkflowAsync(window, vm, database);
+                        var tasksReport = await SmokeAccountWorkflowAsync(window, vm, database, root);
                         var contrastReport = SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
                             "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + engineReport + " " + tasksReport + " " + contrastReport);
@@ -404,7 +404,7 @@ public partial class App : Application
         return "engine readiness: 原神=版本未知, 星铁=待桌面验证, 绝区零=未设置 (read-only fixtures).";
     }
 
-    private static async Task<string> SmokeAccountWorkflowAsync(Window window, MainViewModel vm, LocalDatabase database)
+    private static async Task<string> SmokeAccountWorkflowAsync(Window window, MainViewModel vm, LocalDatabase database, string root)
     {
         var tabs = FindTabControl(window) ?? throw new InvalidOperationException("TabControl not found");
         var headers = tabs.Items.OfType<System.Windows.Controls.TabItem>().Select(t => t.Header as string).ToArray();
@@ -436,6 +436,8 @@ public partial class App : Application
         main.AccountTabs.SelectedIndex = 1;
         window.UpdateLayout();
         if (!ReferenceEquals(main.GenshinAccountList.ItemsSource, vm.GenshinConfiguration.Accounts)
+            || main.ImportGenshinButton.Command != vm.GenshinConfiguration.ImportCommand
+            || main.BindGenshinLoginButton.Command != vm.GenshinConfiguration.BindLoginScreenshotCommand
             || vm.GenshinConfiguration.Accounts.Count == 0
             || vm.GenshinConfiguration.Accounts.Any(a => a.Game != GameId.Genshin))
             throw new InvalidOperationException("The Genshin account tab is not bound to Genshin accounts");
@@ -464,12 +466,51 @@ public partial class App : Application
         if (saved.Values.GetValueOrDefault("dailyRewards") != "true" || untouched.Values.Count != 0
             || (await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
             throw new InvalidOperationException("Genshin plan save did not isolate Genshin and Star Rail accounts");
+        main.GenshinSettingsTabs.SelectedIndex = 1;
+        window.UpdateLayout();
+        if (main.SaveBetterGiButton.Command != genshin.Source.SaveCommand ||
+            main.OpenBetterGiButton.Command != genshin.Source.OpenCommand ||
+            main.SaveBetterGiButton.IsEnabled || main.OpenBetterGiButton.IsEnabled)
+            throw new InvalidOperationException("BetterGI source editor is unbound or allows opening and saving without a profile");
+        if (RealExecutionPolicy.IsM5DailyTest)
+        {
+            main.GenshinSettingsTabs.SelectedIndex = 2;
+            window.UpdateLayout();
+            if (main.VerifyGenshinLoginButton.Command != genshin.VerifyLoginCommand)
+                throw new InvalidOperationException("The isolated Genshin login verification is not bound");
+        }
+        CaptureAccountScreens(main, Array.IndexOf(headers, "账号管理"), Array.IndexOf(headers, "游戏管理"), root);
+        main.GenshinSettingsTabs.SelectedIndex = 0;
         main.GameTabs.SelectedIndex = 0;
 
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
         return "three game account tabs isolated; Star Rail task setting and isolated Genshin plan saved; diagnostic bundle exported.";
+    }
+
+    private static void CaptureAccountScreens(MainWindow window, int accounts, int games, string root)
+    {
+        var size = (window.Width, window.Height, window.MinWidth, window.MinHeight);
+        try
+        {
+            window.MinWidth = Math.Min(window.MinWidth, 1024);
+            window.MinHeight = Math.Min(window.MinHeight, 768);
+            window.Width = 1024;
+            window.Height = 768;
+            window.Navigation.SelectedIndex = accounts;
+            window.AccountTabs.SelectedIndex = 1;
+            SaveScreen(window, root, "accounts-genshin-1024x768.png");
+            window.Navigation.SelectedIndex = games;
+            window.GameTabs.SelectedIndex = 1;
+            window.GenshinSettingsTabs.SelectedIndex = 1;
+            SaveScreen(window, root, "settings-bettergi-1024x768.png");
+        }
+        finally
+        {
+            window.AccountTabs.SelectedIndex = 0;
+            (window.Width, window.Height, window.MinWidth, window.MinHeight) = size;
+        }
     }
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
     private static string SaveTabScreenshots(Window window, string root)
@@ -486,21 +527,7 @@ public partial class App : Application
             checkedTotal += checkedCount;
             skippedTotal += skipped;
             failures.AddRange(found.Select(f => $"tab {i}: \"{f.Text}\" {f.Ratio:F1}:1 ({f.Foreground} on {f.Background})"));
-            // Render the whole client area (content plus its margin), not just the content's own size.
-            var content = (FrameworkElement)window.Content;
-            var width = content.ActualWidth + content.Margin.Left + content.Margin.Right;
-            var height = content.ActualHeight + content.Margin.Top + content.Margin.Bottom;
-            var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
-                (int)Math.Ceiling(width), (int)Math.Ceiling(height), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-            var background = new System.Windows.Media.DrawingVisual();
-            using (var dc = background.RenderOpen())
-                dc.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
-            bitmap.Render(background);
-            bitmap.Render(content);
-            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
-            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
-            using var file = File.Create(Path.Combine(root, $"screen-{i}.png"));
-            encoder.Save(file);
+            SaveScreen(window, root, $"screen-{i}.png");
         }
         tabs.SelectedIndex = 0;
         if (failures.Count > 0)
@@ -509,6 +536,26 @@ public partial class App : Application
             throw new InvalidOperationException("Text below WCAG AA contrast: " + string.Join(" | ", failures.Distinct().Take(8)));
         }
         return $"contrast ok for {checkedTotal} text elements ({skippedTotal} over non-solid backgrounds not checked).";
+    }
+
+    private static void SaveScreen(Window window, string root, string name)
+    {
+        window.UpdateLayout();
+        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.Render);
+        var content = (FrameworkElement)window.Content;
+        var width = content.ActualWidth + content.Margin.Left + content.Margin.Right;
+        var height = content.ActualHeight + content.Margin.Top + content.Margin.Bottom;
+        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(
+            (int)Math.Ceiling(width), (int)Math.Ceiling(height), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+        var background = new System.Windows.Media.DrawingVisual();
+        using (var dc = background.RenderOpen())
+            dc.DrawRectangle(window.Background, null, new Rect(0, 0, width, height));
+        bitmap.Render(background);
+        bitmap.Render(content);
+        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+        using var file = File.Create(Path.Combine(root, name));
+        encoder.Save(file);
     }
 
     private static System.Windows.Controls.TabControl? FindTabControl(DependencyObject node)

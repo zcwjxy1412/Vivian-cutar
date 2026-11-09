@@ -44,7 +44,8 @@ public sealed class MultiAccountOrchestrator
 
     public async Task<MultiAccountOutcome> ExecuteAsync(GameId game, IReadOnlyList<GameAccount> accounts,
         AccountConfigurationMode mode, Func<GameAccount, CancellationToken, Task<IReadOnlyDictionary<string, string>>> settings,
-        BatchTaskRunner runner, Action<BatchAccountProgress>? progress, CancellationToken cancellationToken)
+        BatchTaskRunner runner, Action<BatchAccountProgress>? progress, CancellationToken cancellationToken,
+        Guid? actionId = null, Action? beforeDesktopMutation = null)
     {
         if (accounts.Count == 0) throw new ArgumentException("至少选择一个账号。", nameof(accounts));
         if (accounts.Select(a => a.Id).Distinct().Count() != accounts.Count)
@@ -53,7 +54,7 @@ public sealed class MultiAccountOrchestrator
 
         var policy = _policy;
         var batch = await _database.BeginBatchAsync(game, mode == AccountConfigurationMode.Unified
-            ? "unified" : "independent", cancellationToken);
+            ? "unified" : "independent", cancellationToken, actionId);
         _host?.BeginBatch();
         var succeeded = 0;
         var failed = 0;
@@ -81,6 +82,7 @@ public sealed class MultiAccountOrchestrator
             // The driver still verifies the saved-account screen before the first account can run.
             batch = await StageAsync(batch, accounts[0], BatchRunState.RecognizingLogin,
                 "正在启动星铁或等待已保存账号界面", progress, cancellationToken);
+            beforeDesktopMutation?.Invoke();
             var prepared = await _driver.EnsureLoginAsync(policy, cancellationToken);
             if (!prepared.Ok)
             {
@@ -216,7 +218,11 @@ public sealed class MultiAccountOrchestrator
         catch (OperationCanceledException)
         {
             cancelled = true;
-            try { gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok; }
+            try
+            {
+                beforeDesktopMutation?.Invoke();
+                gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok;
+            }
             catch { /* user stop must still finish */ }
         }
         catch (Exception ex)

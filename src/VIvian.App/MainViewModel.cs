@@ -10,6 +10,7 @@ using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Accounts;
+using VIvian.Infrastructure.Assistant;
 using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.Cli;
@@ -393,7 +394,7 @@ public sealed class MainViewModel : ObservableObject
                 ct => _runs.ReadRecentRunsAsync(20, ct), accounts.Database, [starRailConfiguration]),
             target => target.Game == GameId.StarRail && accounts.SelectedStarRail?.Id == target.AccountId
                 && !ConfigurationBlocked() && Configuration.PendingCount == 0,
-            paths.DataDirectory, Configuration.ReadAsync);
+            paths.DataDirectory, Configuration.ReadAsync, SubmitAssistantPlanAsync);
         accounts.SelectionChanged += Assistant.InvalidateProposals;
         Configuration.PropertyChanged += (_, e) =>
         {
@@ -667,12 +668,27 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private CancellationTokenSource? _batchCts;
-    private async Task RunAccountBatchAsync()
+    private async Task<string> SubmitAssistantPlanAsync(AssistantRunPlan plan)
+    {
+        var outcome = "调度器正在处理其他操作。";
+        await RunAsync(async () =>
+        {
+            await RunAccountBatchAsync(plan);
+            outcome = BatchStatus;
+        });
+        return outcome;
+    }
+
+    private async Task RunAccountBatchAsync(AssistantRunPlan? approved = null)
     {
         if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
         { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return; }
-        var selected = Accounts.SelectedRows;
-        if (selected.Count == 0)
+        if (approved is not null && (!RealExecutionPolicy.IsM5DailyTest || !Assistant.EnableScheduleProposals
+            || approved.Target.Game != GameId.StarRail || approved.Expires <= DateTimeOffset.UtcNow
+            || Accounts.SelectedStarRail?.Id != approved.Target.AccountId))
+        { BatchStatus = "运行计划已失效，或当前选中账号和计划不一致。"; return; }
+        var selected = Accounts.SelectedRows.Where(row => approved is null || row.Id == approved.Target.AccountId).ToArray();
+        if (selected.Length == 0)
         { BatchStatus = "请先在账号管理勾选要执行的星铁账号。"; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
         var evidence = _march7thEvidence;
@@ -681,11 +697,26 @@ public sealed class MainViewModel : ObservableObject
         if (!VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
-        if (!Configuration.TryApplyPending(interactive: false, desktop))
+        if (approved is null ? !Configuration.TryApplyPending(interactive: false, desktop) : Configuration.PendingCount > 0)
         { BatchStatus = "请先在游戏管理保存尚未写入的设置。"; return; }
 
         var accounts = selected.Select(r => r.Account).ToArray();
         var installPath = card.InstallPath;
+        IReadOnlyDictionary<string, string>? approvedSettings = null;
+        if (approved is not null)
+        {
+            var provider = new StarRailAccountConfigurationProvider(Accounts.Database, _control, () => installPath,
+                () => BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore);
+            var current = await provider.ReadAsync(approved.Target, CancellationToken.None);
+            var plan = await Accounts.Database.LoadAccountTaskPlanAsync(approved.Target.AccountId);
+            if (current.WriteUnavailableReason is not null || current.Revision != approved.ConfigurationRevision
+                || !plan.DailyEnabled || plan.Revision != approved.TaskPlanRevision
+                || Accounts.SelectedStarRail?.Id != approved.Target.AccountId || !Assistant.EnableScheduleProposals
+                || approved.Expires <= DateTimeOffset.UtcNow || card.InstallPath != installPath)
+            { BatchStatus = "账号、任务或资源配置已变化，请重新生成运行计划。"; return; }
+            approvedSettings = current.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+                .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
+        }
         using var cancellation = new CancellationTokenSource();
         _batchCts = cancellation;
         BatchRunning = true;
@@ -693,7 +724,7 @@ public sealed class MainViewModel : ObservableObject
         {
             var token = cancellation.Token;
             BatchStatus = $"已完成 0/{accounts.Length} · 正在读取游戏设置";
-            await Accounts.SaveSelectionsAsync(token);
+            if (approved is null) await Accounts.SaveSelectionsAsync(token);
             var upstream = _control.ReadConfiguration(GameId.StarRail, installPath);
             var defaults = upstream.Values
                 .Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
@@ -707,8 +738,8 @@ public sealed class MainViewModel : ObservableObject
                 var plan = await Accounts.Database.LoadAccountTaskPlanAsync(account.Id, token);
                 if (!plan.DailyEnabled)
                     throw new InvalidOperationException($"「{account.Name}」的日常任务已关闭，请在游戏管理启用或在账号管理取消勾选。");
-                var snapshot = new Dictionary<string, string>(defaults, StringComparer.Ordinal);
-                if (account.Id != LegacyStarRail)
+                var snapshot = new Dictionary<string, string>(approvedSettings ?? defaults, StringComparer.Ordinal);
+                if (approvedSettings is null && account.Id != LegacyStarRail)
                 {
                     var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id, token);
                     foreach (var (key, value) in saved.Values) snapshot[key] = value;
@@ -721,7 +752,6 @@ public sealed class MainViewModel : ObservableObject
             }
 
             var completedAccounts = new HashSet<Guid>();
-            desktop.MarkDirty();
             var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, AccountConfigurationMode.Independent,
                 (account, _) => Task.FromResult(snapshots[account.Id]),
                 (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, desktop, ct),
@@ -730,7 +760,7 @@ public sealed class MainViewModel : ObservableObject
                     if (progress.State == BatchRunState.Completed) completedAccounts.Add(progress.AccountId);
                     BatchStatus = $"已完成 {completedAccounts.Count}/{accounts.Length} · {progress.AccountName} · " +
                         $"{BatchProgressText.Describe(progress.State)} · {progress.Detail}";
-                }, token);
+                }, token, approved?.Id, desktop.MarkDirty);
             if (outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed && !Queue.HasUnresolved
                 && !_control.HasPendingConfigurationRestore)
                 desktop.ConfirmClean();

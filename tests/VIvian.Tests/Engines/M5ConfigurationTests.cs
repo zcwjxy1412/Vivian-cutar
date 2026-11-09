@@ -149,6 +149,7 @@ public sealed class M5ConfigurationTests : IDisposable
     // Upstream logs "任务无法完成" for sub-tasks it does not implement and keeps going; a later verified 500 counts.
     [InlineData("开始日常任务\n任务无法完成: 累计消耗120点开拓力\n实训分数已达标\n2026-11-06 12:00:00,000 | INFO | 每日实训已完成", true)]
     [InlineData("开始日常任务\n每日实训已完成\n每日实训未完成", false)]
+    [InlineData("开始日常任务\n每日实训已完成\n2026-11-09 03:17:30,654 | \u001b[92mINFO\u001b[0m | \u001b[93m每日实训未完成\u001b[0m", false)]
     [InlineData("开始日常任务\n每日实训未完成\n每日实训已完成", true)]
     [InlineData("开始日常任务\n2026-11-09 03:36:01,123 | INFO | 检测到本日活跃度已满提示，跳过后续任务检测\n2026-11-09 03:36:19,123 | INFO | 未检测到每日实训奖励", true)]
     [InlineData("开始日常任务\n2026-11-09 03:36:01,123 | INFO | 检测到本日活跃度已满提示，跳过后续任务检测", false)]
@@ -196,7 +197,8 @@ public sealed class M5ConfigurationTests : IDisposable
             2026-11-09 03:18:34,290 | INFO | 当前界面：星际和平指南-每日实训
             {"schema":1,"run_id":"20261109-031124-be5b","task":"routine","status":"success","lock":"acquired","exit_code":0,"pid":230000,"started_at":"2026-11-09T03:11:24-05:00","ended_at":"2026-11-09T03:18:38-05:00"}
             """;
-        Assert.Equal(expected, March7thTaskContract.ParseFinalRecord(output, "routine", 0, id,
+        var consoleOutput = output.Replace("星际和平指南-每日实训", "\u001b[92m星际和平指南-每日实训\u001b[0m");
+        Assert.Equal(expected, March7thTaskContract.ParseFinalRecord(consoleOutput, "routine", 0, id,
             installDirectory: _root).Outcome);
     }
 

@@ -149,6 +149,9 @@ public static partial class March7thDailyEvidence
     private static bool MessageIs(string line, string message) => line == message ||
         line.EndsWith(" | " + message, StringComparison.Ordinal) || line.EndsWith("]" + message, StringComparison.Ordinal);
 
+    [GeneratedRegex(@"\x1B\[[0-9;]*m", RegexOptions.CultureInvariant)]
+    private static partial Regex ConsoleColors();
+
     private static List<string> Lines(string output) =>
-        output.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim()).ToList();
+        ConsoleColors().Replace(output, "").Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries).Select(l => l.Trim()).ToList();
 }

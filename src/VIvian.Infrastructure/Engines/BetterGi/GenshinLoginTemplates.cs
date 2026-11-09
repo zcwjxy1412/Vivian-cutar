@@ -39,12 +39,20 @@ internal sealed class GenshinLoginTemplates
         return templates;
     }
 
-    public ScreenRegion? Find(CapturedFrame frame, string file, ScreenRegion region, CancellationToken ct) =>
-        Match(frame, _images[file], region, ct);
+    public ScreenRegion? Find(CapturedFrame frame, string file, ScreenRegion region, CancellationToken ct,
+        bool flipVertically = false) =>
+        Match(frame, _images[file], region, ct, flipVertically);
 
-    internal static ScreenRegion? Match(CapturedFrame frame, CapturedFrame image, ScreenRegion region, CancellationToken ct)
+    internal static ScreenRegion? Match(CapturedFrame frame, CapturedFrame image, ScreenRegion region, CancellationToken ct,
+        bool flipVertically = false)
     {
         var scale = frame.Height / 1080d;
+        // The anti-aliased 4K caret loses its outline with nearest-neighbor sampling.
+        if (scale == 2)
+        {
+            image = image.Scale(2);
+            scale = 1;
+        }
         var w = (int)Math.Round(image.Width * scale);
         var h = (int)Math.Round(image.Height * scale);
         var samples = new List<(int X, int Y, double Value)>();
@@ -53,6 +61,7 @@ internal sealed class GenshinLoginTemplates
         {
             var ix = Math.Min((int)(x / scale), image.Width - 1);
             var iy = Math.Min((int)(y / scale), image.Height - 1);
+            if (flipVertically) iy = image.Height - 1 - iy;
             if (image.Bgra[(iy * image.Width + ix) * 4 + 3] >= 240)
                 samples.Add((x, y, Gray(image, ix, iy)));
         }

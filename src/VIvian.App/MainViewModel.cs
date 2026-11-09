@@ -345,7 +345,7 @@ public sealed class MainViewModel : ObservableObject
         Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
             new VIvian.Infrastructure.Assistant.AssistantTools(_control, game => Engines.Single(e => e.Id == game).InstallPath,
                 () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version, e.Compatibility, e.CanRunForReal)).ToList(),
-                async () => await _runs.ReadRecentRunsAsync(20), accounts.Database, () => accounts.SelectedStarRail?.Id),
+                ct => _runs.ReadRecentRunsAsync(20, ct), accounts.Database, () => accounts.SelectedStarRail?.Id),
             () => BatchRunning || Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
             () => { _ = Configuration.ReadAsync(); });
         Configuration.PropertyChanged += (_, e) =>

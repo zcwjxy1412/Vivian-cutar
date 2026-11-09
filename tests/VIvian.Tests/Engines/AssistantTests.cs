@@ -29,7 +29,7 @@ public sealed class AssistantTests : IDisposable
 
     private AssistantTools Tools() => new(_control, _ => _root,
         () => [new EngineStatusView(GameId.StarRail, "崩坏：星穹铁道", "March7thAssistant", "v2026.10.31", "已核对", true)],
-        () => Task.FromResult<IReadOnlyList<RunRecord>>([]));
+        _ => Task.FromResult<IReadOnlyList<RunRecord>>([]));
 
     [Fact]
     public async Task ProposeChangesValidatesButNeverWritesUntilTheUserConfirms()

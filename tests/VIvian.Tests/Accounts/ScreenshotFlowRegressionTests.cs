@@ -86,8 +86,19 @@ public sealed class ScreenshotFlowRegressionTests
     public void Screenshot8WelcomeBannerIsTitleNotLoginCard()
     {
         var o = LoginStateClassifier.Classify([T("152******39，欢迎进入游戏", 960, 230, 400),
-            T("开始游戏", 960, 880), T("登出", 1830, 350)], true);
+            T("开始游戏", 960, 880), T("登出", 1830, 350),
+            T("867", 220, 1060, 25), T("679", 300, 1060, 25)], true);
         Assert.Equal(LoginScreenState.Title, o.State);
+        Assert.Equal("152****39", Assert.Single(o.Accounts).NormalizedPhone);
+    }
+
+    [Fact]
+    public void TitleBuildFooterCannotInventAWelcomeAccount()
+    {
+        var o = LoginStateClassifier.Classify([T("点击进入", 960, 1014), T("登出", 1830, 400),
+            T("867", 220, 1060, 25), T("679", 300, 1060, 25)]);
+        Assert.Equal(LoginScreenState.Title, o.State);
+        Assert.Empty(o.Accounts);
     }
 
     [Fact]

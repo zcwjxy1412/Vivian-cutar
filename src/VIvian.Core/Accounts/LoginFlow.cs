@@ -98,7 +98,12 @@ public static class LoginStateClassifier
             (Has("点击进入") || logoutLine is not null || Has("星穹列车")))
         {
             var titleLogout = FindTitleLogout(lines);
-            return new(LoginScreenState.Title, lines, MaskedPhoneParser.FindAll(lines), titleLogout,
+            var welcome = FindAny(lines, ["欢迎进入游戏"]);
+            // The title footer also contains split version digits. Only the welcome row can identify the account.
+            var welcomeAccounts = welcome is null ? [] : MaskedPhoneParser.FindAll(lines.Where(line =>
+                Math.Abs(line.CenterY - welcome.CenterY) <= welcome.Height &&
+                Math.Abs(line.CenterX - welcome.CenterX) <= 2 * welcome.Width).ToArray());
+            return new(LoginScreenState.Title, lines, welcomeAccounts, titleLogout,
                 titleLogout is null ? "标题界面（等待定位登出按钮）。" : "标题界面（可退出登录）。");
         }
 

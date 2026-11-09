@@ -8,6 +8,8 @@ namespace VIvian.Infrastructure.Engines.OneDragon;
 public static class OneDragonContract
 {
     public const string UpstreamRepository = "https://github.com/OneDragon-Anything/ZenlessZoneZero-OneDragon";
+    // SHA-256 of the launcher from the verified WithRuntime-Full release ZIP.
+    public const string LauncherSha256 = "d4a8e2780eacc6754a88810d1d6b2fccdf4dd60a1e00725a12b5ebe8589158c1";
     public const string PinnedTag = "v2.6.0";
     public const string PinnedCommit = "5f2e473bbc5b100ae2ea482dd25be0277bbca87c";
 

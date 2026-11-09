@@ -10,7 +10,14 @@ namespace VIvian.Infrastructure.Engines.OneDragon;
 /// </summary>
 public sealed record OneDragonTaskRequest
 {
-    internal OneDragonTaskRequest(bool closeGame, IReadOnlyList<int> instances) => (CloseGame, Instances) = (closeGame, instances);
+    internal OneDragonTaskRequest(bool closeGame, IReadOnlyList<int> instances, bool engagementRewardOnly = false)
+    {
+        CloseGame = closeGame;
+        Instances = Array.AsReadOnly(instances.ToArray());
+        EngagementRewardOnly = engagementRewardOnly;
+    }
+
+    public bool EngagementRewardOnly { get; }
 
     public bool CloseGame { get; }
     /// <summary>Account instance indices, in the order given. Empty means OneDragon's own default.</summary>
@@ -49,8 +56,14 @@ public static class OneDragonArguments
         if (instances.Count > MaxInstances) return new(null, $"最多指定 {MaxInstances} 个账号实例。");
         if (instances.Any(i => i is < 0 or > MaxInstanceIndex)) return new(null, $"账号实例编号必须在 0–{MaxInstanceIndex} 之间。");
         if (instances.Distinct().Count() != instances.Count) return new(null, "账号实例编号不能重复。");
-        return new(new OneDragonTaskRequest(closeGame, [.. instances]), null);
+        return new(new OneDragonTaskRequest(closeGame, instances), null);
     }
+
+    /// <summary>First diagnostic profile. The task is selected by its saved group configuration.</summary>
+    public static OneDragonArgumentResult EngagementReward(int instanceIndex) =>
+        instanceIndex is > 0 and <= MaxInstanceIndex
+            ? new(new OneDragonTaskRequest(true, [instanceIndex], engagementRewardOnly: true), null)
+            : new(null, "请选择有效的 OneDragon 脚本实例。");
 
     /// <summary>Parses user text such as "1,2" with the same strictness: digits and commas only, no spaces or signs.</summary>
     public static OneDragonArgumentResult Parse(bool closeGame, string? instanceText)

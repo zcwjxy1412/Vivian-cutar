@@ -25,6 +25,13 @@ public sealed record AssistantEndpoint(string BaseUrl, string Model, string ApiK
     public bool IsComplete => ChatUri is not null && !string.IsNullOrWhiteSpace(Model)
         && !string.IsNullOrWhiteSpace(ApiKey) && ApiKey.All(c => c is > ' ' and <= '~');
 
+    public AssistantEndpoint WithDraft(string baseUrl, string model, string newKey)
+    {
+        var draft = new AssistantEndpoint(baseUrl.Trim(), model.Trim(), newKey.Trim());
+        return newKey.Length == 0 && draft.ChatUri is { } uri && uri.Equals(ChatUri)
+            ? draft with { ApiKey = ApiKey } : draft;
+    }
+
     // A record's default string representation would include the key.
     public override string ToString() => nameof(AssistantEndpoint);
 }

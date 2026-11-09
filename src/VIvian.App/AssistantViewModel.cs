@@ -84,8 +84,7 @@ public sealed class AssistantViewModel : ObservableObject
     public string Model { get => _model; set { if (_model == value) return; Set(ref _model, value); InvalidateConnection(); } }
     private string _newApiKey = "";
     public string NewApiKey { get => _newApiKey; set { if (_newApiKey == value) return; Set(ref _newApiKey, value); InvalidateConnection(); } }
-    private AssistantEndpoint DraftEndpoint => new(BaseUrl.Trim(), Model.Trim(),
-        NewApiKey.Length == 0 ? _endpoint.ApiKey : NewApiKey.Trim());
+    private AssistantEndpoint DraftEndpoint => _endpoint.WithDraft(BaseUrl, Model, NewApiKey);
     private string _settingsStatus = "密钥只保存在本机，并用 Windows 账户加密；诊断包与日志不会包含它。";
     public string SettingsStatus { get => _settingsStatus; private set => Set(ref _settingsStatus, value); }
 
@@ -198,7 +197,7 @@ public sealed class AssistantViewModel : ObservableObject
         var endpoint = DraftEndpoint;
         if (!endpoint.IsComplete)
         {
-            SettingsStatus = "请填写有效的接口地址、模型名和密钥。远程接口需要 HTTPS。";
+            SettingsStatus = "请填写有效的接口地址、模型名和密钥。更换地址须重新输入密钥，远程接口需要 HTTPS。";
             return Task.CompletedTask;
         }
         _settings.Save(endpoint);
@@ -232,7 +231,7 @@ public sealed class AssistantViewModel : ObservableObject
         var endpoint = DraftEndpoint;
         if (!endpoint.IsComplete)
         {
-            SettingsStatus = "请填写有效的接口地址、模型名和密钥。远程接口需要 HTTPS。";
+            SettingsStatus = "请填写有效的接口地址、模型名和密钥。更换地址须重新输入密钥，远程接口需要 HTTPS。";
             return;
         }
         var revision = _settingsRevision;

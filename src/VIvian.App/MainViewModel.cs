@@ -332,8 +332,7 @@ public sealed class MainViewModel : ObservableObject
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
-            () => BatchRunning || Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
-            accounts.Database, () => accounts.SelectedStarRail);
+            () => BatchRunning || Queue.IsRunning, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
@@ -358,7 +357,20 @@ public sealed class MainViewModel : ObservableObject
             if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
             { Status = "任务运行或清理未确认时不能扫描切换账号。"; return; }
             using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
-            await action();
+            var touched = false;
+            try
+            {
+                await action(() =>
+                {
+                    if (touched) return;
+                    desktop.MarkDirty();
+                    touched = true;
+                });
+            }
+            finally
+            {
+                if (touched) Status = "扫描可能留下星铁登录界面。关闭本轮游戏后，请先核对桌面交接再执行任务。";
+            }
         });
         StopAllCommand = new(StopAll);
         Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Raise(nameof(CanStopAll)); };
@@ -372,7 +384,8 @@ public sealed class MainViewModel : ObservableObject
         }
         bool ConfigurationBlocked() => BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
         var starRailConfiguration = new VIvian.Infrastructure.Assistant.StarRailAccountConfigurationProvider(
-            accounts.Database, _control, () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath, ConfigurationBlocked);
+            accounts.Database, _control, () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath, ConfigurationBlocked,
+            () => DesktopOperationLease.Acquire(paths.DataDirectory));
         Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
             new VIvian.Infrastructure.Assistant.AssistantTools(
                 () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version,
@@ -590,7 +603,7 @@ public sealed class MainViewModel : ObservableObject
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
         var allowTemporary = AllowTemporaryConfigurationThisRun;
         // Edits made on the Star Rail page must be in the upstream file before the engine reads it.
-        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
+        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true, desktop))
         { Status = $"还有 {Configuration.PendingCount} 项配置修改没写入星铁助手（{Configuration.Status}）。任务未启动。"; return; }
         if (RealExecutionPolicy.IsM5DailyTest)
         {
@@ -668,7 +681,7 @@ public sealed class MainViewModel : ObservableObject
         if (!VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
-        if (!Configuration.TryApplyPending(interactive: false))
+        if (!Configuration.TryApplyPending(interactive: false, desktop))
         { BatchStatus = "请先在游戏管理保存尚未写入的设置。"; return; }
 
         var accounts = selected.Select(r => r.Account).ToArray();

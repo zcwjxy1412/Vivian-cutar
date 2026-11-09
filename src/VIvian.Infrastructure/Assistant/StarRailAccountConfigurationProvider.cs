@@ -7,19 +7,23 @@ namespace VIvian.Infrastructure.Assistant;
 
 /// <summary>Changes only VIvian's independent account overrides, using the same upstream defaults as the Star Rail batch.</summary>
 public sealed class StarRailAccountConfigurationProvider(LocalDatabase database, IConfigurationControl configuration,
-    Func<string> upstreamInstall, Func<bool> runtimeBlocked) : IAccountConfigurationProvider
+    Func<string> upstreamInstall, Func<bool> runtimeBlocked, Func<IDisposable>? acquireReadLease = null) : IAccountConfigurationProvider
 {
     public GameId Game => GameId.StarRail;
     private const string LegacyReadOnly = "原有账号使用星铁共享配置，助手只提供读取。请选择已登记的独立星铁账号。";
     private sealed record Current(GameAccount Account, AccountSettingsSnapshot Settings, ConfigurationSnapshot Effective,
         AccountConfigurationView View);
 
-    public async Task<AccountConfigurationView> ReadAsync(AccountConfigurationTarget target, CancellationToken ct) =>
-        (await LoadAsync(target, ct).ConfigureAwait(false)).View;
+    public async Task<AccountConfigurationView> ReadAsync(AccountConfigurationTarget target, CancellationToken ct)
+    {
+        using var desktop = acquireReadLease?.Invoke();
+        return (await LoadAsync(target, ct).ConfigureAwait(false)).View;
+    }
 
     public async Task<AccountConfigurationProposal> ProposeAsync(AccountConfigurationTarget target, string revision,
         IReadOnlyDictionary<string, string> changes, CancellationToken ct)
     {
+        using var desktop = acquireReadLease?.Invoke();
         var current = await LoadAsync(target, ct).ConfigureAwait(false);
         RequireWritable(current, revision);
         var proposal = configuration.ProposeChanges(current.Effective, changes);

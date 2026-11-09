@@ -38,7 +38,7 @@ public sealed class AccountRecognitionService
     public sealed record RegistrationResult(bool Success, string Detail, LoginScreenView? View,
         IReadOnlyList<GameAccount> Registered, IReadOnlyList<string> Warnings);
 
-    public async Task<RegistrationResult> ScanAndRegisterAsync(CancellationToken cancellationToken)
+    public async Task<RegistrationResult> ScanAndRegisterAsync(CancellationToken cancellationToken, Action? beforeDesktopMutation = null)
     {
         LoginScreenView view;
         try
@@ -47,6 +47,7 @@ public sealed class AccountRecognitionService
             {
                 if (!Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
                     return new(false, "请先以管理员身份打开测试版完成授权，再自动扫描。", null, [], []);
+                beforeDesktopMutation?.Invoke();
                 var ready = await _driver.EnsureLoginAsync(new SwitchPolicy(), cancellationToken);
                 if (!ready.Ok) return new(false, ready.Detail, null, [], []);
             }
@@ -55,6 +56,7 @@ public sealed class AccountRecognitionService
                 view.Result.Observation is { AccountListExpanded: false, Accounts.Count: 1 } card)
             {
                 var row = card.Accounts[0];
+                beforeDesktopMutation?.Invoke();
                 var clicked = await _input.ClickAsync(window, (int)row.CenterX, (int)row.CenterY, cancellationToken);
                 if (!clicked.Ok) return new(false, "无法展开保存账号列表：" + clicked.Error, view, [], []);
                 for (var attempt = 0; attempt < 5; attempt++)

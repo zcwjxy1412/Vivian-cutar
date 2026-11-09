@@ -133,7 +133,8 @@ public sealed class TemporaryConfigurationManager(IConfigurationControl control,
             var current = snapshot.Values.SingleOrDefault(v => v.Schema.Path == change.Path)?.Value;
             if (current is null) return new(RestoreState.Blocked, $"字段 {change.Path} 当前无法识别，暂不恢复。");
             if (current == change.Temporary) revert[change.Path] = change.Original;
-            // current == Original: already back (user or upstream reverted it). Nothing else is possible for booleans.
+            else if (current != change.Original)
+                return new(RestoreState.Blocked, $"字段 {change.Path} 已变为另一个值；保留现值与恢复记录，等待核对。");
         }
         if (revert.Count == 0)
         {

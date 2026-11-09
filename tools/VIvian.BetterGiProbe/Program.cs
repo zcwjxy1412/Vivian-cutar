@@ -5,10 +5,24 @@ using VIvian.Infrastructure.Engines.BetterGi;
 
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-if (args is ["run-daily", var stage])
+if (args.Length != 0 && args[0] is ("render-account" or "run-account" or "run-daily" or "recover-daily"))
 {
-    try { return await DailyAcceptance.RunAsync(stage); }
-    catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+    try
+    {
+        return args switch
+        {
+            ["render-account", var id, var settingsPath, var client] when Guid.TryParse(id, out var accountId) =>
+                PreparedAccountPlan.Render(accountId, settingsPath, client),
+            ["run-account", var accountStage, var id, "--manual-account-confirmed"] when Guid.TryParse(id, out var accountId) =>
+                await DailyAcceptance.RunAsync(accountStage, accountId),
+            ["run-daily", var dailyStage] => await DailyAcceptance.RunAsync(dailyStage),
+            ["recover-daily", var recoveryStage] => await DailyAcceptance.RecoverAsync(recoveryStage),
+            _ => throw new ArgumentException("验收命令缺少隔离目录、账号档案编号或设置文件。"),
+        };
+    }
+    catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException
+        or InvalidDataException or JsonException or ArgumentException or System.ComponentModel.Win32Exception
+        or System.Security.SecurityException)
     {
         Console.Error.WriteLine(ex.Message);
         return 2;
@@ -17,7 +31,7 @@ if (args is ["run-daily", var stage])
 
 if (args is not ["inspect", _] and not ["inspect", _, _])
 {
-    Console.Error.WriteLine("用法：VIvian.BetterGiProbe inspect <BetterGI 安装目录> [一条龙配置名]，或 run-daily <隔离验收目录>");
+    Console.Error.WriteLine("用法：VIvian.BetterGiProbe inspect <BetterGI 安装目录> [一条龙配置名]；也支持 render-account <账号编号> <设置文件> <客户端>、run-account <隔离目录> <账号编号> --manual-account-confirmed、run-daily / recover-daily <隔离目录>");
     return 2;
 }
 

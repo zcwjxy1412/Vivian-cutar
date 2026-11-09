@@ -98,5 +98,7 @@ public sealed class BetterGiAccountPlansTests
         Assert.Throws<ArgumentException>(() => BetterGiAccountPlans.Compile(settings));
         settings["autoDomainConfig.originalResin40UseCount"] = "1";
         Assert.Single(BetterGiAccountPlans.Compile(settings).Tasks);
+        settings["DomainName"] = "根据提升指南选择秘境";
+        Assert.Throws<ArgumentException>(() => BetterGiAccountPlans.Compile(settings));
     }
 }

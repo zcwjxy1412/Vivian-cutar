@@ -23,6 +23,7 @@ public sealed record BetterGiTaskRequest
     public string? ConfigName { get; }
     public IReadOnlyList<string> Groups { get; }
     internal BetterGiOneDragonPlan? OneDragonPlan { get; init; }
+    internal BetterGiDomainResinPlan? DomainResinPlan { get; init; }
 
     /// <summary>
     /// True when VIvian knows which log lines prove this kind of run completed. Only the one-dragon flow has a known

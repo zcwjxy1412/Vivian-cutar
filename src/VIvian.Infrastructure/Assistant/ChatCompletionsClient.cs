@@ -50,6 +50,43 @@ public sealed class ChatCompletionsClient(HttpClient http)
         }
     }
 
+    public async Task TestToolRoundTripAsync(AssistantEndpoint endpoint, CancellationToken ct)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        deadline.CancelAfter(TimeSpan.FromSeconds(20));
+        var token = deadline.Token;
+        var messages = new JsonArray(new JsonObject
+        {
+            ["role"] = "user",
+            ["content"] = "Call vivian_probe with {} now. After receiving its result, reply with the verification code verbatim.",
+        });
+        var definitions = JsonNode.Parse("""
+            [{"type":"function","function":{"name":"vivian_probe","description":"Return a temporary verification code.",
+            "parameters":{"type":"object","properties":{},"additionalProperties":false}}}]
+            """)!.AsArray();
+        try
+        {
+            var reply = await CompleteAsync(endpoint, messages, definitions, token).ConfigureAwait(false);
+            if (reply["tool_calls"] is not JsonArray { Count: 1 } calls)
+                throw new AssistantException("模型能聊天，但没有按协议发起工具调用。请检查模型是否支持工具。");
+            var (id, name, arguments) = AssistantSession.ParseCall(calls[0], new HashSet<string>(StringComparer.Ordinal));
+            if (name != "vivian_probe" || arguments.Length > 256 || JsonNode.Parse(arguments) is not JsonObject { Count: 0 })
+                throw new AssistantException("模型的测试工具参数不符合协议。");
+            var code = Guid.NewGuid().ToString("N");
+            messages.Add(reply.DeepClone());
+            messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = code });
+            var final = await CompleteAsync(endpoint, messages, null, token).ConfigureAwait(false);
+            if (final["tool_calls"] is not (null or JsonArray { Count: 0 })
+                || StringValue(final["content"])?.Contains(code, StringComparison.Ordinal) != true)
+                throw new AssistantException("模型未正确读取测试工具结果，请核对接口的工具往返兼容性。");
+        }
+        catch (JsonException) { throw new AssistantException("模型返回的测试工具参数不是有效的 JSON。"); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new AssistantException("工具往返测试超时，请检查网络或更换模型。");
+        }
+    }
+
     public async Task<JsonObject> CompleteAsync(AssistantEndpoint endpoint, JsonArray messages, JsonArray? tools, CancellationToken ct)
     {
         if (!endpoint.IsComplete)

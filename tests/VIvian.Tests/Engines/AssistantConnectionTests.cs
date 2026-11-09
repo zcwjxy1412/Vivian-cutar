@@ -63,6 +63,42 @@ public sealed class AssistantConnectionTests
             new ChatCompletionsClient(http).TestConnectionAsync(Endpoint, cancellation.Token));
     }
 
+    [Fact]
+    public async Task ToolProbeRequiresARealCallAndEchoedResult()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(ct))!;
+            var message = ++requests switch
+            {
+                1 => JsonNode.Parse("""
+                    {"role":"assistant","content":null,"tool_calls":[{"id":"probe-1","type":"function",
+                    "function":{"name":"vivian_probe","arguments":"{}"}}]}
+                    """)!.AsObject(),
+                2 => new JsonObject { ["role"] = "assistant", ["content"] = body["messages"]!.AsArray().Last()!["content"]!.GetValue<string>() },
+                _ => throw new InvalidOperationException("Unexpected probe request."),
+            };
+            if (requests == 2)
+                Assert.Equal("probe-1", body["messages"]!.AsArray().Last()!["tool_call_id"]!.GetValue<string>());
+            var result = new JsonObject { ["choices"] = new JsonArray(new JsonObject { ["message"] = message }) };
+            return new(HttpStatusCode.OK) { Content = new StringContent(result.ToJsonString()) };
+        }));
+        await new ChatCompletionsClient(http).TestToolRoundTripAsync(Endpoint, CancellationToken.None);
+        Assert.Equal(2, requests);
+    }
+
+    [Fact]
+    public async Task ModelReturningOnlyTextFailsTheToolProbe()
+    {
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"OK"}}]}"""),
+        })));
+        await Assert.ThrowsAsync<AssistantException>(() =>
+            new ChatCompletionsClient(http).TestToolRoundTripAsync(Endpoint, CancellationToken.None));
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) => send(request, ct);

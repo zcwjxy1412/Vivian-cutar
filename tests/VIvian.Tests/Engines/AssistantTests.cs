@@ -137,6 +137,18 @@ public sealed class AssistantTests : IDisposable
         Assert.DoesNotContain(a.Name, progress);
     }
 
+    [Theory]
+    [InlineData("genshin", "genshin.daily_rewards")]
+    [InlineData("zzz", "engagement_reward")]
+    public async Task IntegratedTaskCatalogsRemainReadOnly(string game, string task)
+    {
+        var tools = new AssistantTools(() => [], _ => Task.FromResult<IReadOnlyList<RunRecord>>([]));
+        var result = await tools.InvokeAsync("list_tasks", new JsonObject { ["game"] = game }.ToJsonString(), Ct);
+        var tasks = JsonNode.Parse(result.Content)!.AsArray();
+        Assert.Contains(tasks, t => t!["Id"]!.GetValue<string>() == task);
+        Assert.All(tasks, t => Assert.False(t!["can_run_for_real"]!.GetValue<bool>()));
+    }
+
     private async Task<(LocalDatabase Db, StarRailAccountConfigurationProvider Provider, AssistantTools Tools, GameAccount A, GameAccount B)>
         SetupAsync(Func<bool>? busy = null)
     {

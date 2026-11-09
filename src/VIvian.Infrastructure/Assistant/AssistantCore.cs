@@ -6,6 +6,8 @@ using VIvian.Infrastructure;
 using VIvian.Core;
 using VIvian.Core.Engines;
 using VIvian.Core.Execution;
+using VIvian.Infrastructure.Engines.BetterGi;
+using VIvian.Infrastructure.Engines.OneDragon;
 
 namespace VIvian.Infrastructure.Assistant;
 
@@ -118,11 +120,23 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
             .ConfigureAwait(false);
     }
 
-    private string ListTasks(GameId game) => Serialize(EngineCatalog.For(game).Tasks.Select(t => new
+    private string ListTasks(GameId game)
     {
-        t.Id, t.Title, frequency = t.Frequency.ToString(), can_run_for_real = RealExecutionPolicy.AllowsTask(t.Id) && game == GameId.StarRail,
-        t.Note, t.Preconditions,
-    }));
+        if (game == GameId.ZenlessZoneZero)
+            return Serialize(OneDragonTaskPlans.Catalog.Select(t => new
+            {
+                t.Id, title = t.DisplayName, uses_stamina_plan = t.UsesStaminaPlan, can_run_for_real = false,
+            }));
+
+        var tasks = game == GameId.Genshin ? BetterGiTaskCatalog.Tasks : EngineCatalog.For(game).Tasks;
+        var available = engines().Any(e => e.Game == game && e.CanRunForReal);
+        return Serialize(tasks.Select(t => new
+        {
+            t.Id, t.Title, frequency = t.Frequency.ToString(),
+            can_run_for_real = game == GameId.StarRail && available && RealExecutionPolicy.AllowsTask(t.Id),
+            t.Note, t.Preconditions,
+        }));
+    }
 
     private async Task<string> ReadConfigurationAsync(AccountConfigurationTarget target, CancellationToken ct)
     {

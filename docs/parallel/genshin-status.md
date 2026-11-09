@@ -28,6 +28,8 @@
 
 2026-11-09 已将统一版 `3242768` 安装到原 `E:\auto agent game\VIvian\VIvian.exe`。两处「启动 furina」仍指向这一路径。统一版从 `%LOCALAPPDATA%\VIvian-UserData` 读取合流库。旧 v6/v7 原库摘要和归档的旧正式程序摘要已核对。现场启动检查通过，两个原神账号的计划与各自 BetterGI 档案顺序一致。旧测试产物已可逆归档。[单入口与数据合并](https://github.com/zcwjxy1412/Vivian-cutar/blob/integration/m6-dual-engine/docs/parallel/unified-entry.md)
 
+首次原快捷方式启动发现，打包的 Codex 会话将合流目录和其中一份旧库解析到了包私有路径。已从普通 Windows 会话核对原库的物理句柄并重新合流，正式库含三个原崩铁档案、两个原神档案及已连接任务。原物理库摘要一致，实际安装版在普通会话的启动检查通过，误写入的影子库已归档。
+
 如需只读预览已导出的账号设置，使用普通 PowerShell 运行以下命令。JSON 只含账号任务参数，账号编号是 VIvian 的内部 GUID。
 
 ```powershell

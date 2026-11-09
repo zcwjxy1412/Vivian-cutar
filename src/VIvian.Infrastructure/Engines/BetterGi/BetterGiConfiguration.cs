@@ -82,7 +82,18 @@ public static class BetterGiConfiguration
     internal static Task<BetterGiTaskRequest> ResolveAsync(string installRoot, BetterGiTaskRequest request, CancellationToken ct) =>
         ReadOnlyFileAccess.BoundedAsync(() => Resolve(installRoot, request, ct), ReadOnlyFileAccess.QueryTimeout, ct);
 
-    private static BetterGiTaskRequest Resolve(string installRoot, BetterGiTaskRequest request, CancellationToken ct)
+    internal static Task<BetterGiOneDragonPlan> InspectSavedDailyAsync(string installRoot, string name, CancellationToken ct)
+    {
+        if (!Path.IsPathFullyQualified(installRoot))
+            throw new ArgumentException("BetterGI 安装目录必须是绝对路径。", nameof(installRoot));
+        var request = BetterGiArguments.OneDragon(name);
+        if (request.Request is not { } daily) throw new InvalidDataException(request.Error);
+        return ReadOnlyFileAccess.BoundedAsync(() => Resolve(Path.GetFullPath(installRoot), daily, ct, requireDailyOnly: true)
+            .OneDragonPlan!, ReadOnlyFileAccess.QueryTimeout, ct);
+    }
+
+    private static BetterGiTaskRequest Resolve(string installRoot, BetterGiTaskRequest request, CancellationToken ct,
+        bool requireDailyOnly = false)
     {
         var user = Path.Combine(installRoot, "User");
         if (request.Kind == BetterGiTaskKind.StartGroups)
@@ -120,6 +131,7 @@ public static class BetterGiConfiguration
                 continue;
             if (plan is not null)
                 throw new InvalidDataException("BetterGI 存在同名的一条龙配置，无法确认目标唯一。");
+            if (requireDailyOnly) VerifySavedDailyScope(json.RootElement);
             plan = ReadOneDragonPlan(requestedName!, json.RootElement);
         }
         if (plan is null)
@@ -131,6 +143,15 @@ public static class BetterGiConfiguration
             if (!BuiltInTasks.Contains(task)) CheckGroup(user, task);
         }
         return BetterGiArguments.OneDragon(requestedName).Request! with { OneDragonPlan = plan };
+    }
+
+    private static void VerifySavedDailyScope(JsonElement source)
+    {
+        var entries = ReadProperty(source, "TaskEnabledList")?.Deserialize<Dictionary<string, bool>>() ?? [];
+        if (entries.Any(pair => pair.Value && pair.Key is not ("genshin.daily_rewards" or BetterGiMarkers.DailyRewardTask)))
+            throw new InvalidOperationException("还有未通过实机准入的原神任务，批次未启动。当前只允许领取每日奖励。");
+        if (entries.Count(pair => pair.Value) != 1)
+            throw new InvalidOperationException("当前 BetterGI 源档案须启用唯一的领取每日奖励任务。");
     }
 
     private static readonly HashSet<string> BuiltInTasks = new(StringComparer.Ordinal)

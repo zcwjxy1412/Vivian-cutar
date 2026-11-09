@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using VIvian.Core;
 using VIvian.Core.Accounts;
+using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Engines.BetterGi;
@@ -54,6 +55,54 @@ public sealed class BetterGiAccountBatchTests
             new BetterGiAccountBatch(database, driver).ExecuteAsync([account],
                 (_, _, _) => throw new InvalidOperationException("unexpected task"), null, default));
         Assert.Equal(0, driver.Ensures);
+    }
+
+    [Fact]
+    public async Task UnconfirmedOutcomeStopsBeforeTheNextAccountEvenAfterCleanup()
+    {
+        await using var fixture = new BetterGiFixture();
+        var path = Path.Combine(fixture.Root, "test.db");
+        var database = new LocalDatabase(path);
+        await database.InitializeAsync();
+        var first = await Add(database, path, "A", "130****01", """{"dailyRewards":"true"}""");
+        var second = await Add(database, path, "B", "130****02", """{"dailyRewards":"true"}""");
+        var driver = new LoginDriver();
+        var accountsRun = new List<Guid>();
+
+        var outcome = await new BetterGiAccountBatch(database, driver).ExecuteAsync([first, second], (account, _, _) =>
+        {
+            accountsRun.Add(account.Id);
+            return Task.FromResult(new BatchTaskResult(null, false, true, true, "缺少完成信号", RunOutcome.Indeterminate));
+        }, null, default);
+
+        Assert.Equal([first.Id], accountsRun);
+        Assert.Equal(0, driver.Returns);
+        Assert.False(outcome.Completed);
+        Assert.Contains("结果未确认", outcome.Detail);
+    }
+
+    [Fact]
+    public async Task DirectDailyRunRejectsOtherEnabledTasksInsteadOfSilentlySkippingThem()
+    {
+        await using var fixture = new BetterGiFixture();
+        var path = Path.Combine(fixture.Root, "test.db");
+        var database = new LocalDatabase(path);
+        await database.InitializeAsync();
+        var account = await Add(database, path, "A", "130****01", """{"dailyRewards":"true"}""");
+        var name = BetterGiAccountPlan.SourceProfileName(account.Id);
+        var profilePath = Path.Combine(fixture.Root, "User", "OneDragon", name + ".json");
+        var game = Path.Combine(fixture.Root, "YuanShen.exe");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default));
+        File.WriteAllText(profilePath, $$"""{"Name":"{{name}}","TaskEnabledList":{"领取每日奖励":true,"合成树脂":true},"CompletionAction":"关闭软件","AdventurersGuildCountry":"蒙德"}""");
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default));
+        Assert.Contains("未通过实机准入", error.Message);
+
+        File.WriteAllText(profilePath, $$"""{"Name":"{{name}}","TaskEnabledList":{"custom-group":true},"TaskDefinitions":{"custom-group":"领取每日奖励"},"CompletionAction":"关闭软件"}""");
+        await Assert.ThrowsAsync<InvalidOperationException>(() => BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default));
+
+        File.WriteAllText(profilePath, $$"""{"Name":"{{name}}","TaskEnabledList":{"领取每日奖励":true},"CompletionAction":"关闭软件","AdventurersGuildCountry":"蒙德"}""");
+        Assert.Equal(name, (await BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default)).ProfileName);
     }
 
     private static async Task<GameAccount> Add(LocalDatabase db, string path, string label, string identity, string settings)

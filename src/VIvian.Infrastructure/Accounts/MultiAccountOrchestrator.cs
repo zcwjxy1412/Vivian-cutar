@@ -1,10 +1,11 @@
 using VIvian.Core;
 using VIvian.Core.Accounts;
+using VIvian.Core.Execution;
 
 namespace VIvian.Infrastructure.Accounts;
 
 public sealed record BatchTaskResult(Guid? RunId, bool Success, bool CleanupConfirmed, bool ConfigurationRestored,
-    string Detail);
+    string Detail, RunOutcome? Outcome = null);
 
 public delegate Task<BatchTaskResult> BatchTaskRunner(GameAccount account,
     IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken);
@@ -79,7 +80,8 @@ public sealed class MultiAccountOrchestrator
             // Reuse a client already at login, including one that is still starting.
             // The driver still verifies the saved-account screen before the first account can run.
             batch = await StageAsync(batch, accounts[0], BatchRunState.RecognizingLogin,
-                "正在启动星铁或等待已保存账号界面", progress, cancellationToken);
+                game == GameId.Genshin ? "正在启动原神或等待已保存账号界面" : "正在启动星铁或等待已保存账号界面",
+                progress, cancellationToken);
             var prepared = await _driver.EnsureLoginAsync(policy, cancellationToken);
             if (!prepared.Ok)
             {
@@ -138,8 +140,8 @@ public sealed class MultiAccountOrchestrator
 
                 batch = await StageAsync(batch, account, BatchRunState.LoadingConfiguration,
                     switched.Detail + " 加载配置", progress, cancellationToken);
-                batch = await StageAsync(batch, account, BatchRunState.RunningTasks, "正在执行星铁日常", progress,
-                    cancellationToken);
+                batch = await StageAsync(batch, account, BatchRunState.RunningTasks,
+                    game == GameId.Genshin ? "正在执行原神日常" : "正在执行星铁日常", progress, cancellationToken);
                 BatchTaskResult result;
                 try
                 {
@@ -165,7 +167,13 @@ public sealed class MultiAccountOrchestrator
                 else
                 {
                     failed++;
-                    await RecordAsync(batch, account, "failed", result.Detail, cancellationToken, result.RunId);
+                    var state = result.Outcome switch
+                    {
+                        RunOutcome.Indeterminate => "indeterminate",
+                        RunOutcome.Cancelled => "cancelled",
+                        _ => "failed",
+                    };
+                    await RecordAsync(batch, account, state, result.Detail, CancellationToken.None, result.RunId);
                     progress?.Invoke(P(account, BatchRunState.Failed, result.Detail));
                 }
 
@@ -175,6 +183,14 @@ public sealed class MultiAccountOrchestrator
                     stopReason = !result.CleanupConfirmed
                         ? "上一账号的任务进程清理未确认，已阻断下一个账号。"
                         : "上一账号的临时配置未恢复，已阻断下一个账号。";
+                    break;
+                }
+
+                if (result.Outcome is RunOutcome.Indeterminate or RunOutcome.Cancelled)
+                {
+                    cancelled = result.Outcome == RunOutcome.Cancelled;
+                    aborted = true;
+                    stopReason = "上一账号的任务结果未确认，已阻断下一个账号。";
                     break;
                 }
 

@@ -68,6 +68,7 @@ public sealed class ProcessSafetyGuardTests
             "VIvian.Infrastructure/Simulation/FakeEngineAdapter.cs",
             "VIvian.Infrastructure/Accounts/StarRailWindow.cs",
             "VIvian.Infrastructure/Engines/BetterGi/GenshinWindowsLoginDesktop.cs",
+            "VIvian.Infrastructure/Engines/BetterGi/BetterGiDailyAcceptance.cs",
         }));
     }
 

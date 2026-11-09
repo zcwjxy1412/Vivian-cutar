@@ -32,11 +32,25 @@ public sealed class DesktopOperationLease : IDisposable
 
     public bool Recovering { get; }
 
+    internal string VerifyCommonOwner()
+    {
+        if (!string.Equals(_lockPath, LockPath, StringComparison.OrdinalIgnoreCase) || _file.SafeFileHandle.IsClosed)
+            throw new InvalidOperationException("未持有共同桌面锁。");
+        VerifyHandle(_file, _lockPath);
+        return Encoding.UTF8.GetString(_owner);
+    }
+
     public static DesktopOperationLease Acquire(string profileDirectory, bool recovery = false) =>
         AcquireAt(LockPath, profileDirectory, recovery, WindowsProcessSupervisor.IsCurrentProcessElevated());
 
+    internal static DesktopOperationLease? TryAcquireRecovery(string profileDirectory) =>
+        Open(LockPath, profileDirectory, recovery: true, requireExisting: true, skipForeignOwner: true);
+
     internal static DesktopOperationLease AcquireAt(string lockPath, string profileDirectory, bool recovery = false,
-        bool requireExisting = false)
+        bool requireExisting = false) => Open(lockPath, profileDirectory, recovery, requireExisting, skipForeignOwner: false)!;
+
+    private static DesktopOperationLease? Open(string lockPath, string profileDirectory, bool recovery,
+        bool requireExisting, bool skipForeignOwner)
     {
         lockPath = Path.GetFullPath(lockPath);
         if (ReadOnlyFileAccess.FindReparsePoint(lockPath) is not null)
@@ -62,13 +76,20 @@ public sealed class DesktopOperationLease : IDisposable
             if (pending)
             {
                 if (!recovery || file.Length != owner.Length)
-                    throw PendingCleanup();
+                    return ForeignOwner();
                 var previousOwner = new byte[owner.Length];
                 file.ReadExactly(previousOwner);
                 if (!previousOwner.AsSpan().SequenceEqual(owner))
-                    throw PendingCleanup();
+                    return ForeignOwner();
             }
             return new(file, owner, lockPath, pending);
+
+            DesktopOperationLease? ForeignOwner()
+            {
+                if (!skipForeignOwner) throw PendingCleanup();
+                file.Dispose();
+                return null;
+            }
         }
         catch
         {

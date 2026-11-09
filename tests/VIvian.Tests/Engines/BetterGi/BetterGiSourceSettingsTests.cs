@@ -8,6 +8,72 @@ namespace VIvian.Tests.Engines.BetterGi;
 public sealed class BetterGiSourceSettingsTests
 {
     [Fact]
+    public async Task ConnectCreatesIndependentSourceProfilesFromSavedPlansAndReusesExternalEdits()
+    {
+        await using var fixture = new BetterGiFixture();
+        var defaultProfile = await Bind(fixture, """{"Name":"默认配置","unknown":true}""");
+        var original = File.ReadAllBytes(defaultProfile.ProfilePath);
+        var shared = File.ReadAllBytes(defaultProfile.SharedConfigPath);
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        var firstPlan = BetterGiAccountPlans.Compile(new Dictionary<string, string>
+        {
+            ["dailyRewards"] = "true", ["craftCondensedResin"] = "true", ["CraftingBenchCountry"] = "璃月",
+        });
+        var secondPlan = BetterGiAccountPlans.Compile(new Dictionary<string, string>
+        {
+            ["dailyRewards"] = "true", ["AdventurersGuildCountry"] = "蒙德",
+        });
+        Assert.Null(await Find(firstId));
+
+        var first = await Connect(firstId, firstPlan);
+        var second = await Connect(secondId, secondPlan);
+        var snapshot = await first.ReadAsync();
+        Assert.Equal("true", snapshot.ProfileValues["dailyRewards"]);
+        Assert.Equal("true", snapshot.ProfileValues["craftCondensedResin"]);
+        Assert.Equal("false", snapshot.ProfileValues["autoDomain"]);
+        Assert.Equal("璃月", snapshot.ProfileValues["CraftingBenchCountry"]);
+        Assert.Equal("false", (await second.ReadAsync()).ProfileValues["craftCondensedResin"]);
+        Assert.Equal("蒙德", (await second.ReadAsync()).ProfileValues["AdventurersGuildCountry"]);
+        Assert.NotEqual(first.ProfilePath, second.ProfilePath);
+        Assert.Equal(first.ProfilePath, (await Find(firstId))!.ProfilePath);
+        var sourcePlan = await BetterGiConfiguration.InspectOneDragonAsync(fixture.Root, first.ProfileName);
+        Assert.Equal(["合成树脂", "领取每日奖励"], sourcePlan.EnabledTasks);
+        Assert.Equal("无", sourcePlan.CompletionAction);
+
+        var changed = await first.UpdateProfileAsync(snapshot.ProfileRevision,
+            new Dictionary<string, string> { ["MinResinToKeep"] = "20" });
+        Assert.Equal(changed.ProfileRevision, (await (await Connect(firstId, firstPlan)).ReadAsync()).ProfileRevision);
+        Assert.Equal(original, File.ReadAllBytes(defaultProfile.ProfilePath));
+        Assert.Equal(shared, File.ReadAllBytes(defaultProfile.SharedConfigPath));
+
+        Task<BetterGiSourceSettings?> Find(Guid id) =>
+            BetterGiSourceSettings.FindAccountProfileAsync(fixture.Root, id, fixture.Probe, LockPath(fixture), _ => true);
+        Task<BetterGiSourceSettings> Connect(Guid id, BetterGiAccountPlan plan) =>
+            BetterGiSourceSettings.ConnectAccountProfileAsync(fixture.Root, id, plan, fixture.Probe, LockPath(fixture), _ => true);
+    }
+
+    [Fact]
+    public async Task ConnectRefusesToReplaceAnUnrelatedFileOrWriteWhileEngineIsRunning()
+    {
+        await using var fixture = new BetterGiFixture();
+        var original = await Bind(fixture, """{"Name":"默认配置"}""");
+        var id = Guid.NewGuid();
+        var path = Path.Combine(Path.GetDirectoryName(original.ProfilePath)!, $"VIvian {id:N}.json");
+        const string conflicting = """{"Name":"别的配置","CompletionAction":"关机"}""";
+        File.WriteAllText(path, conflicting);
+        var plan = BetterGiAccountPlans.Compile(new Dictionary<string, string>());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() =>
+            BetterGiSourceSettings.ConnectAccountProfileAsync(fixture.Root, id, plan, fixture.Probe, LockPath(fixture), _ => true));
+        Assert.Equal(conflicting, File.ReadAllText(path));
+        fixture.Probe.Running = 1;
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            BetterGiSourceSettings.ConnectAccountProfileAsync(fixture.Root, Guid.NewGuid(), plan, fixture.Probe, LockPath(fixture), _ => true));
+        Assert.Equal(3, Directory.GetFiles(Path.GetDirectoryName(path)!, "*.json").Length);
+    }
+
+    [Fact]
     public async Task LegacyProfileRoundTripsExistingFieldsWithoutTouchingOtherFiles()
     {
         await using var fixture = new BetterGiFixture();

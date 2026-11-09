@@ -28,6 +28,7 @@ public sealed class BetterGiSourceSettingsConflictException(string path, string?
 /// <summary>Edits registered fields in an explicitly selected existing BetterGI 0.66.0 source profile.</summary>
 public sealed class BetterGiSourceSettings
 {
+    private const int MaxProfiles = 256;
     private const string CurrentParty = "当前队伍";
     private const string NoDomain = "未设置";
     private const string DomainGroup = "autoDomainConfig";
@@ -83,19 +84,95 @@ public sealed class BetterGiSourceSettings
     public static Task<BetterGiSourceSettings> BindAsync(string installRoot, string profileName, CancellationToken ct = default) =>
         BindAsync(installRoot, profileName, new BetterGiProcessProbe(), DesktopOperationLease.LockPath, IsPinnedVersion, ct);
 
+    public static Task<BetterGiSourceSettings?> FindAccountProfileAsync(string installRoot, Guid accountId,
+        CancellationToken ct = default) =>
+        FindAccountProfileAsync(installRoot, accountId, new BetterGiProcessProbe(), DesktopOperationLease.LockPath, IsPinnedVersion, ct);
+
+    public static Task<BetterGiSourceSettings> ConnectAccountProfileAsync(string installRoot, Guid accountId,
+        IReadOnlyDictionary<string, string> savedSettings, CancellationToken ct = default) =>
+        ConnectAccountProfileAsync(installRoot, accountId, BetterGiAccountPlans.Compile(savedSettings),
+            new BetterGiProcessProbe(), DesktopOperationLease.LockPath, IsPinnedVersion, ct);
+
     internal static Task<BetterGiSourceSettings> BindAsync(string installRoot, string profileName,
         IBetterGiProcessProbe processes, string lockPath, Func<string, bool> supportsVersion, CancellationToken ct = default)
     {
-        if (!Path.IsPathFullyQualified(installRoot) || BetterGiArguments.ValidateName(profileName) is not null)
-            throw new ArgumentException("需要 BetterGI 安装绝对路径及明确的一条龙配置名称。");
-        var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(installRoot));
-        var binding = new BetterGiSourceSettings(root, profileName, processes, lockPath, supportsVersion);
+        var binding = CreateBinding(installRoot, profileName, processes, lockPath, supportsVersion);
         return ReadOnlyFileAccess.BoundedAsync(() =>
         {
             binding.EnsureVersion();
             binding.ResolveProfile(ct);
             return binding;
         }, ReadOnlyFileAccess.QueryTimeout, ct);
+    }
+
+    internal static Task<BetterGiSourceSettings?> FindAccountProfileAsync(string installRoot, Guid accountId,
+        IBetterGiProcessProbe processes, string lockPath, Func<string, bool> supportsVersion, CancellationToken ct = default)
+    {
+        var binding = CreateBinding(installRoot, BetterGiAccountPlan.SourceProfileName(accountId), processes, lockPath, supportsVersion);
+        return ReadOnlyFileAccess.BoundedAsync(() =>
+        {
+            binding.EnsureVersion();
+            return binding.FindProfile(ct) is null ? null : binding;
+        }, ReadOnlyFileAccess.QueryTimeout, ct);
+    }
+
+    internal static Task<BetterGiSourceSettings> ConnectAccountProfileAsync(string installRoot, Guid accountId,
+        BetterGiAccountPlan savedPlan, IBetterGiProcessProbe processes, string lockPath, Func<string, bool> supportsVersion,
+        CancellationToken ct = default)
+    {
+        var binding = CreateBinding(installRoot, BetterGiAccountPlan.SourceProfileName(accountId), processes, lockPath, supportsVersion);
+        return Task.Run(() =>
+        {
+            binding.CreateAccountProfile(accountId, savedPlan, ct);
+            return binding;
+        }, ct);
+    }
+
+    private static BetterGiSourceSettings CreateBinding(string installRoot, string profileName,
+        IBetterGiProcessProbe processes, string lockPath, Func<string, bool> supportsVersion)
+    {
+        if (!Path.IsPathFullyQualified(installRoot) || BetterGiArguments.ValidateName(profileName) is not null)
+            throw new ArgumentException("需要 BetterGI 安装绝对路径及明确的一条龙配置名称。");
+        return new(Path.TrimEndingDirectorySeparator(Path.GetFullPath(installRoot)), profileName, processes, lockPath, supportsVersion);
+    }
+
+    private void CreateAccountProfile(Guid accountId, BetterGiAccountPlan savedPlan, CancellationToken ct)
+    {
+        if (new DriveInfo(Path.GetPathRoot(InstallRoot)!).DriveType != DriveType.Fixed)
+            throw new InvalidOperationException("BetterGI 档案只支持本地固定磁盘。");
+        using var lease = DesktopOperationLease.AcquireAt(_lockPath, InstallRoot, requireExisting: true);
+        EnsureVersion();
+        var shared = ReadSource(SharedConfigPath);
+        if (FindProfile(ct) is { } existing)
+        {
+            _ = Snapshot(existing, shared);
+            return;
+        }
+        EnsureIdle();
+        var bytes = Encoding.UTF8.GetBytes(savedPlan.RenderSourceProfile(accountId));
+        _ = Snapshot(Parse(bytes), shared);
+        var folder = Path.GetDirectoryName(ProfilePath)!;
+        if (Directory.EnumerateFiles(folder, "*.json").Take(MaxProfiles).Count() == MaxProfiles)
+            throw new InvalidDataException("BetterGI 一条龙档案已达到可核对的数量上限。");
+
+        var staged = Path.Combine(folder, ".vivian-connect-" + Guid.NewGuid().ToString("N") + ".tmp");
+        try
+        {
+            using (var stream = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(bytes);
+                stream.Flush(flushToDisk: true);
+            }
+            ct.ThrowIfCancellationRequested();
+            EnsureIdle();
+            if (FindProfile(ct) is null)
+                File.Move(staged, ProfilePath, overwrite: false);
+            _ = Snapshot(ResolveProfile(ct), shared);
+        }
+        finally
+        {
+            File.Delete(staged);
+        }
     }
 
     public Task<BetterGiSourceSettingsSnapshot> ReadAsync(CancellationToken ct = default) =>
@@ -258,7 +335,10 @@ public sealed class BetterGiSourceSettings
                 && BetterGiContract.PinnedCommit.StartsWith(revision, StringComparison.Ordinal));
     }
 
-    private SourceFile ResolveProfile(CancellationToken ct)
+    private SourceFile ResolveProfile(CancellationToken ct) => FindProfile(ct)
+        ?? throw new InvalidDataException("BetterGI 找不到明确绑定的一条龙配置。");
+
+    private SourceFile? FindProfile(CancellationToken ct)
     {
         var folder = Path.GetDirectoryName(ProfilePath)!;
         if (ReadOnlyFileAccess.FindReparsePoint(folder) is not null)
@@ -268,16 +348,18 @@ public sealed class BetterGiSourceSettings
         foreach (var path in Directory.EnumerateFiles(folder, "*.json"))
         {
             ct.ThrowIfCancellationRequested();
-            if (++count > 256)
+            if (++count > MaxProfiles)
                 throw new InvalidDataException("BetterGI 一条龙配置超过 256 份，无法确认目标唯一。");
             var source = ReadSource(path);
-            if (StringMember(source.Json, "Name") != ProfileName) continue;
-            if (match is not null || !string.Equals(path, ProfilePath,
-                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            var samePath = string.Equals(path, ProfilePath,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+            var sameName = StringMember(source.Json, "Name") == ProfileName;
+            if (!samePath && !sameName) continue;
+            if (match is not null || !samePath || !sameName)
                 throw new InvalidDataException("BetterGI 一条龙配置名称不唯一，或与文件名不一致。");
             match = source;
         }
-        return match ?? throw new InvalidDataException("BetterGI 找不到明确绑定的一条龙配置。");
+        return match;
     }
 
     private static BetterGiSourceSettingsSnapshot Snapshot(SourceFile profile, SourceFile global)

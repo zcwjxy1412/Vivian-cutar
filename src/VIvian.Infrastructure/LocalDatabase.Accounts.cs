@@ -11,7 +11,7 @@ public sealed record GameAccount(Guid Id, GameId Game, string Name, string Regio
 public sealed record AccountSettingsSnapshot(Guid AccountId, IReadOnlyDictionary<string, string> Values, long Revision);
 public sealed record AccountTaskPlan(Guid AccountId, bool DailyEnabled, long Revision);
 public sealed record AccountBatch(Guid Id, GameId Game, DateTimeOffset StartedAt, DateTimeOffset UpdatedAt,
-    string State, Guid? CurrentAccountId, string Detail);
+    string State, Guid? CurrentAccountId, string Detail, string Mode = "unified");
 public sealed record AccountExecutionRecord(Guid Id, Guid BatchId, string AccountName, Guid? RunId,
     DateTimeOffset At, string Result, string Detail);
 
@@ -214,10 +214,11 @@ public sealed partial class LocalDatabase
         return settings with { Revision = settings.Revision + 1 };
     }
 
-    public async Task<AccountBatch> BeginBatchAsync(GameId game, CancellationToken ct = default)
+    public async Task<AccountBatch> BeginBatchAsync(GameId game, string mode = "unified", CancellationToken ct = default)
     {
+        if (mode is not ("unified" or "independent")) throw new ArgumentOutOfRangeException(nameof(mode));
         var now = DateTimeOffset.UtcNow;
-        var batch = new AccountBatch(Guid.NewGuid(), game, now, now, "running", null, "等待账号登录核对");
+        var batch = new AccountBatch(Guid.NewGuid(), game, now, now, "running", null, "等待账号登录", mode);
         await SaveBatchAsync(batch, ct);
         return batch;
     }
@@ -226,7 +227,7 @@ public sealed partial class LocalDatabase
     {
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "INSERT INTO batch_execution_records(id,game,started_at,updated_at,state,current_account_id,detail) VALUES($id,$game,$start,$update,$state,$account,$detail) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,state=excluded.state,current_account_id=excluded.current_account_id,detail=excluded.detail;";
+        cmd.CommandText = "INSERT INTO batch_execution_records(id,game,started_at,updated_at,state,current_account_id,detail,mode) VALUES($id,$game,$start,$update,$state,$account,$detail,$mode) ON CONFLICT(id) DO UPDATE SET updated_at=excluded.updated_at,state=excluded.state,current_account_id=excluded.current_account_id,detail=excluded.detail,mode=excluded.mode;";
         cmd.Parameters.AddWithValue("$id", batch.Id.ToString("D"));
         cmd.Parameters.AddWithValue("$game", (int)batch.Game);
         cmd.Parameters.AddWithValue("$start", batch.StartedAt.ToString("O"));
@@ -234,6 +235,7 @@ public sealed partial class LocalDatabase
         cmd.Parameters.AddWithValue("$state", batch.State);
         cmd.Parameters.AddWithValue("$account", batch.CurrentAccountId is null ? DBNull.Value : (object)DatabaseId(batch.CurrentAccountId.Value));
         cmd.Parameters.AddWithValue("$detail", batch.Detail);
+        cmd.Parameters.AddWithValue("$mode", batch.Mode);
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
@@ -261,7 +263,7 @@ public sealed partial class LocalDatabase
         if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
         await using var c = await OpenAsync(ct);
         using var cmd = c.CreateCommand();
-        cmd.CommandText = "SELECT id,game,started_at,updated_at,state,current_account_id,detail FROM batch_execution_records ORDER BY started_at DESC LIMIT $limit;";
+        cmd.CommandText = "SELECT id,game,started_at,updated_at,state,current_account_id,detail,mode FROM batch_execution_records ORDER BY started_at DESC LIMIT $limit;";
         cmd.Parameters.AddWithValue("$limit", limit);
         var result = new List<AccountBatch>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -273,7 +275,7 @@ public sealed partial class LocalDatabase
                     "legacy-star-rail" => LegacyId(GameId.StarRail), "legacy-zenless" => LegacyId(GameId.ZenlessZoneZero), _ => null };
             result.Add(new(Guid.Parse(reader.GetString(0)), (GameId)reader.GetInt32(1),
                 DateTimeOffset.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
-                reader.GetString(4), accountId, reader.GetString(6)));
+                reader.GetString(4), accountId, reader.GetString(6), reader.GetString(7)));
         }
         return result;
     }
@@ -331,4 +333,106 @@ public sealed partial class LocalDatabase
         if (path.Length > 512 || path.Contains('\0') || (path.Length > 0 && !Path.IsPathFullyQualified(path.Trim())))
             throw new ArgumentException("账号专属安装目录须为有效的绝对路径。");
     }
+
+    public sealed record AccountLoginProfile(Guid AccountId, string MaskedPhone, string NormalizedPhone,
+        int RowOrder, double Confidence, string? ObservedUid, DateTimeOffset LastScanAt, string Detail);
+    public sealed record AccountScanSession(Guid Id, GameId Game, string Source, int WindowWidth,
+        int WindowHeight, int AccountCount, string Detail, DateTimeOffset CreatedAt);
+
+    public async Task<IReadOnlyList<AccountLoginProfile>> LoadLoginProfilesAsync(GameId? game = null,
+        CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT p.account_id,p.masked_phone,p.normalized_phone,p.row_order,p.confidence,p.observed_uid,p.last_scan_at,p.detail FROM account_login_profiles p JOIN game_accounts a ON a.account_id=p.account_id WHERE ($game IS NULL OR a.game=$game) ORDER BY a.game,p.row_order,p.account_id;";
+        cmd.Parameters.AddWithValue("$game", game is null ? DBNull.Value : (object)(int)game);
+        var result = new List<AccountLoginProfile>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var idText = reader.GetString(0);
+            var id = Guid.TryParse(idText, out var parsed) ? parsed
+                : idText switch { "legacy-genshin" => LegacyId(GameId.Genshin),
+                    "legacy-star-rail" => LegacyId(GameId.StarRail),
+                    "legacy-zenless" => LegacyId(GameId.ZenlessZoneZero), _ => Guid.Empty };
+            if (id == Guid.Empty) continue;
+            result.Add(new(id, reader.GetString(1), reader.GetString(2), reader.GetInt32(3), reader.GetDouble(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5), DateTimeOffset.Parse(reader.GetString(6)),
+                reader.GetString(7)));
+        }
+        return result;
+    }
+
+    public async Task SaveLoginProfileAsync(Guid accountId, string maskedPhone, string normalizedPhone,
+        int rowOrder, double confidence, string? observedUid, string detail, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(maskedPhone) || string.IsNullOrWhiteSpace(normalizedPhone))
+            throw new ArgumentException("脱敏手机号不能为空。");
+        if (rowOrder < 0) throw new ArgumentOutOfRangeException(nameof(rowOrder));
+        await using var c = await OpenAsync(ct);
+        using var tx = c.BeginTransaction();
+        using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "INSERT INTO account_login_profiles(account_id,masked_phone,normalized_phone,row_order,confidence,observed_uid,last_scan_at,detail) VALUES($account,$masked,$normalized,$row,$confidence,$uid,$at,$detail) ON CONFLICT(account_id) DO UPDATE SET masked_phone=excluded.masked_phone,normalized_phone=excluded.normalized_phone,row_order=excluded.row_order,confidence=excluded.confidence,observed_uid=COALESCE(excluded.observed_uid,account_login_profiles.observed_uid),last_scan_at=excluded.last_scan_at,detail=excluded.detail; UPDATE game_accounts SET login_state='recognized',verification_state=CASE WHEN $uid IS NULL THEN verification_state ELSE 'uid_observed' END,revision=revision+1 WHERE account_id=$account;";
+        cmd.Parameters.AddWithValue("$account", DatabaseId(accountId));
+        cmd.Parameters.AddWithValue("$masked", maskedPhone.Trim());
+        cmd.Parameters.AddWithValue("$normalized", normalizedPhone.Trim());
+        cmd.Parameters.AddWithValue("$row", rowOrder);
+        cmd.Parameters.AddWithValue("$confidence", confidence);
+        cmd.Parameters.AddWithValue("$uid", observedUid is null ? DBNull.Value : (object)observedUid);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.AddWithValue("$detail", detail);
+        await cmd.ExecuteNonQueryAsync(ct);
+        tx.Commit();
+    }
+
+    public async Task SaveObservedUidAsync(Guid accountId, string uid, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(uid) || uid.Length > 40) throw new ArgumentException("UID 格式无效。");
+        await using var c = await OpenAsync(ct);
+        using var tx = c.BeginTransaction();
+        using var cmd = c.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE account_login_profiles SET observed_uid=$uid,last_scan_at=$at WHERE account_id=$account; UPDATE game_accounts SET verification_state='uid_observed',revision=revision+1 WHERE account_id=$account;";
+        cmd.Parameters.AddWithValue("$uid", uid.Trim());
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        cmd.Parameters.AddWithValue("$account", DatabaseId(accountId));
+        await cmd.ExecuteNonQueryAsync(ct);
+        tx.Commit();
+    }
+
+    public async Task RecordScanSessionAsync(GameId game, string source, int width, int height, int count,
+        string detail, CancellationToken ct = default)
+    {
+        await using var c = await OpenAsync(ct);
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "INSERT INTO account_scan_sessions(id,game,source,window_width,window_height,account_count,detail,created_at) VALUES($id,$game,$source,$w,$h,$count,$detail,$at);";
+        cmd.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("D"));
+        cmd.Parameters.AddWithValue("$game", (int)game);
+        cmd.Parameters.AddWithValue("$source", source);
+        cmd.Parameters.AddWithValue("$w", width);
+        cmd.Parameters.AddWithValue("$h", height);
+        cmd.Parameters.AddWithValue("$count", count);
+        cmd.Parameters.AddWithValue("$detail", detail);
+        cmd.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<AccountScanSession>> LoadScanSessionsAsync(int limit = 20,
+        CancellationToken ct = default)
+    {
+        if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
+        await using var c = await OpenAsync(ct);
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,game,source,window_width,window_height,account_count,detail,created_at FROM account_scan_sessions ORDER BY created_at DESC LIMIT $limit;";
+        cmd.Parameters.AddWithValue("$limit", limit);
+        var result = new List<AccountScanSession>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            result.Add(new(Guid.Parse(reader.GetString(0)), (GameId)reader.GetInt32(1), reader.GetString(2),
+                reader.GetInt32(3), reader.GetInt32(4), reader.GetInt32(5), reader.GetString(6),
+                DateTimeOffset.Parse(reader.GetString(7))));
+        return result;
+    }
+
 }

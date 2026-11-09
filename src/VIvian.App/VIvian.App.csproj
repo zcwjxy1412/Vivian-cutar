@@ -1,9 +1,13 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 <PropertyGroup>
-<TargetFramework>net10.0-windows</TargetFramework>
+<TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
 <OutputType>WinExe</OutputType><UseWPF>true</UseWPF>
 <EnableWindowsTargeting>true</EnableWindowsTargeting>
 <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- M5 real-execution builds ask for administrator rights once, when VIvian is opened. Star Rail and
+         March7thAssistant run elevated; an elevated VIvian lets a whole multi-account batch run without a UAC
+         prompt per account. Development builds stay asInvoker. -->
+    <ApplicationManifest Condition="'$(M5DailyTestBuild)' == 'true'">app.admin.manifest</ApplicationManifest>
 <AssemblyName>VIvian</AssemblyName><Version>0.4.0</Version><InformationalVersion>0.4.0-dev</InformationalVersion>
 </PropertyGroup>
 <ItemGroup>

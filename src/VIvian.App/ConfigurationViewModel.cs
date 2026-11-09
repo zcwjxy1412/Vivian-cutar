@@ -131,23 +131,26 @@ public sealed class ConfigurationViewModel : ObservableObject, IDisposable
         var path = _installPath(_game);
         if (string.IsNullOrWhiteSpace(path)) { Status = "请先在“引擎与环境”填写安装目录。"; return; }
         var snapshot = _control.ReadConfiguration(_game, path);
-        _upstreamSnapshot = snapshot;
-        _accountSettings = null;
+        var upstream = snapshot;
+        AccountSettingsSnapshot? accountSettings = null;
         if (_game == GameId.StarRail && _selectedAccount() is { } account)
         {
-            _accountSettings = await _accounts.LoadAccountSettingsAsync(account.Id);
+            accountSettings = await _accounts.LoadAccountSettingsAsync(account.Id);
+            if (_selectedAccount()?.Id != selectedId) return;
             if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002"))
             {
-                if (_accountSettings.Values.Count == 0)
+                if (accountSettings.Values.Count == 0)
                 {
                     var initial = snapshot.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
                         .ToDictionary(v => v.Schema.Path, v => v.Value!);
-                    _accountSettings = await _accounts.SaveAccountSettingsAsync(_accountSettings with { Values = initial });
+                    accountSettings = await _accounts.SaveAccountSettingsAsync(accountSettings with { Values = initial });
                 }
-                snapshot = OverlayAccount(snapshot, _accountSettings);
+                snapshot = OverlayAccount(snapshot, accountSettings);
             }
         }
         if (_selectedAccount()?.Id != selectedId) return;
+        _upstreamSnapshot = upstream;
+        _accountSettings = accountSettings;
         _snapshot = snapshot;
         Show(snapshot, null);
         Status = _accountSettings is not null && _selectedAccount()?.Id != Guid.Parse("00000000-0000-4000-8000-000000000002")

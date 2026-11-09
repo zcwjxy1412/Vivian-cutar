@@ -15,12 +15,20 @@ public partial class MainWindow : Window
         // its final state before the window really closes.
         Closing += async (_, e) =>
         {
-            if (_closeAfterStop || !viewModel.Queue.IsRunning) return;
+            if (_closeAfterStop || !viewModel.CanStopAll) return;
             e.Cancel = true;
             if (_stopping) return; // a second close click while the stop is in progress
             _stopping = true;
-            try { await viewModel.Queue.StopForShutdownAsync(ShutdownStopTimeout); }
+            try
+            {
+                if (viewModel.BatchRunning)
+                {
+                    if (!await viewModel.WaitForBatchShutdownAsync(ShutdownStopTimeout)) return;
+                }
+                else await viewModel.Queue.StopForShutdownAsync(ShutdownStopTimeout);
+            }
             catch (Exception ex) { Serilog.Log.Error("Shutdown stop failed: {ErrorType}", ex.GetType().Name); }
+            finally { _stopping = false; }
             _closeAfterStop = true;
             Close();
         };
@@ -29,20 +37,24 @@ public partial class MainWindow : Window
         {
             _hotkey = new StopHotkey(this, () =>
             {
-                if (!viewModel.Queue.IsRunning) return;
+                if (!viewModel.CanStopAll) return;
                 Serilog.Log.Information("Emergency stop requested by F10");
-                viewModel.Queue.EmergencyStop();
+                viewModel.StopAll();
             });
-            viewModel.Queue.PropertyChanged += (_, e) =>
+            // Held for a single run and for a whole multi-account batch (including the switching between accounts).
+            void Update()
             {
-                if (e.PropertyName != nameof(QueueViewModel.IsRunning) || _hotkey is null) return;
-                if (!viewModel.Queue.IsRunning) { _hotkey.Unregister(); return; }
+                if (_hotkey is null) return;
+                if (!viewModel.CanStopAll) { _hotkey.Unregister(); return; }
+                if (_hotkey.IsRegistered) return;
                 if (!_hotkey.Register())
                     Serilog.Log.Warning("F10 stop key unavailable: owned by another program");
                 viewModel.StopKeyText = _hotkey.IsRegistered
                     ? "游戏全屏时也可以按 F10 立即停止。"
                     : "F10 已被其他程序占用（例如星铁助手窗口开着），请用 VIvian 里的“紧急停止”按钮。";
-            };
+            }
+            viewModel.Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Update(); };
+            viewModel.BatchRunningChanged += () => Dispatcher.BeginInvoke(Update);
         };
         Closed += (_, _) => _hotkey?.Dispose();
     }

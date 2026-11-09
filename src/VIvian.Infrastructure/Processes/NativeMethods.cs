@@ -151,6 +151,9 @@ internal static class NativeMethods
     public static extern uint ResumeThread(IntPtr hThread);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern SafeProcessHandle OpenProcess(uint access, bool inherit, int processId);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool TerminateProcess(SafeProcessHandle hProcess, uint exitCode);
 

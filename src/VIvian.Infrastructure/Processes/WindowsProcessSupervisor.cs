@@ -34,6 +34,128 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
         { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
     }
 
+    /// <summary>Starts a user-facing game through the shell and returns its process, if the shell exposes one.</summary>
+    public static System.Diagnostics.Process? StartUserProcess(string fileName, string workingDirectory)
+    {
+        if (!Path.IsPathFullyQualified(fileName) || !File.Exists(fileName)) return null;
+        return System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fileName)
+        {
+            UseShellExecute = true,
+            WorkingDirectory = workingDirectory,
+        });
+    }
+
+    /// <summary>
+    /// Starts the headless input host with the UAC prompt. The host is VIvian's own executable; it is not placed in
+    /// the engine job because it must outlive a single engine run and only performs validated window input.
+    /// </summary>
+    public static System.Diagnostics.Process StartElevatedProcess(string fileName, string arguments, string workingDirectory)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo(fileName, arguments)
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden,
+            WorkingDirectory = workingDirectory,
+        };
+        return System.Diagnostics.Process.Start(info)
+            ?? throw new System.ComponentModel.Win32Exception("StartProcess returned no process.");
+    }
+
+    /// <summary>True when VIvian itself runs with an elevated (administrator) token.</summary>
+    public static bool IsCurrentProcessElevated()
+    {
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Starts VIvian's own input host as a direct child of an already elevated VIvian: it inherits the token the user
+    /// approved when VIvian was opened, so no further UAC prompt is involved.
+    /// </summary>
+    public static System.Diagnostics.Process StartInheritedProcess(string fileName, string arguments, string workingDirectory) =>
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(fileName, arguments)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = workingDirectory,
+        }) ?? throw new System.ComponentModel.Win32Exception("StartProcess returned no process.");
+
+    /// <summary>Terminates only the exact process handle VIvian started, never a process found by name.</summary>
+    public static bool TerminateOwnedProcess(System.Diagnostics.Process process)
+    {
+        try
+        {
+            if (process.HasExited) return true;
+            TerminateProcess(process.SafeHandle, 1);
+            return process.WaitForExit(5000);
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Terminates a Star Rail process after checking both its image name and executable file name. Used by the
+    /// elevated input host, which can reach an already-running game that the medium-integrity VIvian cannot.
+    /// </summary>
+    public static bool TerminateStarRail(int processId, out string detail) =>
+        TerminateStarRail(processId, 0, out detail);
+
+    /// <summary>
+    /// As above, and when <paramref name="expectedStartUtcTicks"/> is known the process start time must match it,
+    /// so a recycled PID belonging to a later process is refused rather than terminated.
+    /// </summary>
+    public static bool TerminateStarRail(int processId, long expectedStartUtcTicks, out string detail)
+    {
+        detail = "";
+        try
+        {
+            using var process = System.Diagnostics.Process.GetProcessById(processId);
+            if (!string.Equals(process.ProcessName, "StarRail", StringComparison.OrdinalIgnoreCase))
+            {
+                detail = "拒绝结束非星铁进程。";
+                return false;
+            }
+            if (expectedStartUtcTicks != 0)
+            {
+                long actual;
+                try { actual = process.StartTime.ToUniversalTime().Ticks; }
+                catch (Exception) { detail = "无法读取星铁进程启动时间，无法证明进程身份，拒绝结束。"; return false; }
+                if (actual != expectedStartUtcTicks)
+                {
+                    detail = "进程号已被另一个星铁进程复用（启动时间不一致），拒绝结束。";
+                    return false;
+                }
+            }
+            // Process.MainModule can itself fail with access denied; open an explicit handle with
+            // PROCESS_TERMINATE through the elevated host instead of using the limited query handle.
+            using var handle = NativeMethods.OpenProcess(0x0001, false, processId);
+            if (handle.IsInvalid)
+            {
+                detail = "无法打开星铁进程（Win32 " + Marshal.GetLastWin32Error() + "）。";
+                return false;
+            }
+            if (!NativeMethods.TerminateProcess(handle, 1))
+            {
+                detail = "无法结束星铁进程（Win32 " + Marshal.GetLastWin32Error() + "）。";
+                return false;
+            }
+            if (!process.WaitForExit(8000))
+            {
+                detail = "星铁进程在 8 秒内未退出。";
+                return false;
+            }
+            detail = "killed";
+            return true;
+        }
+        catch (ArgumentException) { detail = "already-exited"; return true; }
+        catch (Exception ex) { detail = "无法结束星铁进程：" + ex.Message; return false; }
+    }
+
     // Keep our launches serialized while inheritable pipe ends exist in this process.
     private static readonly Lock LaunchLock = new();
 

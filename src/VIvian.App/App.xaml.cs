@@ -10,6 +10,7 @@ using VIvian.Infrastructure;
 using VIvian.Infrastructure.Simulation;
 using VIvian.Infrastructure.Processes;
 using VIvian.Infrastructure.Diagnostics;
+using VIvian.Infrastructure.Accounts;
 
 namespace VIvian.App;
 
@@ -20,9 +21,23 @@ public partial class App : Application
     private WindowActivation? _activation;
     private bool _smoke;
     private bool _startupCheck;
+    private string _stage = "初始化";
+    private string? _dataRoot;
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} OnStartup args={string.Join('|', e.Args)}\n"); } catch { }
+        // The elevated input host is a hidden second instance of this same executable. It must be handled before
+        // single-instance, database, logging or any window exists, and it owns no user data.
+        var hostIndex = Array.IndexOf(e.Args, InputHostProtocol.Argument);
+        if (hostIndex >= 0)
+        {
+            var pipeName = hostIndex + 1 < e.Args.Length ? e.Args[hostIndex + 1] : string.Empty;
+            try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} entering host pipe={pipeName}\n"); } catch { }
+            var exitCode = InputHostServer.Run(pipeName);
+            Shutdown(exitCode);
+            return;
+        }
         _smoke = e.Args.Contains("--smoke-test");
         _startupCheck = e.Args.Contains("--startup-check");
         DispatcherUnhandledException += (_, args) =>
@@ -30,7 +45,9 @@ public partial class App : Application
             Log.Fatal("Unhandled UI error: {ErrorType}; {Stack}", args.Exception.GetType().Name,
                 Redactor.ForCurrentUser().Redact(args.Exception.ToString()));
             args.Handled = true;
-            if (!_smoke) MessageBox.Show("程序遇到未处理错误，将退出。请查看本地日志。", "VIvian");
+            var crash = StartupDiagnostics.Write(args.Exception, _dataRoot, "运行中未处理错误（" + _stage + "）");
+            if (!_smoke) MessageBox.Show("程序遇到未处理错误，将退出。\n\n" + StartupDiagnostics.Explain(args.Exception) +
+                (crash is null ? "" : "\n\n诊断报告：" + crash), "VIvian");
             Shutdown(1);
         };
         try
@@ -60,23 +77,37 @@ public partial class App : Application
                     : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M4-ManualTest"
                     : screenTest ? "VIvian-M4A-ScreenTest-R3" : threeEnginePreview ? "VIvian-M4-ThreeEngine-Preview"
                     : preview ? "VIvian-M4A-Preview" : "VIvian");
+            _dataRoot = root;
+            _stage = "创建数据目录";
             Directory.CreateDirectory(root);
             // Smoke runs must never write into the user's screenshot-feedback folder.
             if (_smoke) Environment.SetEnvironmentVariable("VIVIAN_FEEDBACK_DIR", Path.Combine(root, "no-feedback-folder"));
             // One instance per data directory, decided before the database or logs are touched.
+            _stage = "单实例检查";
             _instance = SingleInstanceGuard.Acquire(root);
             if (!_instance.IsOwner)
             {
-                // A second launch brings the open window to the front instead of only saying it is open.
-                if (!_smoke && _instance.Result != InstanceLockResult.AccessDenied && WindowActivation.SignalExisting(root))
+                // A second launch brings the open window to the front instead of only saying it is open. If the lock
+                // holder never shows a window (hung, windowless, or left over from a test), say so instead of
+                // exiting silently, which looks exactly like "VIvian does not open".
+                var signal = _smoke || _instance.Result == InstanceLockResult.AccessDenied
+                    ? WindowActivation.SignalResult.NoListener
+                    : WindowActivation.SignalAndWait(root, TimeSpan.FromSeconds(4));
+                if (signal == WindowActivation.SignalResult.Shown)
                 {
                     Shutdown(2);
                     return;
                 }
                 if (!_smoke)
                     MessageBox.Show(_instance.Result == InstanceLockResult.AccessDenied
-                        ? "检测到另一个 VIvian 实例（可能以其他用户或管理员身份运行），无法确认它的状态。为避免冲突，本窗口不会启动。"
-                        : "VIvian 已经在运行，请切换到已打开的窗口。", "VIvian");
+                        ? "另一个 VIvian 进程正在使用同一数据目录，而且它以管理员或其他用户身份运行（例如之前测试遗留的进程）。\n" +
+                          "为避免冲突，本窗口不会启动，也不会替你结束那个进程。\n\n" +
+                          "处理方法：打开任务管理器 →“详细信息”→ 结束名为 VIvian.exe 的进程（或重启电脑），然后再打开 VIvian。"
+                        : signal == WindowActivation.SignalResult.NoResponse
+                        ? "另一个 VIvian 进程占用了数据目录，但没有显示窗口也没有响应（可能已卡住或是遗留进程）。\n" +
+                          "本窗口不会启动，也不会替你结束它。\n\n" +
+                          "处理方法：打开任务管理器 →“详细信息”→ 结束名为 VIvian.exe 的进程，然后再打开 VIvian。"
+                        : "VIvian 已经在运行（可能还在启动中），请稍等片刻后切换到已打开的窗口。", "VIvian");
                 Shutdown(_instance.Result == InstanceLockResult.AccessDenied ? 3 : 2);
                 return;
             }
@@ -85,6 +116,7 @@ public partial class App : Application
                     retainedFileCountLimit: 14, fileSizeLimitBytes: 5_000_000, rollOnFileSizeLimit: true).CreateLogger();
             if (_instance.Result == InstanceLockResult.AcquiredAfterAbandoned)
                 Log.Warning("Previous instance exited without releasing the instance lock");
+            _stage = "打开数据库";
             var database = new LocalDatabase(Path.Combine(root, "vivian.db"));
             _host = Host.CreateDefaultBuilder().UseSerilog().ConfigureServices(services =>
             {
@@ -108,6 +140,33 @@ public partial class App : Application
                     admitReal: adapter =>
                         RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
+                services.AddSingleton<LoginScreenReader>();
+                services.AddSingleton<AccountRecognitionService>();
+                // One host object serves input and the per-batch UAC session, so a batch prompts at most once.
+                services.AddSingleton<ElevatedInputHost>();
+                services.AddSingleton<IInputHost>(sp => sp.GetRequiredService<ElevatedInputHost>());
+                services.AddSingleton<IInputHostSession>(sp => sp.GetRequiredService<ElevatedInputHost>());
+                services.AddSingleton<IGameSessionVerifier, StarRailSessionVerifier>();
+                services.AddSingleton<GamePathProvider>();
+                services.AddSingleton<ILoginSwitchDriver>(sp => new StarRailLoginDriver(
+                    sp.GetRequiredService<LoginScreenReader>(), sp.GetRequiredService<IGameSessionVerifier>(),
+                    sp.GetRequiredService<IInputHost>(), sp.GetRequiredService<GamePathProvider>().Get,
+                    message => Log.Information("Login driver: {Message}", message),
+                    prepareLaunch: () => StarRailResolution.Apply(message => Log.Information("Login driver: {Message}", message)),
+                    saveEvidence: async (view, name) =>
+                    {
+                        // Kept on this computer only (the frame can show a masked phone number or UID); 30 newest.
+                        var dir = Path.Combine(root, "login-evidence");
+                        Directory.CreateDirectory(dir);
+                        var path = await LoginScreenReader.SaveEvidenceAsync(view, dir,
+                            $"{DateTime.Now:yyyyMMdd-HHmmss}-{name}", CancellationToken.None);
+                        Log.Warning("Login flow stopped; screen saved to {Path}", path);
+                        foreach (var old in new DirectoryInfo(dir).GetFiles("*.json").OrderByDescending(f => f.CreationTimeUtc).Skip(30))
+                            old.Delete();
+                    }));
+                services.AddSingleton(sp => new MultiAccountOrchestrator(sp.GetRequiredService<LocalDatabase>(),
+                    sp.GetRequiredService<ILoginSwitchDriver>(), sp.GetRequiredService<IInputHostSession>()));
+                services.AddSingleton<IScanWindowShield, MainWindowScanShield>();
                 services.AddSingleton<AccountViewModel>();
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
@@ -124,8 +183,19 @@ public partial class App : Application
             var reconciled = await Task.Run(() => database.ReconcileInterruptedRunsAsync(DateTimeOffset.UtcNow));
             if (reconciled.Count > 0)
                 Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
+            _stage = "加载界面数据";
             var vm = _host.Services.GetRequiredService<MainViewModel>();
-            await vm.InitializeAsync(autoPrepare: !_smoke);
+            try
+            {
+                await vm.InitializeAsync(autoPrepare: !_smoke);
+            }
+            catch (Exception ex) when (!_smoke && !DatabaseVersionTooNew.TryRead(ex, out _, out _))
+            {
+                // Engine discovery or a damaged upstream config must not keep VIvian from opening.
+                Log.Error("Initial preparation failed; continuing: {ErrorType}; {Stack}", ex.GetType().Name,
+                    Redactor.ForCurrentUser().Redact(ex.ToString()));
+                StartupDiagnostics.Write(ex, root, "加载界面数据（已跳过，继续启动）");
+            }
             vm.ReportReconciled(reconciled.Count);
             if (_startupCheck)
             {
@@ -134,6 +204,7 @@ public partial class App : Application
                 Shutdown(0);
                 return;
             }
+            _stage = "创建主窗口";
             var window = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = window;
             if (_smoke)
@@ -153,7 +224,7 @@ public partial class App : Application
                             if (second.IsOwner) throw new InvalidOperationException("Second instance was not refused");
                         var queueReport = await SmokeQueueAsync(vm.Queue, database);
                         var engineReport = await SmokeEngineDiscoveryAsync(vm, root);
-                        var tasksReport = await SmokeTasksAndDiagnosticsAsync(vm, database);
+                        var tasksReport = await SmokeAccountWorkflowAsync(window, vm, database);
                         var contrastReport = SaveTabScreenshots(window, root);
                         await File.WriteAllTextAsync(Path.Combine(root, "smoke.ok"),
                             "WPF content rendered; SQLite round-trip passed; second instance refused; " + queueReport + " " + engineReport + " " + tasksReport + " " + contrastReport);
@@ -167,7 +238,9 @@ public partial class App : Application
                     }
                 };
             }
+            _stage = "显示主窗口";
             window.Show();
+            _stage = "运行中";
             if (!_smoke) _activation = WindowActivation.Listen(root, window);
             // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
             Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
@@ -181,9 +254,12 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Error("Startup failed: {ErrorType}; {Stack}", ex.GetType().Name,
+            Log.Error("Startup failed at {Stage}: {ErrorType}; {Stack}", _stage, ex.GetType().Name,
                 Redactor.ForCurrentUser().Redact(ex.ToString()));
-            if (!_smoke) MessageBox.Show("启动失败。请检查数据目录权限、磁盘空间及数据库版本；原数据不会自动删除。", "VIvian");
+            var report = StartupDiagnostics.Write(ex, _dataRoot, _stage);
+            if (!_smoke)
+                MessageBox.Show($"VIvian 启动失败（阶段：{_stage}）。\n\n{StartupDiagnostics.Explain(ex)}\n\n" +
+                    (report is null ? "无法写入诊断报告。" : $"诊断报告：{report}") + "\n原数据不会被删除或修改。", "VIvian");
             Shutdown(1);
         }
     }
@@ -273,27 +349,31 @@ public partial class App : Application
         return "engine readiness: 原神=版本未知, 星铁=待桌面验证, 绝区零=未设置 (read-only fixtures).";
     }
 
-    /// <summary>Smoke check: task plans persist and stay non-executable; a redacted diagnostic bundle is exported.</summary>
-    private static async Task<string> SmokeTasksAndDiagnosticsAsync(MainViewModel vm, LocalDatabase database)
+    private static async Task<string> SmokeAccountWorkflowAsync(Window window, MainViewModel vm, LocalDatabase database)
     {
-        var plan = vm.TaskPlans.Single(p => p.Game == GameId.StarRail);
-        vm.SelectedPlan = plan;
-        plan.Rows[1].Enabled = true;
-        plan.Selected = plan.Rows[1];
-        plan.Move(-1);
-        plan.Selected = null; // no list selection highlight in the screenshots
-        if (!plan.Validation.StartsWith("不能执行", StringComparison.Ordinal))
-            throw new InvalidOperationException("A selected candidate task was shown as executable");
-        await vm.SaveTasksCommandAsync();
-        var stored = (await database.LoadTaskPlansAsync()).Single(p => p.Game == GameId.StarRail);
-        if (stored.Revision != 1 || !stored.Entries[0].Enabled || stored.Entries[0].TaskId != EngineCatalog.March7th.Tasks[1].Id)
-            throw new InvalidOperationException("Task plan was not persisted in order");
+        var tabs = FindTabControl(window) ?? throw new InvalidOperationException("TabControl not found");
+        var headers = tabs.Items.OfType<System.Windows.Controls.TabItem>().Select(t => t.Header as string).ToArray();
+        if (!headers.Contains("账号管理") || !headers.Contains("游戏管理") ||
+            headers.Contains("日常任务") || headers.Contains("任务计划"))
+            throw new InvalidOperationException("Account workflow pages do not match the home-start layout");
+
+        if (RealExecutionPolicy.IsM5DailyTest)
+        {
+            await vm.OneClickAsync();
+            if (!vm.BatchStatus.Contains("勾选", StringComparison.Ordinal) || vm.BatchRunning)
+                throw new InvalidOperationException("Home start did not require selected accounts");
+        }
+
+        var row = vm.Accounts.ConfigurationRow ?? throw new InvalidOperationException("Missing Star Rail configuration account");
+        row.DailyEnabled = false;
+        await vm.Accounts.SaveDailyPlanAsync();
+        if ((await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
+            throw new InvalidOperationException("Game task setting was not saved");
         await vm.ExportDiagnosticsAsync();
         if (vm.LastExportPath is null || !File.Exists(vm.LastExportPath))
             throw new InvalidOperationException("Diagnostic bundle was not exported: " + vm.ExportStatus);
-        return "task plan persisted (non-executable); diagnostic bundle exported.";
+        return "account workflow pages verified; game task setting saved; diagnostic bundle exported.";
     }
-
     /// <summary>Saves a PNG of every tab into the smoke evidence folder, for human visual review of CI builds.</summary>
     private static string SaveTabScreenshots(Window window, string root)
     {

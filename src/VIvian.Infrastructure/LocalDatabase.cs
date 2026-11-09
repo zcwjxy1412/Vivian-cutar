@@ -30,7 +30,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 5;
+    public const int CurrentSchemaVersion = 6;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -113,6 +113,22 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         PRAGMA user_version=5;
         """;
 
+    private const string SchemaV6 = """
+        CREATE TABLE account_login_profiles(
+            account_id TEXT PRIMARY KEY REFERENCES game_accounts(account_id) ON DELETE CASCADE,
+            masked_phone TEXT NOT NULL, normalized_phone TEXT NOT NULL,
+            row_order INTEGER NOT NULL DEFAULT 0 CHECK(row_order>=0),
+            confidence REAL NOT NULL DEFAULT 0,
+            observed_uid TEXT NULL, last_scan_at TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
+        CREATE INDEX ix_account_login_phone ON account_login_profiles(normalized_phone);
+        CREATE TABLE account_scan_sessions(
+            id TEXT PRIMARY KEY, game INTEGER NOT NULL CHECK(game BETWEEN 0 AND 2),
+            source TEXT NOT NULL, window_width INTEGER NOT NULL, window_height INTEGER NOT NULL,
+            account_count INTEGER NOT NULL, detail TEXT NOT NULL, created_at TEXT NOT NULL);
+        ALTER TABLE batch_execution_records ADD COLUMN mode TEXT NOT NULL DEFAULT 'unified';
+        PRAGMA user_version=6;
+        """;
+
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         await using var c = await OpenAsync(ct);
@@ -127,7 +143,8 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         {
             versionCommand.CommandText = "PRAGMA user_version;";
             var oldVersion = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(ct));
-            var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak" : ".pre-m5.1.bak");
+            var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak"
+                : oldVersion == 5 ? ".pre-v6.bak" : ".pre-m5.1.bak");
             if (oldVersion is > 0 and < CurrentSchemaVersion && !File.Exists(backupPath))
             {
                 await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -145,7 +162,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         command.Transaction = tx;
         command.CommandText = "PRAGMA user_version;";
         var version = Convert.ToInt64(await command.ExecuteScalarAsync(ct));
-        if (version > CurrentSchemaVersion) throw new InvalidOperationException("数据库由更新版本创建，当前版本不会覆盖它。");
+        if (version > CurrentSchemaVersion) throw DatabaseVersionTooNew.Create(checked((int)version), CurrentSchemaVersion);
         // Each step upgrades exactly one version inside the same transaction; any failure rolls back everything.
         if (version == 0)
         {
@@ -170,6 +187,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 4)
         {
             command.CommandText = SchemaV5;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 5)
+        {
+            command.CommandText = SchemaV6;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();
@@ -253,5 +275,30 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         var result = new List<DiagnosticRecord>();
         while (await r.ReadAsync(ct)) result.Add(new(r.GetString(0), DateTimeOffset.Parse(r.GetString(1)), r.GetString(2)));
         return result;
+    }
+}
+
+/// <summary>
+/// The data directory was last used by a newer VIvian. The database is left untouched. The exception type stays
+/// <see cref="InvalidOperationException"/> (an existing contract); the versions travel in <see cref="Exception.Data"/>.
+/// </summary>
+public static class DatabaseVersionTooNew
+{
+    public const string FoundKey = "VIvian.DatabaseVersion.Found";
+    public const string SupportedKey = "VIvian.DatabaseVersion.Supported";
+
+    public static InvalidOperationException Create(int found, int supported)
+    {
+        var ex = new InvalidOperationException($"数据库由更新版本创建（v{found}），当前版本只支持到 v{supported}，不会覆盖它。");
+        ex.Data[FoundKey] = found;
+        ex.Data[SupportedKey] = supported;
+        return ex;
+    }
+
+    public static bool TryRead(Exception ex, out int found, out int supported)
+    {
+        found = ex.Data[FoundKey] is int f ? f : 0;
+        supported = ex.Data[SupportedKey] is int s ? s : 0;
+        return found > 0;
     }
 }

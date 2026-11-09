@@ -41,9 +41,7 @@ public static class March7thUpstreamActivity
         IEnumerable<FileInfo> records;
         try
         {
-            records = new DirectoryInfo(runs).EnumerateFiles("*.json")
-                .Where(f => !f.Name.Equals("active.json", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(f => f.LastWriteTimeUtc).Take(MaxRecordsScanned).ToList();
+            records = RecentRecords(runs).ToList();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         { return new(UpstreamActivityState.Unknown, "无法读取星铁助手的运行记录。"); }
@@ -109,25 +107,38 @@ public static class March7thUpstreamActivity
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
     }
 
-    /// <summary>The upstream run that holds the lock for <paramref name="task"/> and started at or after
-    /// <paramref name="since"/> (used when the entry's launch line was not captured).</summary>
-    public static string? ActiveRunStartedSince(string installDirectory, string task, DateTimeOffset since)
+    /// <summary>Finds the live record for the exact process VIvian launched, even without an active lock file.</summary>
+    public static string? ActiveRunOwnedBy(string installDirectory, string task, int pid, DateTimeOffset created)
     {
+        var runs = RunsDirectory(installDirectory);
+        if (!Directory.Exists(runs)) return null;
         try
         {
-            var active = Path.Combine(RunsDirectory(installDirectory), "active.json");
-            if (!File.Exists(active)) return null;
-            using var doc = JsonDocument.Parse(File.ReadAllText(active), new JsonDocumentOptions { MaxDepth = 8 });
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("run_id", out var id) || id.GetString() is not { } runId || !March7thTaskContract.IsRunId(runId)
-                || !root.TryGetProperty("task", out var t) || t.GetString() != task
-                || !root.TryGetProperty("started_at", out var s) || !DateTimeOffset.TryParse(s.GetString(), out var started))
-                return null;
-            return started >= since ? runId : null;
+            if (ReadMatch(Path.Combine(runs, "active.json"), requireRunning: false) is { } locked) return locked;
+            var candidates = RecentRecords(runs).Select(record => ReadMatch(record.FullName, requireRunning: true))
+                .Where(id => id is not null).Take(2).ToArray();
+            return candidates.Length == 1 ? candidates[0] : null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+
+        string? ReadMatch(string path, bool requireRunning)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions { MaxDepth = 16 });
+                var root = doc.RootElement;
+                var id = March7thTaskContract.MatchRootRun(root, task, pid, created);
+                if (!requireRunning || id is null) return id;
+                return Path.GetFileNameWithoutExtension(path) == id && root.TryGetProperty("status", out var status) &&
+                    status.ValueKind == JsonValueKind.String && status.GetString() == "running" ? id : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return null; }
+        }
     }
+
+    private static IEnumerable<FileInfo> RecentRecords(string runs) => new DirectoryInfo(runs).EnumerateFiles("*.json")
+        .Where(f => !f.Name.Equals("active.json", StringComparison.OrdinalIgnoreCase))
+        .OrderByDescending(f => f.LastWriteTimeUtc).Take(MaxRecordsScanned);
 
     private static string? ControlFile(string runs, string runId)
     {

@@ -5,8 +5,11 @@ using System.Text.Json;
 using System.Windows;
 using Serilog;
 using VIvian.Core;
+using VIvian.Core.Accounts;
 using VIvian.Core.Engines;
 using VIvian.Core.Execution;
+using VIvian.Infrastructure;
+using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Diagnostics;
 using VIvian.Infrastructure.Engines;
 using VIvian.Infrastructure.Engines.Cli;
@@ -36,14 +39,21 @@ public sealed record AppPaths(string DataDirectory)
 
 public sealed record RecentRunRow(string Game, string When, string Result, bool Succeeded, string Duration);
 
+/// <summary>Late-bound game path: the engine card is discovered after the DI graph is built.</summary>
+public sealed class GamePathProvider
+{
+    public Func<string>? Resolve { get; set; }
+    public string Get() => Resolve?.Invoke() ?? "";
+}
+
 public sealed class MainViewModel : ObservableObject
 {
     private readonly ISettingsStore _settings;
     private readonly IDiagnosticStore _history;
-    private readonly ITaskPlanStore _plans;
     private readonly IPreferenceStore _preferences;
     private readonly IRunHistory _runs;
     private readonly IUnifiedTaskControl _control;
+    private readonly MultiAccountOrchestrator _orchestrator;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
     private readonly SemaphoreSlim _sessionWrite = new(1, 1);
@@ -60,10 +70,10 @@ public sealed class MainViewModel : ObservableObject
     private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
-        + (RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训手动实测版（逐次确认）"
+        + (RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
             : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
             : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
-    public string ExecutionBanner => RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训 · 每次需本人确认与 UAC · 无定时执行"
+    public string ExecutionBanner => RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次 · 首页启动"
         : RealExecutionPolicy.IsReusableManualTest
         ? "手动实测版 · 星铁 screen_test · 每次需本人确认与 UAC · 无定时/无人值守执行"
         : RealExecutionPolicy.BuildPermitsRealExecution
@@ -71,6 +81,8 @@ public sealed class MainViewModel : ObservableObject
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
     /// <summary>Page title of the home page, e.g. "11月6日 星期五".</summary>
     public string TodayText => DateTime.Now.ToString("M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
+    public Visibility LegacyRealTestVisibility => RealExecutionPolicy.BuildPermitsRealExecution && !RealExecutionPolicy.IsM5DailyTest
+        ? Visibility.Visible : Visibility.Collapsed;
     public Visibility M5Visibility => RealExecutionPolicy.IsM5DailyTest ? Visibility.Visible : Visibility.Collapsed;
     public string DiagnosticSessionText => "诊断会话：" + _diagnosticSessionId;
     private readonly string _diagnosticSessionId = Guid.NewGuid().ToString("N")[..12];
@@ -83,9 +95,6 @@ public sealed class MainViewModel : ObservableObject
     public ObservableCollection<EngineCard> Engines { get; } =
     [new(GameId.Genshin, "原神", "BetterGI", "01"), new(GameId.StarRail, "崩坏：星穹铁道", "March7thAssistant", "02"), new(GameId.ZenlessZoneZero, "绝区零", "OneDragon", "03")];
     public ObservableCollection<DiagnosticRecord> History { get; } = [];
-    public ObservableCollection<TaskPlanViewModel> TaskPlans { get; } = [];
-    private TaskPlanViewModel? _selectedPlan;
-    public TaskPlanViewModel? SelectedPlan { get => _selectedPlan; set => Set(ref _selectedPlan, value); }
     public ConfigurationViewModel Configuration { get; }
     public AccountViewModel Accounts { get; }
     private EngineCard? _selectedEngine;
@@ -98,21 +107,38 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand InspectMarch7thCommand { get; }
     public AsyncCommand CheckEnginesCommand { get; }
     public AsyncCommand VerifyReleaseCommand { get; }
-    public AsyncCommand SaveTasksCommand { get; }
-    public AsyncCommand ReloadTasksCommand { get; }
-    public RelayCommand MoveUpCommand { get; }
-    public RelayCommand MoveDownCommand { get; }
     public AsyncCommand SavePreferencesCommand { get; }
     public AsyncCommand ExportDiagnosticsCommand { get; }
     public AsyncCommand SaveFeedbackCommand { get; }
     public AsyncCommand StartMarch7thCommand { get; }
-    public AsyncCommand RunAllAccountsCommand { get; }
-    public RelayCommand StopBatchCommand { get; }
-    public RelayCommand SkipAccountCommand { get; }
+    
     private bool _batchRunning;
-    private bool _stopBatch;
-    private bool _skipAccount;
-    public bool BatchRunning { get => _batchRunning; private set => Set(ref _batchRunning, value); }
+    public bool BatchRunning
+    {
+        get => _batchRunning;
+        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); BatchRunningChanged?.Invoke(); }
+    }
+    /// <summary>Raised when a multi-account batch starts or ends (the F10 key is held for the whole batch).</summary>
+    public event Action? BatchRunningChanged;
+    /// <summary>The home "停止" button and F10 stop whatever is running: a single run or a whole account batch.</summary>
+    public bool CanStopAll => BatchRunning || Queue.IsRunning;
+    public RelayCommand StopAllCommand { get; private set; } = null!;
+
+    /// <summary>Actual token of this process, shown on the home page instead of a fixed claim.</summary>
+    public string PrivilegeText { get; } = VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated()
+        ? "管理员 · 打开时已授权，批次内不再弹窗"
+        : "普通用户 · UAC 由你确认";
+
+    public void StopAll()
+    {
+        if (BatchRunning)
+        {
+            _batchCts?.Cancel();
+            BatchStatus = "正在停止批次并等待清理…";
+            Status = BatchStatus;
+        }
+        if (Queue.IsRunning) Queue.EmergencyStop();
+    }
     private string _batchStatus = "尚未运行多账号批次。";
     public string BatchStatus { get => _batchStatus; private set => Set(ref _batchStatus, value); }
     public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = RealExecutionPolicy.BuildPermitsRealExecution
@@ -267,18 +293,20 @@ public sealed class MainViewModel : ObservableObject
 
     public QueueViewModel Queue { get; }
 
-    public MainViewModel(ISettingsStore settings, IDiagnosticStore history, ITaskPlanStore plans, IPreferenceStore preferences,
-        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor, AccountViewModel accounts)
+    public MainViewModel(ISettingsStore settings, IDiagnosticStore history, IPreferenceStore preferences,
+        IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor,
+        AccountViewModel accounts, MultiAccountOrchestrator orchestrator, GamePathProvider gamePath)
     {
-        _settings = settings; _history = history; _plans = plans; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
+        _orchestrator = orchestrator;
+        gamePath.Resolve = () => March7thGamePath.Read(Engines.Single(e => e.Id == GameId.StarRail).InstallPath);
+        _settings = settings; _history = history; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
         Accounts = accounts;
+        accounts.ExecutionSelectionChanged += () => Raise(nameof(SelectedAccountsText));
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
-            game => game == GameId.StarRail && accounts.SelectedStarRail is { Id: var selectedId } selected
-                && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002")
-                    ? selected.InstallPath : Engines.Single(e => e.Id == game).InstallPath,
-            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
+            game => Engines.Single(e => e.Id == game).InstallPath,
+            () => BatchRunning || Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
             accounts.Database, () => accounts.SelectedStarRail);
         accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
@@ -295,29 +323,30 @@ public sealed class MainViewModel : ObservableObject
         InspectMarch7thCommand = new(() => RunAsync(() => InspectAsync(Engines.Single(e => e.Id == GameId.StarRail))), HandleError);
         CheckEnginesCommand = new(() => RunAsync(CheckEnginesCoreAsync), HandleError);
         VerifyReleaseCommand = new(() => RunAsync(VerifyReleaseAsync), HandleError);
-        SaveTasksCommand = new(() => RunAsync(SaveTasksAsync), HandleError);
-        ReloadTasksCommand = new(() => RunAsync(LoadTasksAsync), HandleError);
-        MoveUpCommand = new(() => SelectedPlan?.Move(-1));
-        MoveDownCommand = new(() => SelectedPlan?.Move(1));
         SavePreferencesCommand = new(() => RunAsync(SavePreferencesAsync), HandleError);
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
         SaveFeedbackCommand = new(() => RunAsync(SaveFeedbackAsync), HandleError);
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
-        RunAllAccountsCommand = new(() => RunAsync(RunAllAccountsAsync), HandleError);
-        StopBatchCommand = new(() => { _stopBatch = true; Queue.EmergencyStop(); BatchStatus = "正在停止批次…"; });
-        SkipAccountCommand = new(() => { _skipAccount = true; Queue.EmergencyStop(); BatchStatus = "正在跳过当前账号，等待资源清理…"; });
+        Accounts.ExecuteScan = action => RunAsync(async () =>
+        {
+            if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+            { Status = "任务运行或清理未确认时不能扫描切换账号。"; return; }
+            await action();
+        });
+        StopAllCommand = new(StopAll);
+        Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Raise(nameof(CanStopAll)); };
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
         foreach (var card in Engines)
         {
             card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
-            card.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(EngineCard.IncludeInOneClick) or nameof(EngineCard.Compatibility)) RaiseHome(); };
+            card.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(EngineCard.Compatibility)) RaiseHome(); };
         }
         Assistant = new AssistantViewModel(Theme, new VIvian.Infrastructure.Assistant.AssistantSettingsStore(paths.DataDirectory),
             new VIvian.Infrastructure.Assistant.AssistantTools(_control, game => Engines.Single(e => e.Id == game).InstallPath,
                 () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version, e.Compatibility, e.CanRunForReal)).ToList(),
                 async () => await _runs.ReadRecentRunsAsync(20), accounts.Database, () => accounts.SelectedStarRail?.Id),
-            () => Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
+            () => BatchRunning || Queue.IsRunning, Path.Combine(paths.DataDirectory, "configuration-audit"),
             () => { _ = Configuration.ReadAsync(); });
         Configuration.PropertyChanged += (_, e) =>
         {
@@ -348,9 +377,6 @@ public sealed class MainViewModel : ObservableObject
             card.InstallPath = value.InstallPath; card.Revision = value.Revision; card.SavedInstallPath = value.InstallPath;
         }
         await LoadPreferencesAsync();
-        await LoadTasksAsync();
-        if (RealExecutionPolicy.IsM5DailyTest && autoPrepare)
-            SelectedPlan = TaskPlans.FirstOrDefault(p => p.Game == GameId.StarRail) ?? SelectedPlan;
         await RefreshHistoryAsync();
         await Queue.InitializeAsync();
         await Accounts.ReloadAsync();
@@ -427,55 +453,24 @@ public sealed class MainViewModel : ObservableObject
     private string _estimate = "—";
     public string EstimateText { get => _estimate; private set => Set(ref _estimate, value); }
     public string RunnableText => $"{Engines.Count(e => e.CanRunForReal)} / {Engines.Count}";
-    public string SelectedGamesText => Engines.Count(e => e.IncludeInOneClick).ToString();
+    public string SelectedAccountsText => Accounts.SelectedRows.Count.ToString();
     public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
     public string RunStateText => Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
     public string ConfigSyncText => Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
     private void RaiseHome()
     {
-        foreach (var name in new[] { nameof(RunnableText), nameof(SelectedGamesText), nameof(InstalledText), nameof(RunStateText), nameof(ConfigSyncText) })
+        foreach (var name in new[] { nameof(RunnableText), nameof(SelectedAccountsText), nameof(InstalledText), nameof(RunStateText), nameof(ConfigSyncText) })
             Raise(name);
     }
     public AsyncCommand OneClickCommand { get; }
 
-    /// <summary>
-    /// The big button: runs every selected game that can run for real (today: Star Rail "日常"). The dialog is the
-    /// per-run consent, and lists any temporary setting change; nothing starts without "是".
-    /// </summary>
-    private async Task OneClickAsync()
+    internal async Task OneClickAsync()
     {
-        if (Accounts.SelectedStarRail is { Id: var selectedId } && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
-        { Status = "当前选择的是新增账号。其设置尚未加载到上游；为避免用错账号配置，本次没有启动。"; return; }
-        var card = Engines.Single(e => e.Id == GameId.StarRail);
-        // A previous run whose worker exit could not be confirmed blocks everything until it is verified:
-        // first by VIvian itself from March7th's run records, only then by asking the user.
-        if (Queue.HasUnresolved && !await Queue.TryAutoResolveAsync())
-        {
-            if (Queue.LastActivity?.State == VIvian.Infrastructure.Engines.UpstreamActivityState.Busy)
-            { Status = Queue.Status; return; }
-            if (MessageBox.Show("上一次运行结束时，VIvian 没能确认星铁助手的工作进程已经退出（例如游戏窗口被关掉、任务被中途停止），所以暂停了新任务，防止两个自动化同时操作游戏。\n\n" +
-                    "请确认：星铁助手窗口、它的命令行窗口和游戏都已关闭（不确定可在任务管理器里查看是否还有 March7th Assistant）。\n\n已经确认全部关闭了吗？",
-                    "VIvian · 上次运行未确认清理", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-            { Status = "上次运行的清理还没确认，任务未启动。确认全部关闭后再点“一键日常”。"; return; }
-            await Queue.AcknowledgeAllAsync();
-            if (Queue.HasUnresolved) { Status = Queue.Status; return; }
-        }
-        if (!card.IncludeInOneClick || !card.CanRunForReal)
-        { Status = "没有选中可以真实执行的游戏。目前只有星铁的“日常”可以运行。"; return; }
-        IReadOnlyList<TemporaryChange> changes = [];
-        try { changes = _control.RequiredTemporaryChanges(card.InstallPath, RealExecutionPolicy.M5RealTask); }
-        catch (Exception ex) when (ex is IOException or InvalidOperationException) { Status = "读取星铁配置失败，未启动：" + ex.Message; return; }
-        var snapshot = changes.Count > 0 ? _control.ReadConfiguration(GameId.StarRail, card.InstallPath) : null;
-        var text = "将运行：崩坏：星穹铁道 · 日常（清体力 + 每日实训 + 领奖）\n会操作真实游戏和账号；需要管理员权限时由你在 UAC 中决定。" +
-            (snapshot is null ? "" : "\n\n本次需要临时修改：" + TemporaryConfigurationManager.Describe(changes, snapshot) + "，结束后自动恢复。");
-        if (MessageBox.Show(text, "VIvian · 一键日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        { Status = "已取消，没有启动任何任务。"; return; }
-        March7thConfirmedThisRun = true;
-        AllowTemporaryConfigurationThisRun = changes.Count > 0;
-        if (!CanStartMarch7th) { Status = "暂时不能启动：" + Admission.Text; March7thConfirmedThisRun = false; return; }
-        await StartMarch7thAsync();
+        if (!RealExecutionPolicy.IsM5DailyTest)
+        { Status = "此版本未启用真实星铁批次。"; return; }
+        await RunAccountBatchAsync();
+        Status = BatchStatus;
     }
-
     /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>
     public static string RealResultLabel(RunRecord r) =>
         r.Cleanup == CleanupState.Unconfirmed ? "清理未确认（结果未知，队列已阻断）"
@@ -619,145 +614,100 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    private async Task RunAllAccountsAsync()
+    private CancellationTokenSource? _batchCts;
+    private async Task RunAccountBatchAsync()
     {
         if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
-        { BatchStatus = "当前有任务运行、清理待确认或临时配置待恢复，批次未启动。"; return; }
+        { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return; }
+        var selected = Accounts.SelectedRows;
+        if (selected.Count == 0)
+        { BatchStatus = "请先在账号管理勾选要执行的星铁账号。"; return; }
         var card = Engines.Single(e => e.Id == GameId.StarRail);
-        if (!RealExecutionPolicy.IsM5DailyTest || _march7thEvidence is null ||
-            card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
-        { BatchStatus = "请先在“引擎与环境”核对星铁官方发行包与安装身份。"; return; }
-        if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true))
-        { BatchStatus = "当前账号仍有未保存设置；批次未启动。"; return; }
-        var allAccounts = await Accounts.Database.LoadAccountsAsync(GameId.StarRail);
-        var candidates = allAccounts.Where(a => a.Enabled && a.AutoRun)
-            .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
-        if (candidates.Length == 0) { BatchStatus = "请在账号管理中勾选要运行的星铁账号。"; return; }
-        if (MessageBox.Show($"将串行运行 {candidates.Length} 个星铁账号。每个账号开始前需要你手动登录并核对 UID；每轮任务仍会请求 UAC。确认开始批次？",
-                "VIvian · 多账号日常", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-        { BatchStatus = "已取消批次。"; return; }
-        var batch = await Accounts.Database.BeginBatchAsync(GameId.StarRail);
-        BatchRunning = true; _stopBatch = false; _skipAccount = false;
-        var completed = 0; var failed = 0; var skipped = 0;
+        var evidence = _march7thEvidence;
+        if (evidence is null || card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
+        { BatchStatus = "请先在引擎与环境核对星铁官方发行包与安装身份。"; return; }
+        if (!VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
+        { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
+        if (!Configuration.TryApplyPending(interactive: false))
+        { BatchStatus = "请先在游戏管理保存尚未写入的设置。"; return; }
+
+        var accounts = selected.Select(r => r.Account).ToArray();
+        var installPath = card.InstallPath;
+        using var cancellation = new CancellationTokenSource();
+        _batchCts = cancellation;
+        BatchRunning = true;
         try
         {
-            for (var i = 0; i < candidates.Length && !_stopBatch; i++)
+            var token = cancellation.Token;
+            BatchStatus = $"已完成 0/{accounts.Length} · 正在读取游戏设置";
+            await Accounts.SaveSelectionsAsync(token);
+            var upstream = _control.ReadConfiguration(GameId.StarRail, installPath);
+            var defaults = upstream.Values
+                .Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+                .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
+            if (defaults.Count == 0)
+                throw new InvalidOperationException("星铁助手没有可读取的任务配置，请检查游戏管理。");
+
+            var snapshots = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
+            foreach (var account in accounts)
             {
-                var account = candidates[i];
-                var accountPath = account.Id == Guid.Parse("00000000-0000-4000-8000-000000000002")
-                    ? card.InstallPath : account.InstallPath;
-                if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002") &&
-                    (string.IsNullOrWhiteSpace(accountPath) ||
-                     string.Equals(Path.GetFullPath(accountPath), Path.GetFullPath(card.InstallPath), StringComparison.OrdinalIgnoreCase) ||
-                     allAccounts.Where(a => a.Id != account.Id).Any(a => a.InstallPath.Length > 0 &&
-                         string.Equals(Path.GetFullPath(a.InstallPath), Path.GetFullPath(accountPath), StringComparison.OrdinalIgnoreCase))))
+                var plan = await Accounts.Database.LoadAccountTaskPlanAsync(account.Id, token);
+                if (!plan.DailyEnabled)
+                    throw new InvalidOperationException($"「{account.Name}」的日常任务已关闭，请在游戏管理启用或在账号管理取消勾选。");
+                var snapshot = new Dictionary<string, string>(defaults, StringComparer.Ordinal);
+                if (account.Id != LegacyStarRail)
                 {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "configuration_not_isolated", "新增账号须绑定与其他账号不同的 March7thAssistant 安装目录。");
-                    continue;
+                    var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id, token);
+                    foreach (var (key, value) in saved.Values) snapshot[key] = value;
                 }
-                var inspected = await March7thReadOnlyInspector.InspectAsync(accountPath, _march7thEvidence);
-                if (inspected.Compatibility != March7thCompatibility.Verified)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "install_not_verified", inspected.Detail);
-                    continue;
-                }
-                batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = account.Id,
-                    Detail = $"{i + 1}/{candidates.Length}：等待手动登录 {account.Name}" };
-                await Accounts.Database.SaveBatchAsync(batch);
-                BatchStatus = batch.Detail;
-                var identity = $"请手动切换并登录星铁账号“{account.Name}”。\n区服：{account.Region}\n预期 UID：{account.Uid ?? "未填写；请先在账号管理中填写 UID"}\n\n请在游戏画面中查看实际 UID，确认与档案完全一致后点“是”。点“否”将跳过此账号。";
-                if (string.IsNullOrWhiteSpace(account.Uid) || MessageBox.Show(identity, "核对实际登录身份",
-                        MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
-                {
-                    skipped++;
-                    await Accounts.Database.RecordAccountSwitchAsync(i == 0 ? null : candidates[i - 1].Id,
-                        account.Id, "unverified", "未确认游戏画面中的实际 UID。");
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "identity_unverified", "实际登录 UID 未由用户确认，任务未启动。");
-                    continue;
-                }
-                await Accounts.Database.RecordAccountSwitchAsync(i == 0 ? null : candidates[i - 1].Id,
-                    account.Id, "manual_verified", "用户在游戏画面中人工核对 UID；本次运行前仍需再次确认任务。");
-                _skipAccount = false;
-                if (_stopBatch) break;
-                var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id);
-                if (!(await Accounts.Database.LoadAccountTaskPlanAsync(account.Id)).DailyEnabled)
-                {
-                    skipped++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "plan_disabled", "此账号的星铁日常任务计划未启用。");
-                    continue;
-                }
-                if (account.Id != Guid.Parse("00000000-0000-4000-8000-000000000002") && saved.Values.Count == 0)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null,
-                        "configuration_missing", "账号独立设置尚未初始化；请在游戏管理中选择此账号并读取配置。");
-                    continue;
-                }
-                IReadOnlyList<TemporaryChange> accountChanges;
-                try
-                {
-                    var actual = _control.ReadConfiguration(GameId.StarRail, accountPath);
-                    var desired = new Dictionary<string, string>(saved.Values);
-                    foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask)) desired[key] = value;
-                    accountChanges = TemporaryConfigurationManager.Plan(actual, desired);
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "configuration_failed", ex.Message);
-                    continue;
-                }
-                // This confirmation applies to exactly one account and one run. No stored permission is reused.
-                if (MessageBox.Show($"账号“{account.Name}”（UID {account.Uid}）已人工核对。\n本次临时修改 {accountChanges.Count} 项设置：\n" +
-                        (accountChanges.Count == 0 ? "（无需修改）" : string.Join("\n", accountChanges.Select(c => $"· {c.Path}: {c.Original} → {c.Temporary}"))) +
-                        "\n\n确认加载并执行一次日常任务？",
-                        "确认本次真实任务", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
-                { skipped++; await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "cancelled", "用户取消本次执行。"); continue; }
-                BatchStatus = $"{i + 1}/{candidates.Length}：正在运行 {account.Name}";
-                TaskPlanExecution result;
-                try
-                {
-                    var plan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
-                    result = await _control.ExecuteTaskPlan(plan,
-                        new RealTaskAuthorization(accountPath, _march7thEvidence, () => !_stopBatch && !_skipAccount,
-                            true, AllowTemporaryConfiguration: true, AccountSettings: saved.Values));
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, null, "failed", ex.Message);
-                    BatchStatus = $"{account.Name} 未启动或执行异常：{ex.Message}";
-                    if (_control.HasPendingConfigurationRestore || Queue.HasUnresolved) { _stopBatch = true; break; }
-                    continue;
-                }
-                var run = result.Queue?.Runs.LastOrDefault();
-                var success = run?.Outcome == RunOutcome.Success && run.Cleanup == CleanupState.Confirmed
-                    && result.Restore?.State != RestoreState.Blocked;
-                var label = _skipAccount ? "skipped" : success ? "success" : "failed";
-                if (_skipAccount) skipped++; else if (success) completed++; else failed++;
-                await Accounts.Database.RecordAccountResultAsync(batch.Id, account.Id, run?.RunId, label,
-                    result.Restore?.Detail ?? RunPresentation.Reason(run?.ReasonCode));
-                if (result.Restore?.State == RestoreState.Blocked || Queue.HasUnresolved)
-                { _stopBatch = true; BatchStatus = "临时配置未恢复或资源清理未确认，批次已停止。"; break; }
+                var desired = new Dictionary<string, string>(snapshot, StringComparer.Ordinal);
+                foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask))
+                    desired[key] = value;
+                _ = TemporaryConfigurationManager.Plan(upstream, desired);
+                snapshots.Add(account.Id, snapshot);
             }
-            batch = batch with { UpdatedAt = DateTimeOffset.UtcNow, CurrentAccountId = null,
-                State = _stopBatch ? "stopped" : "finished",
-                Detail = $"完成 {completed}，失败 {failed}，跳过 {skipped}。" };
-            await Accounts.Database.SaveBatchAsync(batch);
-            BatchStatus = "批次结束：" + batch.Detail;
+
+            var completedAccounts = new HashSet<Guid>();
+            var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, AccountConfigurationMode.Independent,
+                (account, _) => Task.FromResult(snapshots[account.Id]),
+                (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, ct),
+                progress =>
+                {
+                    if (progress.State == BatchRunState.Completed) completedAccounts.Add(progress.AccountId);
+                    BatchStatus = $"已完成 {completedAccounts.Count}/{accounts.Length} · {progress.AccountName} · " +
+                        $"{BatchProgressText.Describe(progress.State)} · {progress.Detail}";
+                }, token);
+            BatchStatus = (outcome.Completed ? "批次结束：" : "批次已停止：") + outcome.Detail;
         }
+        catch (OperationCanceledException) { BatchStatus = "批次已由用户停止。"; }
+        catch (Exception ex) { BatchStatus = "批次失败：" + ex.Message; }
         finally
         {
+            _batchCts = null;
             BatchRunning = false;
             await Accounts.ReloadAsync();
         }
     }
 
+    private static readonly Guid LegacyStarRail = Guid.Parse("00000000-0000-4000-8000-000000000002");
+
+    private async Task<BatchTaskResult> RunAccountTasksAsync(string installPath, March7thReleaseEvidence evidence,
+        IReadOnlyDictionary<string, string> settings, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var taskPlan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
+        var result = await _control.ExecuteTaskPlan(taskPlan,
+            new RealTaskAuthorization(installPath, evidence, () => !cancellationToken.IsCancellationRequested,
+                true, AllowTemporaryConfiguration: true, AccountSettings: settings));
+        if (result.Restore is not null) ShowRestore(result.Restore);
+        var run = result.Queue?.Runs.LastOrDefault();
+        var cleaned = run?.Cleanup == CleanupState.Confirmed;
+        var restored = result.Restore?.State != RestoreState.Blocked && !_control.HasPendingConfigurationRestore;
+        var success = run?.Outcome == RunOutcome.Success && cleaned && restored;
+        var detail = success ? "日常完成。" : RunPresentation.Reason(run?.ReasonCode) ?? "任务完成或清理未确认。";
+        if (result.Restore is not null) detail += " " + result.Restore.Detail;
+        return new(run?.RunId, success, cleaned, restored, detail);
+    }
     public void ReportReconciled(int count)
     {
         if (count > 0) Status = $"上次 VIvian 意外退出，{count} 条运行已标记为结果未知，请在“调度与监控”中查看并确认。";
@@ -769,6 +719,14 @@ public sealed class MainViewModel : ObservableObject
         Busy(true);
         try { await action(); }
         finally { Busy(false); _operation.Release(); }
+    }
+
+    internal async Task<bool> WaitForBatchShutdownAsync(TimeSpan timeout)
+    {
+        StopAll();
+        if (!await _operation.WaitAsync(timeout)) return false;
+        _operation.Release();
+        return !BatchRunning && !Queue.IsRunning;
     }
 
     private async Task SaveAsync()
@@ -831,27 +789,6 @@ public sealed class MainViewModel : ObservableObject
             : $"已自动填入 {count} 个安装目录并完成只读检查；请核对后点击“保存路径并检查”。";
     }
 
-    private async Task LoadTasksAsync()
-    {
-        var plans = await Task.Run(() => _plans.LoadTaskPlansAsync());
-        var selected = SelectedPlan?.Game;
-        TaskPlans.Clear();
-        foreach (var plan in plans) TaskPlans.Add(new TaskPlanViewModel(plan));
-        SelectedPlan = TaskPlans.FirstOrDefault(p => p.Game == selected) ?? TaskPlans.FirstOrDefault();
-    }
-
-    /// <summary>Saves the task plans (used by the smoke test; the button uses the same path).</summary>
-    public Task SaveTasksCommandAsync() => RunAsync(SaveTasksAsync);
-
-    private async Task SaveTasksAsync()
-    {
-        foreach (var plan in TaskPlans.Where(p => p.IsDirty).ToList())
-            await Task.Run(() => _plans.SaveTaskPlanAsync(plan.ToPlan()));
-        await LoadTasksAsync();
-        Status = "任务选择已保存。这里的计划不会触发真实执行；星铁单次测试只从专用页手动启动。";
-        Log.Information("Task plans saved");
-    }
-
     private async Task LoadPreferencesAsync()
     {
         _prefs = await Task.Run(() => _preferences.LoadPreferencesAsync());
@@ -869,7 +806,7 @@ public sealed class MainViewModel : ObservableObject
         Status = $"设置已保存。已按新的保留期清理 {removed.Count} 个旧日志文件。";
     }
 
-    private static string BuildKind => RealExecutionPolicy.IsM5DailyTest ? "M5 每日实训手动实测版"
+    private static string BuildKind => RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
         : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版"
         : RealExecutionPolicy.BuildPermitsRealExecution ? "M4-D 单次测试包" : "开发版（模拟）";
 

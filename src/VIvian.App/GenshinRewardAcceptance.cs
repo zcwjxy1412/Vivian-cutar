@@ -51,12 +51,13 @@ internal sealed class GenshinRewardAcceptance
         false;
 #endif
 
-    internal GenshinRewardAcceptance(Guid attempt, Guid? account, long revision, string profileRoot)
+    internal GenshinRewardAcceptance(Guid attempt, Guid? account, long revision, string profileRoot, bool installedDaily = false)
     {
         Attempt = attempt;
         AccountId = account;
         Revision = revision;
-        ProfileDirectory = Path.Combine(profileRoot, attempt.ToString("N"));
+        ProfileDirectory = installedDaily ? profileRoot : Path.Combine(profileRoot, attempt.ToString("N"));
+        RewardOnly = !installedDaily;
     }
 
     internal Guid Attempt { get; }

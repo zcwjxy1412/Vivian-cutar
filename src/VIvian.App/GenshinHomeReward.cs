@@ -8,7 +8,7 @@ using VIvian.Infrastructure.Engines;
 
 namespace VIvian.App;
 
-internal sealed class GenshinHomeReward(string officialDirectory, Func<string, CancellationToken, Task> prepareSnapshot,
+internal sealed class GenshinHomeReward(string officialDirectory, LocalDatabase database,
     GenshinDailyVerification verify, Func<string, LocalDatabase>? openSnapshot = null)
 {
     private readonly string _root = Path.Combine(Path.GetDirectoryName(officialDirectory)!,
@@ -18,20 +18,21 @@ internal sealed class GenshinHomeReward(string officialDirectory, Func<string, C
     {
         if (account is not { Game: GameId.Genshin, Enabled: true, LoginState: "recognized" } || account.Id == Guid.Empty)
             throw new InvalidOperationException("请选择一个已启用并绑定登录标识的原神账号。");
-        return new(Guid.NewGuid(), account.Id, account.Revision, _root);
+        return new(Guid.NewGuid(), account.Id, account.Revision, officialDirectory, installedDaily: true);
     }
 
     internal async Task<MultiAccountOutcome> RunAsync(GenshinRewardAcceptance request, string betterGiRoot, string archivePath,
         Action<BatchAccountProgress>? progress, CancellationToken ct)
     {
-        var destination = Path.Combine(_root, request.Attempt.ToString("N"));
-        if (!string.Equals(destination, request.ProfileDirectory, StringComparison.OrdinalIgnoreCase) || request.ReviewOnly)
-            throw new InvalidOperationException("原神首跑请求与隔离档案不一致。");
+        if (!string.Equals(officialDirectory, request.ProfileDirectory, StringComparison.OrdinalIgnoreCase)
+            || request.ReviewOnly || request.RewardOnly)
+            throw new InvalidOperationException("原神日常请求与当前项目的保存计划不一致。");
+        if ((await database.ReadUnresolvedAsync(ct).ConfigureAwait(false)).Count > 0)
+            throw new InvalidOperationException("当前项目仍有待核对的运行记录。");
         if (ReadLatest() is { } prior && (await prior.ReadUnresolvedAsync(ct).ConfigureAwait(false)).Any(IsAcceptanceRun))
             throw new InvalidOperationException("上一轮原神首跑仍有待核对的运行记录。");
-        await prepareSnapshot(destination, ct).ConfigureAwait(false);
-        return await request.RunAsync(Open(destination), betterGiRoot, archivePath, destination, verify, progress, ct,
-            recoveryProfileDirectory: officialDirectory, beforeVerify: () => WriteLatest(request.Attempt)).ConfigureAwait(false);
+        return await request.RunAsync(database, betterGiRoot, archivePath, officialDirectory, verify, progress, ct)
+            .ConfigureAwait(false);
     }
 
     internal async Task<IReadOnlyList<RunRecord>> ReadRecentRunsAsync(int limit)
@@ -73,18 +74,4 @@ internal sealed class GenshinHomeReward(string officialDirectory, Func<string, C
         return Open(Path.Combine(_root, attempt.ToString("N")));
     }
 
-    private void WriteLatest(Guid attempt)
-    {
-        var pointer = Path.Combine(_root, "latest");
-        var temporary = Path.Combine(_root, attempt.ToString("N") + ".latest");
-        using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-        {
-            if (!ReadOnlyFileAccess.HandlePathMatches(file.SafeFileHandle, temporary) ||
-                ReadOnlyFileAccess.LinkCount(file.SafeFileHandle) != 1)
-                throw new IOException("无法核对原神首跑档案索引的实际写入位置。");
-            file.Write(System.Text.Encoding.ASCII.GetBytes(attempt.ToString("N")));
-            file.Flush(flushToDisk: true);
-        }
-        File.Move(temporary, pointer, overwrite: true);
-    }
 }

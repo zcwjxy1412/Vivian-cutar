@@ -626,10 +626,10 @@ public sealed class MainViewModel : ObservableObject
             if (GenshinConfiguration.SelectedForDaily.FirstOrDefault() is not { } selected)
             { Status = "请在「账号管理 → 原神」勾选并排序已识别的账号。"; return; }
             if (RunWithHomeRewardStopKey is not { } withStopKey)
-            { Status = "主窗口的停止功能尚未就绪，原神首验未启动。"; return; }
+            { Status = "主窗口的停止功能尚未就绪，原神日常未启动。"; return; }
 
             var request = home.CreateRequest(selected);
-            Status = $"原神首验 · {selected.Name} · 领取每日奖励 · 0 树脂";
+            Status = $"原神日常 · 从 {selected.Name} 开始 · 按保存的任务顺序执行";
             await withStopKey(async () =>
             {
                 await RunAccountBatchAsync(GameId.Genshin, acceptance: request, homeReward: home);
@@ -652,16 +652,17 @@ public sealed class MainViewModel : ObservableObject
             { Status = "原神验收仅接受本次启动指定的请求。"; return; }
             if (scope is not (null or GameId.StarRail or GameId.Genshin))
             { Status = "所选游戏的真实日常入口尚未开放。"; return; }
-            var deferGenshin = scope is null && acceptance is null && _genshinDailyBatch is null &&
-                GenshinConfiguration.SelectedForDaily.Count > 0;
-            var genshinHint = _homeGenshinReward is not null
-                ? "原神完整日常尚待验收。请点首页原神卡片，按勾选顺序对第一个账号进行零树脂领奖首验。"
-                : "原神完整日常尚未开放。";
-            if (deferGenshin && Accounts.SelectedRows.Count == 0)
-            { Status = BatchStatus = genshinHint; return; }
-
-            exitCode = await RunAccountBatchAsync(deferGenshin ? GameId.StarRail : scope, acceptance: acceptance, verify: verify);
-            if (deferGenshin) BatchStatus += " " + genshinHint;
+            if (acceptance is null && scope is null or GameId.Genshin && _genshinDailyBatch is null &&
+                _homeGenshinReward is { } home && GenshinConfiguration.SelectedForDaily.FirstOrDefault() is { } selected)
+            {
+                if (RunWithHomeRewardStopKey is not { } withStopKey)
+                { Status = "主窗口的停止功能尚未就绪，日常未启动。"; return; }
+                var request = home.CreateRequest(selected);
+                Status = $"原神日常 · 从 {selected.Name} 开始 · 按保存的任务顺序执行";
+                await withStopKey(() => RunAccountBatchAsync(scope, acceptance: request, homeReward: home));
+            }
+            else
+                exitCode = await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
             Status = BatchStatus;
         });
         return exitCode;
@@ -846,7 +847,7 @@ public sealed class MainViewModel : ObservableObject
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return null; }
 
-        using var deadline = acceptance is null ? null : new CancellationTokenSource(acceptance.RewardOnly
+        using var deadline = acceptance is null || homeReward is not null ? null : new CancellationTokenSource(acceptance.RewardOnly
             ? GenshinRewardAcceptance.RunLimit : TimeSpan.FromMinutes(30));
         using var cancellation = deadline is null ? new CancellationTokenSource()
             : CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
@@ -895,8 +896,7 @@ public sealed class MainViewModel : ObservableObject
                 if (acceptance is not null)
                 {
                     BatchRunning = true;
-                    Queue.HomeRewardRunning = homeReward is not null;
-                    BatchStatus = homeReward is null ? "原神 · 正在核对本次日常验收" : "原神首跑 · 正在准备零树脂领奖";
+                    BatchStatus = homeReward is null ? "原神 · 正在核对本次日常验收" : "原神 · 正在准备已保存的日常计划";
                     Log.Information("Genshin reward acceptance {Attempt} starting", acceptance.Attempt);
                 }
                 var archive = await ReadOnlyFileAccess.BoundedAsync(() => DailyBatchSequence.FindGenshinArchive(AppContext.BaseDirectory),
@@ -907,6 +907,7 @@ public sealed class MainViewModel : ObservableObject
                         : GenshinConfiguration.SelectedForDaily.Count;
                     var progress = Track(GameId.Genshin, total);
                     BatchRunning = true;
+                    Queue.HomeRewardRunning = homeReward is not null;
                     BatchStatus = $"原神 · 已完成 0/{total} · 正在核对账号和固定发行包";
                     MultiAccountOutcome outcome;
                     try
@@ -929,7 +930,7 @@ public sealed class MainViewModel : ObservableObject
                     activeGame = null;
                     var finished = outcome.Completed && outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed;
                     var label = finished ? "批次结束" : "批次已停止";
-                    if (acceptance is not null)
+                    if (acceptance is not null && game == GameId.Genshin)
                     {
                         acceptanceOutcome = outcome;
                         acceptancePassed = finished && outcome.Succeeded == acceptance.ExpectedAccountCount && outcome.Failed == 0 && !token.IsCancellationRequested;

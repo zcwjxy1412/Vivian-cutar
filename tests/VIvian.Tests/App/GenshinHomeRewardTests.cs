@@ -31,7 +31,7 @@ public sealed class GenshinHomeRewardTests
             var vm = new MainViewModel(database, database, database, database, paths, queue, supervisor,
                 accounts, new MultiAccountOrchestrator(database, null!), new GamePathProvider());
             vm.ConfigureHomeGenshinReward(new GenshinHomeReward(paths.DataDirectory,
-                (_, _) => throw new InvalidOperationException("此用例不准备快照"),
+                database,
                 (_, _, _, _, _, _, _, _) => throw new InvalidOperationException("此用例不启动引擎")));
             await vm.GenshinConfiguration.LoadAsync();
             var card = vm.Engines.Single(x => x.Id == GameId.Genshin);
@@ -41,7 +41,7 @@ public sealed class GenshinHomeRewardTests
 
             Assert.True(card.CanPlayFromHome);
             Assert.False(card.CanRunForReal);
-            Assert.Contains("0 树脂", card.RunHint);
+            Assert.Contains("保存", card.RunHint);
             var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var stopScopes = 0;
             vm.RunWithHomeRewardStopKey = async _ =>
@@ -74,8 +74,7 @@ public sealed class GenshinHomeRewardTests
             if (RealExecutionPolicy.IsM5DailyTest)
             {
                 await vm.OneClickAsync();
-                Assert.Contains("原神卡片", vm.BatchStatus);
-                Assert.Equal(1, stopScopes);
+                Assert.Equal(2, stopScopes);
 
                 var star = await database.AddAccountAsync(GameId.StarRail, "星铁日常", "", null);
                 await database.SaveLoginProfileAsync(star.Id, "130****03", "130****03", 0, .95, null, "合成");
@@ -86,8 +85,8 @@ public sealed class GenshinHomeRewardTests
                 Assert.DoesNotContain("原神卡片", starRailStatus);
                 await vm.OneClickAsync();
                 Assert.StartsWith(starRailStatus, vm.BatchStatus);
-                Assert.Contains("原神卡片", vm.BatchStatus);
-                Assert.Equal(1, stopScopes);
+                Assert.DoesNotContain("原神卡片", vm.BatchStatus);
+                Assert.Equal(3, stopScopes);
             }
             vm.GenshinConfiguration.Close();
         }
@@ -95,57 +94,49 @@ public sealed class GenshinHomeRewardTests
     }
 
     [Fact]
-    public async Task HomeRunnerUsesOnlyTheConfirmedAccountAndRestoresTheExactIsolatedRun()
+    public async Task HomeRunnerUsesInstalledDatabaseAndAllSavedAccountsWithoutRewardOnlyOverride()
     {
-        var temp = Directory.CreateTempSubdirectory("vivian-home-reward-");
+        var temp = Directory.CreateTempSubdirectory("vivian-home-daily-");
         try
         {
-            var official = Directory.CreateDirectory(Path.Combine(temp.FullName, "official")).FullName;
-            var live = new LocalDatabase(Path.Combine(official, "vivian.db"));
+            var live = new LocalDatabase(Path.Combine(temp.FullName, "vivian.db"));
             await live.InitializeAsync();
-            var selected = await live.AddAccountAsync(GameId.Genshin, "甲", "", null);
-            await live.SaveLoginProfileAsync(selected.Id, "130****01", "130****01", 0, .95, null, "合成");
-            selected = (await live.LoadAccountsAsync(GameId.Genshin)).Single(a => a.Id == selected.Id);
+            var first = await live.AddAccountAsync(GameId.Genshin, "甲", "", null);
+            var second = await live.AddAccountAsync(GameId.Genshin, "乙", "", null);
+            foreach (var account in new[] { first, second })
+            {
+                await live.SaveAccountAsync(account with { AutoRun = true });
+                await live.SaveLoginProfileAsync(account.Id, account.Id == first.Id ? "130****01" : "130****02",
+                    account.Id == first.Id ? "130****01" : "130****02", 0, .95, null, "合成");
+            }
+            var selected = (await live.LoadAccountsAsync(GameId.Genshin))
+                .Where(a => a.Id == first.Id || a.Id == second.Id).OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
             var run = Guid.NewGuid();
             var called = 0;
-            var snapshot = "";
-            var changeRevision = true;
-            async Task Prepare(string destination, CancellationToken ct)
-            {
-                snapshot = destination;
-                Directory.CreateDirectory(destination);
-                var copiedFile = Path.Combine(destination, "vivian.db");
-                File.Copy(Path.Combine(official, "vivian.db"), copiedFile);
-                if (changeRevision)
-                    await new LocalDatabase(copiedFile).SaveAccountAsync(selected with { AutoRun = true }, ct);
-            }
-            var home = new GenshinHomeReward(official, Prepare,
+            var home = new GenshinHomeReward(temp.FullName, live,
                 async (database, accounts, _, _, owner, rewardOnly, _, ct) =>
                 {
                     called++;
-                    Assert.Equal(official, owner);
-                    Assert.True(rewardOnly);
-                    Assert.Equal(selected.Id, Assert.Single(accounts).Id);
+                    Assert.Same(live, database);
+                    Assert.Equal(temp.FullName, owner);
+                    Assert.False(rewardOnly);
+                    Assert.Equal(selected.Select(a => a.Id), accounts.Select(a => a.Id));
                     await database.PublishAsync(new(run, run, GameId.Genshin, "fixture/acceptance", false,
                         RunPhase.Finished, RunOutcome.Indeterminate, CleanupState.Unconfirmed,
                         ReasonCodes.CleanupUnconfirmed, DateTimeOffset.UtcNow), ct);
                     return new MultiAccountOutcome(run, false, 0, 1, "模拟");
-                }, path => new LocalDatabase(Path.Combine(path, "vivian.db")));
-
-            var request = home.CreateRequest(selected);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(request, "root", "archive", null, default));
+                });
+            var stale = home.CreateRequest(selected[0]);
+            await live.SaveAccountAsync(selected[0] with { Name = "已修改" });
+            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(stale, "root", "archive", null, default));
             Assert.Equal(0, called);
-            changeRevision = false;
-            await home.RunAsync(home.CreateRequest(selected), "root", "archive", null, default);
+            var refreshed = (await live.LoadAccountsAsync(GameId.Genshin)).Single(a => a.Id == selected[0].Id);
+            await home.RunAsync(home.CreateRequest(refreshed), "root", "archive", null, default);
             Assert.Equal(1, called);
-            Assert.Equal(run, Assert.Single(await home.ReadRecentRunsAsync(5)).RunId);
-            Assert.Empty(await live.ReadRecentRunsAsync(5));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(home.CreateRequest(selected), "root", "archive", null, default));
+            Assert.Equal(run, Assert.Single(await live.ReadRecentRunsAsync(5)).RunId);
+            Assert.Empty(await home.ReadRecentRunsAsync(5)); // No new isolated history.
+            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(home.CreateRequest(refreshed), "root", "archive", null, default));
             Assert.Equal(1, called);
-            Assert.True(await home.RecordRecoveryAsync(run, default));
-            Assert.True(await home.RecordRecoveryAsync(run, default));
-            Assert.False(await home.RecordRecoveryAsync(Guid.NewGuid(), default));
-            Assert.Empty(await new LocalDatabase(Path.Combine(snapshot, "vivian.db")).ReadUnresolvedAsync());
         }
         finally { temp.Delete(recursive: true); }
     }

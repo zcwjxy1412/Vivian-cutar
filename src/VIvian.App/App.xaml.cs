@@ -246,9 +246,8 @@ public partial class App : Application
                 Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
             _stage = "加载界面数据";
             var vm = _host.Services.GetRequiredService<MainViewModel>();
-            if (unified && !_smoke && reward is null && _instance is { IsOwner: true } installedInstance)
-                vm.ConfigureHomeGenshinReward(new GenshinHomeReward(root,
-                    (destination, ct) => UnifiedProfilePreparation.CreateGenshinHomeRewardSnapshotAsync(destination, installedInstance, ct),
+            if (unified && !_smoke && reward is null && _instance is { IsOwner: true })
+                vm.ConfigureHomeGenshinReward(new GenshinHomeReward(root, database,
                     BetterGiAccountBatch.VerifySavedDailyAsync));
             try
             {
@@ -273,6 +272,8 @@ public partial class App : Application
             var window = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = window;
             if (reward is { ReviewOnly: false }) WaitForRewardAcceptanceActivation(window, vm, reward);
+            else if (!_smoke && unified && reward is null && e.Args is ["--run-saved-genshin-daily"])
+                WaitForRewardAcceptanceActivation(window, vm, null);
             if (_smoke)
             {
                 window.ContentRendered += async (_, _) =>
@@ -334,7 +335,7 @@ public partial class App : Application
         }
     }
 
-    private void WaitForRewardAcceptanceActivation(MainWindow window, MainViewModel vm, GenshinRewardAcceptance reward)
+    private void WaitForRewardAcceptanceActivation(MainWindow window, MainViewModel vm, GenshinRewardAcceptance? reward)
     {
         var activation = new GenshinRewardActivation(TimeProvider.System);
         var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = GenshinRewardActivation.Timeout };
@@ -361,7 +362,12 @@ public partial class App : Application
         {
             if (!activation.TryStart(window.IsActive)) return;
             Detach();
-            vm.ReportGenshinRewardActivation("验收候选窗口已激活，正在准备本轮原神领奖。");
+            vm.ReportGenshinRewardActivation("主窗口已激活，正在准备原神保存计划。");
+            if (reward is null)
+            {
+                await vm.PlayGameCardAsync(GameId.Genshin);
+                return;
+            }
             Log.Information("Genshin reward acceptance {Attempt} window rendered and active", reward.Attempt);
             var exitCode = await window.RunWithRewardAcceptanceStopKeyAsync(
                 () => vm.OneClickAsync(GameId.Genshin, reward, BetterGiAccountBatch.VerifySavedDailyAsync));
@@ -372,16 +378,16 @@ public partial class App : Application
         {
             if (!activation.StopWaiting()) return;
             Detach();
-            vm.ReportGenshinRewardActivation($"等待候选窗口渲染并激活超过 {seconds:0} 秒，本轮原神验收未启动。");
+            vm.ReportGenshinRewardActivation($"等待主窗口渲染并激活超过 {seconds:0} 秒，原神日常未启动。");
             Log.Warning("Genshin reward acceptance {Attempt} did not start: window activation wait timed out after {Seconds}s",
-                reward.Attempt, seconds);
+                reward?.Attempt, seconds);
         }
 
         void CancelWaiting(object? sender, EventArgs args)
         {
             if (!activation.StopWaiting()) return;
             Detach();
-            Log.Information("Genshin reward acceptance {Attempt} cancelled before window activation", reward.Attempt);
+            Log.Information("Genshin daily {Attempt} cancelled before window activation", reward?.Attempt);
         }
 
         window.ContentRendered += OnRendered;
@@ -390,8 +396,8 @@ public partial class App : Application
         Dispatcher.ShutdownStarted += CancelWaiting;
         timer.Tick += OnTimeout;
         timer.Start();
-        vm.ReportGenshinRewardActivation($"等待候选窗口渲染并激活，最多 {seconds:0} 秒。");
-        Log.Information("Genshin reward acceptance {Attempt} waiting up to {Seconds}s for a rendered active window", reward.Attempt, seconds);
+        vm.ReportGenshinRewardActivation($"等待主窗口渲染并激活，最多 {seconds:0} 秒。");
+        Log.Information("Genshin daily {Attempt} waiting up to {Seconds}s for a rendered active window", reward?.Attempt, seconds);
     }
 
     /// <summary>

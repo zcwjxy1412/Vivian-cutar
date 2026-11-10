@@ -38,9 +38,9 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     });
     public bool CanPlayFromHome => CanRunForReal || (CanOperateWorkspace && HomeRewardWired &&
         InstallPath == SavedInstallPath && Report?.Compatibility == CompatibilityClass.PendingValidation);
-    public string HomePlayHint => HomeRewardWired ? "原神首验 · 首个勾选账号 · 领奖 · 0 树脂" : "运行";
+    public string HomePlayHint => HomeRewardWired ? "原神日常 · 按勾选顺序执行已保存计划" : "运行";
     public string RunHint => !CanOperateWorkspace ? "隔离验收 · 只读"
-        : HomeRewardWired ? (CanPlayFromHome ? "首个勾选 · 领奖首验 · 0 树脂" : "领奖首验 · 待安装核验")
+        : HomeRewardWired ? (CanPlayFromHome ? "按顺序执行保存计划" : "日常 · 待安装核验")
         : CanRunForReal ? "可以执行" : Id == GameId.StarRail || GenshinDailyWired ? "待安装核验" : "接入中";
     /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
     public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
@@ -85,7 +85,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
 
     /// <summary>What this build lets the user do with the engine for real.</summary>
     public string Execution => !CanOperateWorkspace ? "隔离验收中，此游戏卡片仅供查看。"
-        : HomeRewardWired ? "原神首验按账号管理的顺序执行首个勾选账号，只领取每日奖励，消耗 0 树脂。"
+        : HomeRewardWired ? "按账号管理的勾选顺序执行已保存的任务和消耗设置；启用合成时先合成树脂，再领取每日奖励。"
         : GenshinDailyWired
         ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest

@@ -272,21 +272,20 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             !SendPair(Key(0, mapKey), Key(2, mapKey)))
             throw new InvalidOperationException("无法从已核对的原神世界安全打开地图读取树脂。");
 
-        (int Original, int Condensed)? previous = null;
+        var readiness = new GenshinResinReadiness(TimeProvider.System);
         (int Original, int Condensed)? inventory = null;
-        for (var attempt = 0; attempt < 12; attempt++)
+        while (!readiness.Expired)
         {
-            await Task.Delay(350, ct).ConfigureAwait(false);
+            await Task.Delay(500, ct).ConfigureAwait(false);
             if (!CanRead(window)) break;
             var (frame, check) = ScreenCapture.CaptureChecked(window, ClientProcessName);
             var counts = frame is not null && CaptureVerdict.Evaluate(check).Accept
                 ? await reader.ReadAsync(frame, ct).ConfigureAwait(false) : null;
-            if (counts is not null && counts == previous)
+            if (readiness.Observe(counts))
             {
                 inventory = counts;
                 break;
             }
-            previous = counts;
         }
 
         ct.ThrowIfCancellationRequested();
@@ -304,13 +303,14 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             !SendPair(Key(0), Key(2)))
             throw new InvalidOperationException("无法确认当前原神地图并安全退出，树脂库存未确认。");
 
-        for (var attempt = 0; attempt < 5; attempt++)
+        var returnStarted = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(returnStarted) < GenshinResinReadiness.ReturnToWorldTimeout)
         {
             await Task.Delay(350, ct).ConfigureAwait(false);
             var returned = await ReadAsync(ct).ConfigureAwait(false);
             if (returned.Window != window) break;
             if (returned.View == GenshinView.World)
-                return inventory ?? throw new InvalidOperationException("没有从两个连续地图画面读到一致的树脂库存。" +
+                return inventory ?? throw new InvalidOperationException("等待地图与树脂库存就绪已达 60 秒，仍未从连续两帧读到一致库存。" +
                     (resinEvidence is null ? "" : " 资源栏识别证据：" + resinEvidence));
         }
         throw new InvalidOperationException("地图关闭后未能确认回到同一原神世界。");

@@ -7,10 +7,55 @@ namespace VIvian.Tests.Engines.BetterGi;
 
 public sealed class GenshinResinInventoryReaderTests
 {
+    [Fact]
+    public async Task LocalCapturedResourceBarReads143OriginalAndZeroCondensed()
+    {
+        var path = Environment.GetEnvironmentVariable("VIVIAN_RESIN_FIXTURE");
+        if (string.IsNullOrEmpty(path)) return;
+        var bar = (await WindowsOcrReader.DecodeFileAsync(path, default))!;
+        var frame = new CapturedFrame(new byte[bar.Width * (bar.Width * 9 / 16) * 4], bar.Width,
+            bar.Width * 9 / 16, "resource-bar replay");
+        Buffer.BlockCopy(bar.Bgra, 0, frame.Bgra, 0, bar.Bgra.Length);
+        var root = @"C:\Program Files\BetterGI";
+        var icon = (await WindowsOcrReader.DecodeFileAsync(Path.Combine(root,
+            "GameTask", "QuickTeleport", "Assets", "1920x1080", "MapSettingsButton.png"), default))!.Scale(2);
+        for (var row = 0; row < icon.Height; row++)
+            Buffer.BlockCopy(icon.Bgra, row * icon.Stride, frame.Bgra, (2004 + row) * frame.Stride + 80 * 4, icon.Stride);
+        var reader = await GenshinResinInventoryReader.LoadAsync(root, default);
+        Assert.True(reader.IsMap(frame, default));
+        Assert.Equal((143, 0), await reader.ReadAsync(frame, default));
+    }
+
     private static readonly CapturedFrame MapSettings = Icon(33, 32, 1);
     private static readonly CapturedFrame Original = Icon(10, 10, 2);
     private static readonly CapturedFrame Condensed = Icon(13, 24, 3);
     private static readonly GenshinResinInventoryReader Reader = new(MapSettings, Original, Condensed);
+
+    [Theory]
+    [InlineData("000", 0)]
+    [InlineData("2 2 2", 2)]
+    [InlineData("001", null)]
+    [InlineData("00", null)]
+    [InlineData("multi", null)]
+    [InlineData("unavailable", null)]
+    [InlineData("OOO", null)]
+    [InlineData("666", null)]
+    [InlineData("", null)]
+    public async Task RepeatedDigitFallbackRequiresThreeIdenticalValidDigits(string repeated, int? expected)
+    {
+        var reader = new GenshinResinInventoryReader(MapSettings, Original, Icon(13, 24, 99), Condensed);
+        var calls = 0;
+        var result = await reader.ReadAsync(MapFrame(), (_, _) => Task.FromResult(++calls switch
+        {
+            1 => new OcrReadResult(true, null, [Line("143/200")]),
+            2 => new OcrReadResult(true, null, []),
+            _ when repeated == "multi" => new OcrReadResult(true, null, [Line("000"), Line("000")]),
+            _ when repeated == "unavailable" => new OcrReadResult(false, "offline", [Line("000")]),
+            _ => new OcrReadResult(true, null, [Line(repeated)]),
+        }), default);
+        Assert.Equal(3, calls);
+        Assert.Equal(expected is { } value ? (143, value) : ((int, int)?)null, result);
+    }
 
     [Theory]
     [InlineData(1, "215 / 200", "4", 215, 4)]

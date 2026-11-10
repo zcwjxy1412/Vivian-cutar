@@ -145,7 +145,7 @@ internal static class BetterGiDailyAcceptance
             journal = new(runId, original, Command(program), FileRevision(config), owner);
 
         using var recheck = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        recheck.CancelAfter(TimeSpan.FromSeconds(30));
+        recheck.CancelAfter(verifyCraft ? GenshinResinReadiness.VerificationTimeout : TimeSpan.FromSeconds(30));
         var world = await recheckWorld(recheck.Token).WaitAsync(recheck.Token).ConfigureAwait(false);
         if (accountId is { } id && (world is null || world.AccountId != id))
             throw new InvalidOperationException("无法重新确认本次账号已进入原神世界，验收未启动。");
@@ -201,7 +201,7 @@ internal static class BetterGiDailyAcceptance
                     AdverseSignal: false, ExitCode: 0, CraftAction: BetterGiCraftAction.Attempt or BetterGiCraftAction.Skipped })
             {
                 using var inventoryLimit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                inventoryLimit.CancelAfter(TimeSpan.FromSeconds(25));
+                inventoryLimit.CancelAfter(GenshinResinReadiness.VerificationTimeout);
                 try
                 {
                     var same = await ConfirmSameWorldAsync(world!, recheckWorld, inventoryLimit.Token).ConfigureAwait(false);

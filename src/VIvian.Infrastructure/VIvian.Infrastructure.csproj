@@ -5,5 +5,6 @@
 <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
 <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.14" />
 <InternalsVisibleTo Include="VIvian.Tests" />
+<Content Include="Assets/Genshin/condensed-resin-map.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 </ItemGroup>
 </Project>

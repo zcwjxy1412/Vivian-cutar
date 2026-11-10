@@ -945,7 +945,13 @@ public sealed class MainViewModel : ObservableObject
         { BatchStatus = string.Join("  ", results.Append(deadline?.IsCancellationRequested == true ? "领奖验收已达时限，执行已停止。" : "批次已由用户停止。")); }
         catch (Exception ex)
         {
-            Log.Warning("Daily batch failed: {ErrorType}", ex.GetType().Name);
+            // Method names and error codes locate failures without logging account data or file contents.
+            var failureFrames = new System.Diagnostics.StackTrace(ex, false).GetFrames()
+                .Select(frame => frame.GetMethod())
+                .Where(method => method?.DeclaringType?.FullName?.StartsWith("VIvian.", StringComparison.Ordinal) == true)
+                .Select(method => method!.DeclaringType!.FullName + "." + method.Name);
+            Log.Warning("Daily batch failed: {ErrorType}; code {ErrorCode}; location {FailureFrames}; operation {Operation}",
+                ex.GetType().Name, ex.HResult, string.Join(" > ", failureFrames), ex.Data["Operation"]);
             var detail = ex is InvalidOperationException or InvalidDataException or FileNotFoundException or TimeoutException
                 ? ex.Message : UserFacingError.Describe(ex);
             BatchStatus = string.Join("  ", results.Append("批次失败：" + detail));

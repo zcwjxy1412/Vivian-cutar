@@ -191,8 +191,14 @@ public sealed class BetterGiAcceptanceStage
             .ConfigureAwait(false);
         try
         {
-            if (await group.WaitForRootExitAsync(deadline.Token).ConfigureAwait(false) != 0 || group.ActiveProcessCount != 0)
-                throw new IOException("官方 BetterGI 发行包解压失败或解压进程未完全退出。");
+            var exitCode = await group.WaitForRootExitAsync(deadline.Token).ConfigureAwait(false);
+            var activeCount = group.ActiveProcessCount;
+            if (exitCode != 0 || activeCount != 0)
+            {
+                var failure = new IOException("官方 BetterGI 发行包解压失败或解压进程未完全退出。");
+                failure.Data["Operation"] = $"BetterGI extraction: exit={exitCode}, active={activeCount}";
+                throw failure;
+            }
         }
         catch (OperationCanceledException)
         {

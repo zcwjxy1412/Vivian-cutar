@@ -25,7 +25,7 @@ if ($UnifiedInstall) {
   'VIvian M5 daily test; isolated data; elevation before batch' | Set-Content "$Target/VIvian-M5-DailyTest.marker" -Encoding ascii
 }
 if ($GenshinRewardAcceptance) {
-  'VIvian Genshin single-account reward-only acceptance' | Set-Content "$Target/VIvian-GenshinRewardAcceptance.marker" -Encoding ascii
+  'VIvian Genshin reward or saved-daily acceptance' | Set-Content "$Target/VIvian-GenshinRewardAcceptance.marker" -Encoding ascii
 }
 Copy-Item 'docs/M5_2_DELIVERY.md' "$Target/使用说明-M5.2.md"
 Copy-Item 'docs/M5_2_ACCEPTANCE.md' "$Target/验收状态-M5.2.md"
@@ -39,7 +39,7 @@ Copy-Item 'docs/M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md' "$Target/账号切换截图�
   "构建时间(UTC): $((Get-Date).ToUniversalTime().ToString('o'))"
   "构建标志: M5DailyTestBuild=true UnifiedInstallBuild=$($UnifiedInstall.IsPresent) GenshinRewardAcceptanceBuild=$($GenshinRewardAcceptance.IsPresent)"
   "SDK: $(dotnet --version)"
-  $(if ($GenshinRewardAcceptance) { "真实任务: 原神单账号领取每日奖励（一次、零树脂）" }
+  $(if ($GenshinRewardAcceptance) { "真实任务: --genshin-reward-acceptance 为单账号零树脂领奖；--genshin-daily-acceptance 按已保存配置执行勾选账号日常与切号" }
     else { "真实任务: March7thAssistant v2026.10.31 日常（预先配置，一键批次无逐项确认）" })
   $(if (-not $GenshinRewardAcceptance) { "多账号: 已保存账号切换；打开程序时由本人完成 UAC；批次内不提权；身份不明即停止" })
   $(if ($GenshinRewardAcceptance) { "数据目录: %LOCALAPPDATA%\VIvian-M6-GenshinAcceptance\<验收编号>（独立合流快照）" }

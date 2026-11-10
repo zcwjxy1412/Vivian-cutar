@@ -352,10 +352,27 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             if (normalized.Any(line => GenshinLoginScreen.IsBlockingOverlay(line.Text) ||
                 !GenshinLoginScreen.WithinFrame(line, frame.Width, frame.Height)))
                 return View(GenshinView.Unknown) with { VisualDiagnostic = "账号卡片存在弹窗或无效的识别位置。" };
+            var loginPanel = Region(610, 290, 700, 510);
             if (!normalized.Any(line => line.Text == "进入游戏") &&
                 templates.Find(frame, "caret.png", caretSearch, ct, flipVertically: true) is { } openCaret)
             {
                 var rows = GenshinLoginScreen.AnalyzeExpandedList(frame.Width, frame.Height, lines, openCaret);
+                if (rows.Count == 0)
+                {
+                    var panelLines = await ReadLoginPanelAsync(frame, loginPanel, ct).ConfigureAwait(false);
+                    var panel = GenshinLoginScreen.Analyze(frame.Width, frame.Height, panelLines);
+                    if (panel.State == GenshinLoginScreenState.NeedsUser)
+                        return View(GenshinView.NeedsUser) with { UserActionMarker = panel.UserActionMarker };
+                    rows = GenshinLoginScreen.AnalyzeExpandedList(frame.Width, frame.Height, panelLines, openCaret);
+                    if (rows.Count == 0 && panel.State == GenshinLoginScreenState.Unrecognized)
+                    {
+                        // Pale last-used labels often disappear from OCR. The contrast pass supplies only captions.
+                        var captions = await ReadLoginPanelAsync(frame, loginPanel, ct, enhanceContrast: true).ConfigureAwait(false);
+                        rows = GenshinLoginScreen.AnalyzeExpandedList(frame.Width, frame.Height, lines, openCaret, captions);
+                        if (rows.Count == 0)
+                            rows = GenshinLoginScreen.AnalyzeExpandedList(frame.Width, frame.Height, panelLines, openCaret, captions);
+                    }
+                }
                 if (rows.Count > 0)
                     return new(window, GenshinView.Dropdown, rows, null);
                 return View(GenshinView.Unknown) with { VisualDiagnostic = "已核对展开的下拉箭头，保存账号列表未能核对。" };
@@ -364,7 +381,10 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             {
                 var liveCard = GenshinLoginScreen.Analyze(frame.Width, frame.Height, lines, closedCaret);
                 if (liveCard.State == GenshinLoginScreenState.Unrecognized)
-                    liveCard = await ReadSavedCardAsync(frame, Region(610, 310, 700, 465), closedCaret, ct).ConfigureAwait(false);
+                {
+                    var panelLines = await ReadLoginPanelAsync(frame, loginPanel, ct).ConfigureAwait(false);
+                    liveCard = GenshinLoginScreen.Analyze(frame.Width, frame.Height, panelLines, closedCaret);
+                }
                 if (liveCard.State == GenshinLoginScreenState.NeedsUser)
                     return View(GenshinView.NeedsUser) with { UserActionMarker = liveCard.UserActionMarker };
                 if (liveCard.Account is { } row)
@@ -417,17 +437,25 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
 
     private static bool IsGateText(string text) => text is "点击进入" or "点击进入游戏";
 
-    private static async Task<GenshinLoginScreen> ReadSavedCardAsync(CapturedFrame frame, ScreenRegion panel,
-        ScreenRegion closedCaret, CancellationToken ct)
+    private static async Task<IReadOnlyList<RecognizedText>> ReadLoginPanelAsync(CapturedFrame frame, ScreenRegion panel,
+        CancellationToken ct, bool enhanceContrast = false)
     {
         var x = (int)panel.X;
         var y = (int)panel.Y;
         const int magnification = 2;
         var card = frame.Crop(x, y, (int)panel.Width, (int)panel.Height).Scale(magnification);
+        if (enhanceContrast)
+        {
+            for (var i = 0; i < card.Bgra.Length; i += 4)
+            {
+                var gray = (card.Bgra[i] + 2 * card.Bgra[i + 1] + card.Bgra[i + 2]) / 4;
+                var value = (byte)Math.Clamp((gray - 170) * 255 / 50, 0, 255);
+                card.Bgra[i] = card.Bgra[i + 1] = card.Bgra[i + 2] = value;
+            }
+        }
         var read = await WindowsOcrReader.ReadAsync(card, ct).ConfigureAwait(false);
-        var lines = read.Lines.Select(line => new RecognizedText(line.Text, x + line.X / magnification,
+        return read.Lines.Select(line => new RecognizedText(line.Text, x + line.X / magnification,
             y + line.Y / magnification, line.Width / magnification, line.Height / magnification)).ToArray();
-        return GenshinLoginScreen.Analyze(frame.Width, frame.Height, lines, closedCaret);
     }
 
     internal static bool IsUpdateCheckText(string text) => text.TrimEnd('.', '。', '…') == "检查更新中";

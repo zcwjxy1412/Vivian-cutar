@@ -251,6 +251,21 @@ public sealed class GenshinLoginTests
     }
 
     [Fact]
+    public void LogoSloganDigitsAreOutsideTheSavedAccountRow()
+    {
+        var card = GenshinLoginScreen.Analyze(1920, 1080,
+        [
+            new("HO", 935, 377, 59, 43),
+            new("TECH0TAKUSSAVETHEW0RLD", 879, 426, 160, 8),
+            new(Target, 788, 487, 117, 18),
+            new("进入游戏", 910, 615, 100, 22),
+            new("登录其他账号", 890, 690, 140, 20),
+        ], new(1191, 490, 18, 12));
+
+        Assert.Equal(Target, card.Account?.NormalizedPhone);
+    }
+
+    [Fact]
     public void FourKExpandedListRemovesOnlyTheRepeatedHeaderAndKeepsTheActualRows()
     {
         var rows = GenshinLoginScreen.AnalyzeExpandedList(3840, 2160, DoubleSize(Expanded()),
@@ -260,6 +275,20 @@ public sealed class GenshinLoginTests
         Assert.Equal([1106, 1284], rows.Select(row => row.Y));
         Assert.Empty(GenshinLoginScreen.AnalyzeExpandedList(3840, 2160, DoubleSize(Expanded()),
             new(2382, 1260, 36, 24)));
+    }
+
+    [Fact]
+    public void AlternateCaptionsRecoverMissingTextButNeverSupplyAnAccountNumber()
+    {
+        var all = Expanded();
+        var withoutCaptions = all.Where(line => line.Text is not "刚 刚" and not "1 天 前").ToArray();
+        var caret = new ScreenRegion(1191, 490, 18, 12);
+
+        Assert.Empty(GenshinLoginScreen.AnalyzeExpandedList(1920, 1080, withoutCaptions, caret));
+        Assert.Equal([Target, "139****74"], GenshinLoginScreen.AnalyzeExpandedList(
+            1920, 1080, withoutCaptions, caret, all).Select(row => row.NormalizedPhone));
+        Assert.Empty(GenshinLoginScreen.AnalyzeExpandedList(1920, 1080,
+            withoutCaptions.Where(line => line.Text != "139******74").ToArray(), caret, all));
     }
 
     [Theory]

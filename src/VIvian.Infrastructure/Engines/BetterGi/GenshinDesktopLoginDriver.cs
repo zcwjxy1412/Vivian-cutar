@@ -18,7 +18,7 @@ internal enum GenshinInput
 
 internal sealed record GenshinDesktopFrame(StarRailWindowInfo? Window, GenshinView View,
     IReadOnlyList<LoginAccountObservation> Rows, ScreenRegion? Main, ScreenRegion? Secondary = null, string? Uid = null,
-    string? UserActionMarker = null);
+    string? UserActionMarker = null, LoginScanFailure? CaptureFailure = null);
 
 internal sealed record GenshinVerifiedWorld(Guid AccountId, IntPtr WindowHandle, int ProcessId,
     DateTimeOffset ProcessStartedAt, string? Uid);
@@ -300,6 +300,7 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
     {
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutSource.CancelAfter(timeout);
+        GenshinDesktopFrame? last = null;
         try
         {
             while (true)
@@ -311,6 +312,7 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
                     window.ProcessId <= 0 || _window is { } expected && !SameWindow(expected, window))
                     throw new LoginInterruptedException("原神窗口不在前台，或客户端身份已经变化。");
                 _window = window;
+                last = frame;
                 if (frame.View == GenshinView.NeedsUser)
                     throw new LoginInterruptedException(frame.UserActionMarker is { } marker
                         ? $"原神需要手动完成登录验证或协议确认。画面标志为「{marker}」。"
@@ -322,7 +324,14 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new LoginInterruptedException("等待原神下一步画面超时，已停止。");
+            var reason = last?.CaptureFailure switch
+            {
+                LoginScanFailure.WindowOccluded => "最近一次采集时画面被遮挡。",
+                not null => "最近一次采集未获得可核对的游戏画面。",
+                _ when last?.View == GenshinView.Unknown => "已取得游戏画面，画面尚未识别。",
+                _ => "",
+            };
+            throw new LoginInterruptedException("等待原神下一步画面超时，已停止。" + reason);
         }
     }
 

@@ -374,6 +374,10 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         if (confirmLogout is not null && Find("quit.png", dialog) is { } quit)
             return View(GenshinView.ConfirmLogout, quit);
 
+        var titleRegion = Region(805, 930, 310, 150);
+        if (Label(normalized, titleRegion, IsUpdateCheckText) is not null)
+            return View(GenshinView.CheckingUpdates);
+
         var gate = Label(normalized, Region(805, 945, 310, 135), IsGateText);
         var logoutRegion = GateLogoutSearch(frame.Height);
         if (gate is not null)
@@ -404,6 +408,8 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     }
 
     private static bool IsGateText(string text) => text is "点击进入" or "点击进入游戏";
+
+    internal static bool IsUpdateCheckText(string text) => text.TrimEnd('.', '。', '…') == "检查更新中";
 
     internal static ScreenRegion GateLogoutSearch(int frameHeight)
     {

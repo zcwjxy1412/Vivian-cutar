@@ -8,7 +8,7 @@ namespace VIvian.Infrastructure.Engines.BetterGi;
 
 internal enum GenshinView
 {
-    Unknown, NeedsUser, Card, Dropdown, Gate, World, Menu, LeaveWorld, ConfirmLogout,
+    Unknown, CheckingUpdates, NeedsUser, Card, Dropdown, Gate, World, Menu, LeaveWorld, ConfirmLogout,
 }
 
 internal enum GenshinInput
@@ -33,6 +33,8 @@ internal interface IGenshinLoginDesktop
 
 public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
 {
+    // Cold launch includes the game's own update check. Returning from a world uses the regular login timeout.
+    private static readonly TimeSpan ColdLoginScreenTimeout = TimeSpan.FromMinutes(3);
     private readonly IGenshinLoginDesktop _desktop;
     private readonly TimeSpan _poll;
     private readonly bool _stopOwnedClient;
@@ -117,7 +119,8 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         {
             return Failed(LoginSwitchStage.ReturningToLogin, ex.Message);
         }
-        return await ReachCardAsync(policy.LoginScreen, null, cancellationToken).ConfigureAwait(false);
+        return await ReachCardAsync(policy.LoginScreenTimeout is null ? ColdLoginScreenTimeout : policy.LoginScreen,
+            null, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<LoginSwitchOutcome> RestartToLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
@@ -324,6 +327,8 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            if (last?.View == GenshinView.CheckingUpdates)
+                throw new LoginInterruptedException("等待超时，原神仍在检查更新，尚未到达登录画面。");
             var reason = last?.CaptureFailure switch
             {
                 LoginScanFailure.WindowOccluded => "最近一次采集时画面被遮挡。",

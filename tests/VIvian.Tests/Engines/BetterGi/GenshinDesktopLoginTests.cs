@@ -48,6 +48,28 @@ public sealed class GenshinDesktopLoginTests
     }
 
     [Theory]
+    [InlineData("检查更新中…", true)]
+    [InlineData("检查更新中...", true)]
+    [InlineData("检查更新中", true)]
+    [InlineData("检查更新失败", false)]
+    [InlineData("点击进入", false)]
+    public void OnlyTheGameUpdateCheckIsRecognizedAsWaiting(string text, bool expected) =>
+        Assert.Equal(expected, GenshinWindowsLoginDesktop.IsUpdateCheckText(text));
+
+    [Fact]
+    public async Task CheckingForGameUpdatesDoesNotSendInput()
+    {
+        var desktop = new Desktop(Frame(GenshinView.CheckingUpdates));
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromSeconds(30));
+
+        var result = await driver.EnsureLoginAsync(new SwitchPolicy(LoginScreenTimeout: TimeSpan.FromMilliseconds(500)), default);
+
+        Assert.False(result.Ok);
+        Assert.Contains("原神仍在检查更新", result.Detail);
+        Assert.Empty(desktop.Actions);
+    }
+
+    [Theory]
     [InlineData(LoginScanFailure.WindowOccluded, null, "画面被遮挡")]
     [InlineData(LoginScanFailure.CaptureFailed, null, "未获得可核对的游戏画面")]
     [InlineData(null, null, "画面尚未识别")]

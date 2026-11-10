@@ -42,6 +42,8 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
                 if (!_active) throw new InvalidOperationException("原神桌面会话已结束。");
                 EnsureDesktopAvailable();
                 var existing = FindExistingClient();
+                if (stopOwnedClient && existing is not null && _ownedClient is null)
+                    throw new InvalidOperationException("检测到先前打开的原神。只有本次批次自行启动的客户端才可运行日常。");
                 if (stopOwnedClient && (_launchUnverified || _client is not null && _client != existing))
                     throw new InvalidOperationException("原神启动进程已退出或发生变化，已停止登录。");
                 _client = client = existing ?? StartClient();

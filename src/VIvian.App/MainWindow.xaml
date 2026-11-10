@@ -146,8 +146,18 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,2" Margin="0,0,6,4"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
 <Button Content="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Click="OpenGameSettings" Tag="{Binding Id}" ToolTip="配置" Padding="10,8" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 配置}"/>
-<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.OneClickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" IsEnabled="{Binding CanRunForReal}" ToolTip="运行" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
+<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.PlayGameCardCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" IsEnabled="{Binding CanPlayFromHome}" ToolTip="{Binding HomePlayHint}" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
 </StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+
+<Border Style="{StaticResource Panel}" Padding="18,14" Visibility="{Binding ShowHomeGenshinReward, Converter={StaticResource Visible}}">
+<StackPanel>
+<TextBlock Text="原神首跑 · 领取每日奖励" Style="{StaticResource H2}"/>
+<TextBlock Text="选择一个原神账号。此次只领奖，消耗 0 树脂，运行记录保存在隔离快照。" Style="{StaticResource Small}"/>
+<ComboBox ItemsSource="{Binding HomeGenshinRewardAccounts}" SelectedItem="{Binding HomeGenshinRewardAccount}" DisplayMemberPath="Name" IsSynchronizedWithCurrentItem="False"
+          AutomationProperties.Name="本次领奖验收的原神账号" Margin="0,8,0,8"/>
+<WrapPanel><Button Style="{StaticResource Primary}" Content="确认并启动领奖" Click="ConfirmHomeGenshinReward" IsEnabled="{Binding CanConfirmHomeGenshinReward}" Margin="0,0,8,0"/>
+<Button Content="取消" Command="{Binding CancelHomeGenshinRewardCommand}"/></WrapPanel>
+</StackPanel></Border>
 
 <!-- 最近运行 + 本次运行 -->
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>

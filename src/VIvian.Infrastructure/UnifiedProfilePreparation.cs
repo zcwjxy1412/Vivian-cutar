@@ -9,6 +9,7 @@ namespace VIvian.Infrastructure;
 public static class UnifiedProfilePreparation
 {
     public const string InstalledProfileName = "VIvian-UserData";
+    public const string GenshinHomeRewardFolder = "VIvian-M6-GenshinHomeAcceptance";
     private const string DatabaseName = "vivian.db";
     private const int PreparedApplicationId = 0x5649564E; // VIVN
     private const int Win32GetHandle = 29; // SQLITE_FCNTL_WIN32_GET_HANDLE
@@ -42,16 +43,28 @@ public static class UnifiedProfilePreparation
     public static async Task CreateGenshinRewardAcceptanceSnapshotAsync(string destination, CancellationToken ct)
     {
         var installed = InstalledDirectory;
-        var parent = Path.Combine(Path.GetDirectoryName(installed)!, "VIvian-M6-GenshinAcceptance");
+        using var instance = SingleInstanceGuard.Acquire(installed);
+        if (!instance.IsOwner)
+            throw new InvalidOperationException("请先关闭正式合流程序，再准备原神验收快照。");
+        await CreateRewardSnapshotAsync(installed, destination, "VIvian-M6-GenshinAcceptance", instance, ct)
+            .ConfigureAwait(false);
+    }
+
+    public static Task CreateGenshinHomeRewardSnapshotAsync(string destination, SingleInstanceGuard instance, CancellationToken ct) =>
+        CreateRewardSnapshotAsync(InstalledDirectory, destination, GenshinHomeRewardFolder, instance, ct);
+
+    internal static async Task CreateRewardSnapshotAsync(string installed, string destination, string folder,
+        SingleInstanceGuard instance, CancellationToken ct)
+    {
+        if (!instance.Owns(installed))
+            throw new InvalidOperationException("主程序未持有正式合流档案的单实例锁。");
+        var parent = Path.Combine(Path.GetDirectoryName(installed)!, folder);
         var output = Path.GetFullPath(destination);
         if (!string.Equals(Path.GetDirectoryName(output), parent, StringComparison.OrdinalIgnoreCase) ||
             !Guid.TryParseExact(Path.GetFileName(output), "N", out var attempt) || attempt == Guid.Empty)
             throw new ArgumentException("原神领奖验收需要独立的单次数据目录。", nameof(destination));
         if (ReadOnlyFileAccess.FindReparsePoint(parent) is not null)
             throw new IOException("原神验收目录含链接，拒绝创建快照。");
-        using var instance = SingleInstanceGuard.Acquire(installed);
-        if (!instance.IsOwner)
-            throw new InvalidOperationException("请先关闭正式合流程序，再准备原神验收快照。");
         using var desktop = DesktopOperationLease.Acquire(installed);
         if (File.Exists(Path.Combine(installed, "configuration-recovery", "temporary-config-recovery.json")))
             throw new InvalidOperationException("正式档案的临时配置待恢复，无法开始原神验收。");

@@ -57,6 +57,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IUnifiedTaskControl _control;
     private readonly GenshinDailyBatch? _genshinDailyBatch;
     private readonly GenshinDailyRecovery? _genshinDailyRecovery;
+    private GenshinHomeReward? _homeGenshinReward;
     private readonly MultiAccountOrchestrator _orchestrator;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
@@ -73,7 +74,13 @@ public sealed class MainViewModel : ObservableObject
     public bool IsIdle => !_busy;
     public bool CanOperateWorkspace => _paths.RewardAcceptanceScope is null;
     public bool CanEditWorkspace => CanOperateWorkspace && IsIdle;
-    private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); Raise(nameof(CanEditWorkspace)); }
+    private void Busy(bool value)
+    {
+        _busy = value;
+        Raise(nameof(IsIdle));
+        Raise(nameof(CanEditWorkspace));
+        Raise(nameof(CanConfirmHomeGenshinReward));
+    }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
         + (RealExecutionPolicy.IsUnifiedInstall ? "VIvian 合流版" : RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
@@ -125,7 +132,7 @@ public sealed class MainViewModel : ObservableObject
     public bool BatchRunning
     {
         get => _batchRunning;
-        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); Raise(nameof(RunStateText)); }
+        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); Raise(nameof(RunStateText)); Raise(nameof(CanConfirmHomeGenshinReward)); }
     }
     /// <summary>The home stop button and F10 also cancel a login verification.</summary>
     public bool CanStopAll => BatchRunning || Queue.IsRunning || GenshinConfiguration.IsVerifyingLogin;
@@ -245,9 +252,32 @@ public sealed class MainViewModel : ObservableObject
         if (_genshinDailyRecovery is { } recoverGenshin)
         {
             Guid? recovered;
-            try { recovered = await Task.Run(() => recoverGenshin(_paths.DataDirectory, CancellationToken.None)); }
+            var recordedInSnapshot = false;
+            var missingAudit = false;
+            try
+            {
+                recovered = await Task.Run(() => _homeGenshinReward is { } home
+                    ? BetterGiAccountBatch.RecoverSavedDailyAsync(_paths.DataDirectory, CancellationToken.None, async (runId, ct) =>
+                    {
+                        recordedInSnapshot = await home.RecordRecoveryAsync(runId, ct).ConfigureAwait(false);
+                        if (!recordedInSnapshot)
+                        {
+                            var runs = await Accounts.Database.ReadBoundRunsAsync(GameId.Genshin, null, 20, ct).ConfigureAwait(false);
+                            if (runs.SingleOrDefault(run => run.RunId == runId && !run.IsSimulation) is not { } officialRun)
+                            {
+                                missingAudit = true;
+                                Log.Warning("Genshin recovery {RunId} verified; matching SQLite run was not recorded", runId);
+                                return;
+                            }
+                            if (officialRun.IsUnresolved)
+                                await Accounts.Database.AcknowledgeAsync(runId, "VIvian 核对了原神桌面交接与 BetterGI 协议恢复。",
+                                    DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                        }
+                    })
+                    : recoverGenshin(_paths.DataDirectory, CancellationToken.None));
+            }
             catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException
-                or UnauthorizedAccessException or TimeoutException or JsonException)
+                or UnauthorizedAccessException or TimeoutException or JsonException or Microsoft.Data.Sqlite.SqliteException)
             {
                 Status = "原神桌面交接待确认：" + ex.Message;
                 return;
@@ -255,7 +285,9 @@ public sealed class MainViewModel : ObservableObject
             if (recovered is { } runId)
             {
                 Status = $"已核对并恢复原神日常的桌面交接（RunId {runId:D}）。";
-                if (!await Queue.AcknowledgeGenshinRecoveryAsync(runId))
+                if (missingAudit) Status += " 对应的 SQLite 运行记录缺失，已单独记录恢复证据编号。";
+                if (recordedInSnapshot || missingAudit) await Queue.RefreshAsync();
+                else if (!await Queue.AcknowledgeGenshinRecoveryAsync(runId))
                     Status += " 运行日志的清理确认尚未写入，请核对该条记录。";
                 return;
             }
@@ -383,7 +415,8 @@ public sealed class MainViewModel : ObservableObject
             () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinOperationAsync, CanOperateWorkspace);
         GenshinConfiguration.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin)) Raise(nameof(CanStopAll));
+            if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin))
+            { Raise(nameof(CanStopAll)); Raise(nameof(CanConfirmHomeGenshinReward)); }
             if (e.PropertyName == nameof(GenshinConfigurationViewModel.SelectedForDaily)) Raise(nameof(SelectedAccountsText));
         };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
@@ -391,7 +424,7 @@ public sealed class MainViewModel : ObservableObject
         Queue.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(QueueViewModel.IsRunning) or nameof(QueueViewModel.IsIdle) or nameof(QueueViewModel.HasUnresolved))
-            { RaiseAdmission(); RaiseHome(); }
+            { RaiseAdmission(); RaiseHome(); Raise(nameof(CanConfirmHomeGenshinReward)); }
         };
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         AutoDiscoverCommand = new(() => RunAsync(() => AutoDiscoverAsync(persist: true)), HandleError);
@@ -431,6 +464,8 @@ public sealed class MainViewModel : ObservableObject
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         RecoverDesktopCommand = new(() => RunAsync(RecoverDesktopAsync), HandleError);
         OneClickCommand = new(scope => OneClickAsync(scope is GameId game ? game : null), HandleError);
+        PlayGameCardCommand = new(scope => PlayGameCardAsync(scope is GameId game ? game : null), HandleError);
+        CancelHomeGenshinRewardCommand = new(() => ShowHomeGenshinReward = false);
         foreach (var card in Engines)
         {
             card.CanOperateWorkspace = CanOperateWorkspace;
@@ -570,6 +605,63 @@ public sealed class MainViewModel : ObservableObject
             Raise(name);
     }
     public AsyncCommand OneClickCommand { get; }
+    public AsyncCommand PlayGameCardCommand { get; }
+    public RelayCommand CancelHomeGenshinRewardCommand { get; }
+    public IReadOnlyList<GameAccount> HomeGenshinRewardAccounts { get; private set; } = [];
+    private GameAccount? _homeGenshinRewardAccount;
+    public GameAccount? HomeGenshinRewardAccount
+    {
+        get => _homeGenshinRewardAccount;
+        set { Set(ref _homeGenshinRewardAccount, value); Raise(nameof(CanConfirmHomeGenshinReward)); }
+    }
+    private bool _showHomeGenshinReward;
+    public bool ShowHomeGenshinReward
+    {
+        get => _showHomeGenshinReward;
+        private set { Set(ref _showHomeGenshinReward, value); Raise(nameof(CanConfirmHomeGenshinReward)); }
+    }
+    public bool CanConfirmHomeGenshinReward => ShowHomeGenshinReward && IsIdle && !CanStopAll
+        && !Queue.HasUnresolved && HomeGenshinRewardAccount is not null;
+
+    internal void ConfigureHomeGenshinReward(GenshinHomeReward home)
+    {
+        _homeGenshinReward = home;
+        Engines.Single(card => card.Id == GameId.Genshin).HomeRewardWired = _genshinDailyBatch is null;
+        Queue.HomeRewardHistory = home.ReadRecentRunsAsync;
+    }
+
+    private Task PlayGameCardAsync(GameId? game)
+    {
+        if (game is null) return Task.CompletedTask;
+        if (game != GameId.Genshin || _homeGenshinReward is null || _genshinDailyBatch is not null)
+            return OneClickAsync(game);
+        if (!CanOperateWorkspace || !IsIdle || CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+        { Status = "请先结束任务并核对桌面交接。"; return Task.CompletedTask; }
+        if (!Engines.Single(card => card.Id == GameId.Genshin).CanPlayFromHome)
+        { Status = "请先保存并核对固定版本的 BetterGI 安装目录。"; return Task.CompletedTask; }
+        HomeGenshinRewardAccounts = GenshinConfiguration.Accounts
+            .Where(account => account.Enabled && account.LoginState == "recognized").ToArray();
+        Raise(nameof(HomeGenshinRewardAccounts));
+        HomeGenshinRewardAccount = null;
+        ShowHomeGenshinReward = HomeGenshinRewardAccounts.Count > 0;
+        Status = ShowHomeGenshinReward ? "请选择本次要验收的原神账号。"
+            : "请先在账号管理为原神账号绑定登录截图。";
+        return Task.CompletedTask;
+    }
+
+    internal Task RunHomeGenshinRewardAsync() => RunAsync(async () =>
+    {
+        if (_homeGenshinReward is not { } home || !CanOperateWorkspace || !ShowHomeGenshinReward ||
+            HomeGenshinRewardAccount is not { } selected || !HomeGenshinRewardAccounts.Contains(selected)) return;
+        ShowHomeGenshinReward = false;
+        try
+        {
+            var request = home.CreateRequest(selected);
+            await RunAccountBatchAsync(GameId.Genshin, acceptance: request, homeReward: home);
+            Status = BatchStatus;
+        }
+        catch (Exception ex) { HandleError(ex); }
+    });
 
     internal async Task<int?> OneClickAsync(GameId? scope = null, GenshinRewardAcceptance? acceptance = null,
         GenshinDailyVerification? verify = null)
@@ -751,7 +843,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private async Task<int?> RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null,
-        GenshinRewardAcceptance? acceptance = null, GenshinDailyVerification? verify = null)
+        GenshinRewardAcceptance? acceptance = null, GenshinDailyVerification? verify = null, GenshinHomeReward? homeReward = null)
     {
         if (!CanOperateWorkspace && acceptance is null)
         { BatchStatus = "隔离验收只执行本次启动指定的原神任务。"; return null; }
@@ -817,7 +909,8 @@ public sealed class MainViewModel : ObservableObject
                 if (acceptance is not null)
                 {
                     BatchRunning = true;
-                    BatchStatus = "原神 · 正在核对本次领奖验收";
+                    Queue.HomeRewardRunning = homeReward is not null;
+                    BatchStatus = homeReward is null ? "原神 · 正在核对本次领奖验收" : "原神首跑 · 正在准备零树脂领奖";
                     Log.Information("Genshin reward acceptance {Attempt} starting", acceptance.Attempt);
                 }
                 var archive = await ReadOnlyFileAccess.BoundedAsync(() => DailyBatchSequence.FindGenshinArchive(AppContext.BaseDirectory),
@@ -833,7 +926,9 @@ public sealed class MainViewModel : ObservableObject
                     {
                         outcome = await Task.Run(() => acceptance is null
                             ? batch!(Accounts.Database, genshin, root, archive, _paths.DataDirectory, progress, ct)
-                            : acceptance.RunAsync(Accounts.Database, root, archive, _paths.DataDirectory, verify!, progress, ct), ct);
+                            : homeReward is not null
+                                ? homeReward.RunAsync(acceptance, root, archive, progress, ct)
+                                : acceptance.RunAsync(Accounts.Database, root, archive, _paths.DataDirectory, verify!, progress, ct), ct);
                     }
                     finally { await Queue.RefreshAsync(); }
                     return outcome;
@@ -873,6 +968,7 @@ public sealed class MainViewModel : ObservableObject
             var started = BatchRunning;
             _batchCts = null;
             BatchRunning = false;
+            Queue.HomeRewardRunning = false;
             if (started)
             {
                 try
@@ -883,7 +979,7 @@ public sealed class MainViewModel : ObservableObject
                 catch (Exception ex) { Log.Warning("Refresh after daily batch failed: {ErrorType}", ex.GetType().Name); }
             }
         }
-        if (acceptanceOutcome is null) return null;
+        if (acceptanceOutcome is null || homeReward is not null) return null;
 
         var pendingRecovery = Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
         var exitCode = await Task.Run(() => GenshinRewardAcceptance.AutoExitCode(acceptanceOutcome, acceptancePassed, pendingRecovery, () =>

@@ -94,7 +94,20 @@ public sealed class QueueViewModel : ObservableObject
 
     private bool _isRunning;
     public bool IsRunning { get => _isRunning; private set { Set(ref _isRunning, value); Raise(nameof(IsIdle)); Raise(nameof(CanPause)); Raise(nameof(CanAcknowledge)); } }
-    public bool IsIdle => !IsRunning;
+    private bool _homeRewardRunning;
+    internal bool HomeRewardRunning
+    {
+        get => _homeRewardRunning;
+        set
+        {
+            if (_homeRewardRunning == value) return;
+            _homeRewardRunning = value;
+            Raise(nameof(IsIdle));
+            Raise(nameof(CanAcknowledge));
+        }
+    }
+    public bool IsIdle => !IsRunning && !HomeRewardRunning;
+    internal Func<int, Task<IReadOnlyList<RunRecord>>>? HomeRewardHistory { get; set; }
     public bool CanAcknowledge => CanOperateWorkspace && IsIdle;
     public string HomeCleanupHint => CanOperateWorkspace
         ? "VIvian 每 5 秒自动核实一次：星铁助手的任务进程一退出，这里会自己消失，不用你操作。只有一直无法核实时，才需要你确认星铁助手窗口和命令行窗口都已关闭后点下面的按钮。原判定结果不会被改写。"
@@ -125,7 +138,7 @@ public sealed class QueueViewModel : ObservableObject
 
     private async Task<QueueResult?> RunItemsAsync(IReadOnlyList<QueueItem> items, bool simulation)
     {
-        if (!CanOperateWorkspace || IsRunning) return null;
+        if (!CanOperateWorkspace || !IsIdle) return null;
         if (items.Count == 0)
         {
             Status = "请至少选择一款游戏。";
@@ -218,7 +231,7 @@ public sealed class QueueViewModel : ObservableObject
 
     public async Task AcknowledgeAllAsync()
     {
-        if (!CanOperateWorkspace) return;
+        if (!CanOperateWorkspace || HomeRewardRunning) return;
         // Goes through the scheduler: it refuses while an abandoned adapter call is still running, and only releases
         // its in-session barrier after the acknowledgement has been stored.
         var refused = 0;
@@ -243,8 +256,20 @@ public sealed class QueueViewModel : ObservableObject
     {
         var recent = await Task.Run(() => _history.ReadRecentRunsAsync(30));
         var unresolved = await Task.Run(() => _history.ReadUnresolvedAsync());
+        IReadOnlyList<RunRecord> isolated = [];
+        if (HomeRewardHistory is { } readHomeReward)
+        {
+            try { isolated = await Task.Run(() => readHomeReward(30)); }
+            catch (Exception ex) when (ex is System.IO.IOException or System.IO.InvalidDataException or InvalidOperationException
+                or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+            { Serilog.Log.Warning("Could not read isolated Genshin acceptance history: {ErrorType}", ex.GetType().Name); }
+        }
         Runs.Clear();
-        foreach (var r in recent) Runs.Add(ToRow(r));
+        foreach (var r in recent.Concat(isolated).OrderByDescending(r => r.CreatedAt).Take(30))
+        {
+            var row = ToRow(r);
+            Runs.Add(isolated.Contains(r) ? row with { Summary = "隔离首跑 · " + row.Summary } : row);
+        }
         Unresolved.Clear();
         foreach (var r in unresolved) Unresolved.Add(ToRow(r));
         // In-session hazards the database may not know about (failed write, adapter call still running).

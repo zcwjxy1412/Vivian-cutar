@@ -25,17 +25,20 @@ public sealed class SingleInstanceGuard : IDisposable
 {
     private readonly ManualResetEventSlim _release;
     private readonly Thread? _owner;
+    private readonly string _name;
     private int _disposed;
 
-    private SingleInstanceGuard(InstanceLockResult result, ManualResetEventSlim release, Thread? owner)
+    private SingleInstanceGuard(InstanceLockResult result, ManualResetEventSlim release, Thread? owner, string name)
     {
         Result = result;
         _release = release;
         _owner = owner;
+        _name = name;
     }
 
     public InstanceLockResult Result { get; }
     public bool IsOwner => Result is InstanceLockResult.Acquired or InstanceLockResult.AcquiredAfterAbandoned;
+    internal bool Owns(string directory) => IsOwner && Volatile.Read(ref _disposed) == 0 && _name == NameFor(directory);
 
     /// <summary>Mutex name derived from the full data directory path (case-insensitive, as on Windows).</summary>
     public static string NameFor(string dataDirectory)
@@ -59,7 +62,7 @@ public sealed class SingleInstanceGuard : IDisposable
         var result = decided.Task.GetAwaiter().GetResult();
         var holding = result is InstanceLockResult.Acquired or InstanceLockResult.AcquiredAfterAbandoned;
         if (!holding) owner.Join();
-        return new SingleInstanceGuard(result, release, holding ? owner : null);
+        return new SingleInstanceGuard(result, release, holding ? owner : null, name);
     }
 
     private static void Hold(string name, Func<string, Mutex> openMutex,

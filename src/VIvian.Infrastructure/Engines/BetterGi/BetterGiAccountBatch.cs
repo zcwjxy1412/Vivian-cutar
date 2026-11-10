@@ -71,6 +71,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             : null;
 
         using var lease = DesktopOperationLease.Acquire(RecoveryOwner(profileDirectory));
+        BetterGiDailyAcceptance.RemoveInactiveRecoveryJournals(lease, ct);
         var stages = new Dictionary<Guid, string>();
         foreach (var account in selected)
         {
@@ -119,6 +120,10 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
 
     public static Task<Guid?> RecoverSavedDailyAsync(string profileDirectory, CancellationToken ct) =>
         BetterGiDailyAcceptance.RecoverPendingForOwnerAsync(RecoveryOwner(profileDirectory), ct);
+
+    public static Task<Guid?> RecoverSavedDailyAsync(string profileDirectory, CancellationToken ct,
+        Func<Guid, CancellationToken, Task> beforeRelease) =>
+        BetterGiDailyAcceptance.RecoverPendingForOwnerAsync(RecoveryOwner(profileDirectory), ct, beforeRelease);
 
     private static string RecoveryOwner(string profileDirectory) => Path.Combine(profileDirectory, "BetterGi-日常");
 

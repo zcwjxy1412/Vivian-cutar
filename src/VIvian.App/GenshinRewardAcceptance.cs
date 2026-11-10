@@ -24,12 +24,12 @@ internal sealed class GenshinRewardAcceptance
         false;
 #endif
 
-    private GenshinRewardAcceptance(Guid attempt, Guid? account, long revision, string localAppData)
+    internal GenshinRewardAcceptance(Guid attempt, Guid? account, long revision, string profileRoot)
     {
         Attempt = attempt;
         AccountId = account;
         Revision = revision;
-        ProfileDirectory = Path.Combine(localAppData, "VIvian-M6-GenshinAcceptance", attempt.ToString("N"));
+        ProfileDirectory = Path.Combine(profileRoot, attempt.ToString("N"));
     }
 
     internal Guid Attempt { get; }
@@ -49,11 +49,12 @@ internal sealed class GenshinRewardAcceptance
             throw new InvalidOperationException("原神领奖验收仅在带有专用标记的合流验收构建中可用。");
         if (!Path.IsPathFullyQualified(localAppData))
             throw new InvalidOperationException("无法确认 Windows 本机数据目录。");
+        var profileRoot = Path.Combine(localAppData, "VIvian-M6-GenshinAcceptance");
         if (args is [ReviewOption, var reviewAttempt] && TryId(reviewAttempt, out var prior))
-            return new(prior, null, 0, localAppData);
+            return new(prior, null, 0, profileRoot);
         if (args is [RunOption, var attempt, var account, var revision] && TryId(attempt, out var runId) &&
             TryId(account, out var accountId) && long.TryParse(revision, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
-            return new(runId, accountId, value, localAppData);
+            return new(runId, accountId, value, profileRoot);
         throw new ArgumentException("请提供唯一的验收编号、一个原神账号 GUID 及账号 revision，或用 --genshin-reward-review 查看既有验收。");
     }
 
@@ -65,7 +66,8 @@ internal sealed class GenshinRewardAcceptance
             !pendingRecovery && confirmDesktopClean() ? (passed ? 0 : 1) : null;
 
     internal async Task<MultiAccountOutcome> RunAsync(LocalDatabase database, string betterGiRoot, string archivePath,
-        string profileDirectory, GenshinDailyVerification verify, Action<BatchAccountProgress>? progress, CancellationToken ct)
+        string profileDirectory, GenshinDailyVerification verify, Action<BatchAccountProgress>? progress, CancellationToken ct,
+        string? recoveryProfileDirectory = null, Action? beforeVerify = null)
     {
         if (AccountId is not { } id || !string.Equals(ProfileDirectory, profileDirectory, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("原神领奖验收需要本次请求对应的隔离合流档案。");
@@ -74,7 +76,8 @@ internal sealed class GenshinRewardAcceptance
         if (target is not { Enabled: true, LoginState: "recognized" } || target.Revision != Revision)
             throw new InvalidOperationException("原神验收账号缺失、未识别、已停用或 revision 已变化。");
         ct.ThrowIfCancellationRequested();
-        return await verify(database, [target], betterGiRoot, archivePath, profileDirectory,
+        beforeVerify?.Invoke();
+        return await verify(database, [target], betterGiRoot, archivePath, recoveryProfileDirectory ?? profileDirectory,
             rewardOnly: true, progress, ct).ConfigureAwait(false);
     }
 }

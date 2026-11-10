@@ -10,6 +10,24 @@ public sealed class BetterGiDailyAcceptanceTests
     private static readonly Guid Account = new("1810a252-65f3-4ee9-afb0-75c80757c33d");
     private const string Client = @"C:\Games\YuanShen.exe";
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void InterruptedRunCanRecoverOnlyWithItsOwnConfirmedCleanup(bool cancelled, bool timedOut)
+    {
+        var run = Guid.NewGuid();
+        var at = DateTimeOffset.UtcNow;
+        var owned = new BetterGiRunObservation(123, at, true, false, false, false, true, 1, false, false);
+        var report = new BetterGiDailyAcceptance.AcceptanceReport(run, RunOutcome.Cancelled, ReasonCodes.UserStop,
+            [new Evidence(run, EvidenceKind.CancelReported, "模拟停止", at)], owned, cancelled, timedOut,
+            CleanupState.Confirmed, false, false, null);
+
+        Assert.True(BetterGiDailyAcceptance.HasRecoveryProof(report, run));
+        Assert.False(BetterGiDailyAcceptance.HasRecoveryProof(report with { Cleanup = CleanupState.Unconfirmed }, run));
+        Assert.False(BetterGiDailyAcceptance.HasRecoveryProof(report with { Observation = owned with { OwnedPrimary = false } }, run));
+        Assert.False(BetterGiDailyAcceptance.HasRecoveryProof(report, Guid.NewGuid()));
+    }
+
     [Fact]
     public async Task ReadsTheExactRenderedAccountAndPreservesTheLiteralPartyName()
     {

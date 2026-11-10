@@ -344,11 +344,12 @@ internal static class BetterGiDailyAcceptance
         (stage, _, program) = await ValidateStageAsync(stage, ct).ConfigureAwait(false);
         var journal = ReadJournal(stage);
         using var lease = DesktopOperationLease.Acquire(journal.LockOwner ?? stage, recovery: true);
-        RecoverWithLease(stage, program, journal, lease, ct);
+        await RecoverWithLeaseAsync(stage, program, journal, lease, ct).ConfigureAwait(false);
         return 0;
     }
 
-    internal static async Task<Guid?> RecoverPendingForOwnerAsync(string ownerDirectory, CancellationToken ct)
+    internal static async Task<Guid?> RecoverPendingForOwnerAsync(string ownerDirectory, CancellationToken ct,
+        Func<Guid, CancellationToken, Task>? beforeRelease = null)
     {
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
             throw new InvalidOperationException("请在同一 Windows 用户的管理员会话中恢复原神验收。");
@@ -361,16 +362,33 @@ internal static class BetterGiDailyAcceptance
         var found = FindPendingForOwner(owner, ct)
             ?? throw new InvalidOperationException("本档案的原神桌面锁仍待恢复，但找不到对应的验收记录。");
         var validated = await ValidateStageAsync(found.Stage, ct).ConfigureAwait(false);
-        RecoverWithLease(validated.Stage, validated.Program, found.Journal, lease, ct);
+        await RecoverWithLeaseAsync(validated.Stage, validated.Program, found.Journal, lease, ct, beforeRelease).ConfigureAwait(false);
         return found.Journal.RunId;
     }
 
     private static (string Stage, RecoveryJournal Journal)? FindPendingForOwner(string owner, CancellationToken ct)
     {
+        using var matches = FindRecoveryJournals(owner, ct).GetEnumerator();
+        if (!matches.MoveNext()) return null;
+        var pending = matches.Current;
+        if (matches.MoveNext())
+            throw new InvalidOperationException("原神验收档案存在多份待恢复记录，无法确认应恢复哪次运行。");
+        return pending;
+    }
+
+    internal static void RemoveInactiveRecoveryJournals(DesktopOperationLease lease, CancellationToken ct)
+    {
+        // A clean exclusive marker precedes any new run. Leftover journals can only predate its dirty mark or follow completed recovery.
+        var owner = lease.VerifyCommonOwner(requireClean: true);
+        foreach (var (stage, _) in FindRecoveryJournals(owner, ct))
+            File.Delete(Path.Combine(stage, RecoveryFile));
+    }
+
+    private static IEnumerable<(string Stage, RecoveryJournal Journal)> FindRecoveryJournals(string owner, CancellationToken ct)
+    {
         string[] stages;
         try { stages = Directory.GetDirectories(StageParent); }
-        catch (DirectoryNotFoundException) { return null; }
-        (string Stage, RecoveryJournal Journal)? pending = null;
+        catch (DirectoryNotFoundException) { stages = []; }
         foreach (var stage in stages)
         {
             ct.ThrowIfCancellationRequested();
@@ -381,11 +399,8 @@ internal static class BetterGiDailyAcceptance
             EnsureProtectedStage(StageParent, stage);
             var journal = ReadJournal(stage);
             if (!string.Equals(journal.LockOwner ?? stage, owner, StringComparison.OrdinalIgnoreCase)) continue;
-            if (pending is not null)
-                throw new InvalidOperationException("原神验收档案存在多份待恢复记录，无法确认应恢复哪次运行。");
-            pending = (stage, journal);
+            yield return (stage, journal);
         }
-        return pending;
     }
 
     private static RecoveryJournal ReadJournal(string stage)
@@ -394,8 +409,8 @@ internal static class BetterGiDailyAcceptance
         return ReadEvidence<RecoveryJournal>(file);
     }
 
-    private static void RecoverWithLease(string stage, string program, RecoveryJournal journal,
-        DesktopOperationLease lease, CancellationToken ct)
+    private static async Task RecoverWithLeaseAsync(string stage, string program, RecoveryJournal journal,
+        DesktopOperationLease lease, CancellationToken ct, Func<Guid, CancellationToken, Task>? beforeRelease = null)
     {
         var owner = lease.VerifyCommonOwner();
         if (!JournalMatches(journal, program) || !string.Equals(journal.LockOwner ?? stage, owner, StringComparison.OrdinalIgnoreCase))
@@ -417,17 +432,30 @@ internal static class BetterGiDailyAcceptance
                 report = ReadEvidence<AcceptanceReport>(reportFile);
             if (!HasRecoveryProof(report, journal.RunId))
                 throw new InvalidDataException("验收报告缺少本次运行已清理的证据，保留待恢复状态。");
+            if (beforeRelease is not null && GenshinWindowsLoginDesktop.HasRunningClient())
+                throw new InvalidOperationException("仍检测到原神客户端，请先退出后再核对桌面交接。");
             ct.ThrowIfCancellationRequested();
             if (!TryRestore(program, journal, reportPath, report))
                 throw new InvalidOperationException("仍有 BetterGI 活动，或原配置、协议注册存在冲突，保留待恢复状态。");
+        }
+        if (beforeRelease is not null)
+        {
+            await beforeRelease(journal.RunId, ct).ConfigureAwait(false);
+            if (GenshinWindowsLoginDesktop.HasRunningClient())
+                throw new InvalidOperationException("原神客户端状态已变化，保留桌面交接标记。");
         }
         lease.ConfirmClean();
         File.Delete(recovery);
     }
 
-    private static bool HasRecoveryProof(AcceptanceReport report, Guid runId)
+    internal static bool HasRecoveryProof(AcceptanceReport report, Guid runId)
     {
-        if (report.RunId != runId || report.UserCancelled || report.TimedOut) return false;
+        if (report.RunId != runId) return false;
+        if (report.UserCancelled || report.TimedOut)
+            return report.Cleanup == CleanupState.Confirmed && report.StartError is null
+                && report.Observation is { ProcessId: > 0, OwnedPrimary: true, ForeignActivitySeen: false } stopped
+                && stopped.ProcessStartedAt > DateTimeOffset.UnixEpoch
+                && report.Evidence is { Count: > 0 } && report.Evidence.All(e => e is not null && e.RunId == runId);
         return report.Cleanup switch
         {
             CleanupState.NotRequired => report.StartError is (ReasonCodes.NotConfigured or ReasonCodes.StartFailed
@@ -551,7 +579,7 @@ internal static class BetterGiDailyAcceptance
     private sealed record RecoveryJournal(Guid RunId, string Original, string Expected, string OriginalConfigRevision,
         string? LockOwner = null);
 
-    private sealed record AcceptanceReport(Guid RunId, RunOutcome? Outcome, string? ReasonCode, IReadOnlyList<Evidence>? Evidence,
+    internal sealed record AcceptanceReport(Guid RunId, RunOutcome? Outcome, string? ReasonCode, IReadOnlyList<Evidence>? Evidence,
         BetterGiRunObservation? Observation, bool UserCancelled, bool TimedOut, CleanupState Cleanup,
         bool ProtocolRestored, bool OriginalConfigUnchanged, string? StartError);
 

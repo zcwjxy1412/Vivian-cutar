@@ -27,6 +27,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
         .Select(t => t.Title.Split('（')[0]).Distinct().Take(3).ToList();
     /// <summary>True only when this build may run the engine for real and its installation is verified.</summary>
     internal bool GenshinDailyWired { get; set; }
+    internal bool HomeRewardWired { get; set; }
     internal bool CanOperateWorkspace { get; set; } = true;
     public bool CanRunForReal => CanOperateWorkspace && (Id switch
     {
@@ -35,7 +36,11 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
             Report?.Compatibility is CompatibilityClass.PendingValidation or CompatibilityClass.IdentityVerified,
         _ => false,
     });
+    public bool CanPlayFromHome => CanRunForReal || (CanOperateWorkspace && HomeRewardWired &&
+        InstallPath == SavedInstallPath && Report?.Compatibility == CompatibilityClass.PendingValidation);
+    public string HomePlayHint => HomeRewardWired ? "原神首跑 · 单账号领奖 · 0 树脂" : "运行";
     public string RunHint => !CanOperateWorkspace ? "隔离验收 · 只读"
+        : HomeRewardWired ? (CanPlayFromHome ? "领奖首验 · 0 树脂" : "领奖首验 · 待安装核验")
         : CanRunForReal ? "可以执行" : Id == GameId.StarRail || GenshinDailyWired ? "待安装核验" : "接入中";
     /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
     public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
@@ -57,6 +62,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
             Report = null;
             Compatibility = "路径已改变，请重新检查";
             Raise(nameof(CanRunForReal));
+            Raise(nameof(CanPlayFromHome));
             Raise(nameof(RunHint));
         }
     }
@@ -79,6 +85,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
 
     /// <summary>What this build lets the user do with the engine for real.</summary>
     public string Execution => !CanOperateWorkspace ? "隔离验收中，此游戏卡片仅供查看。"
+        : HomeRewardWired ? "原神首页仅开放单账号领奖首验，使用隔离快照，消耗 0 树脂。"
         : GenshinDailyWired
         ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
@@ -99,7 +106,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public void Show(EngineReadinessReport report)
     {
         Report = report;
-        foreach (var name in new[] { nameof(CanRunForReal), nameof(RunHint) }) Raise(name);
+        foreach (var name in new[] { nameof(CanRunForReal), nameof(CanPlayFromHome), nameof(RunHint) }) Raise(name);
         var (state, brush) = report.Compatibility switch
         {
             CompatibilityClass.NotConfigured => ("未设置路径", StateColors.Neutral),

@@ -32,11 +32,13 @@ public sealed class DesktopOperationLease : IDisposable
 
     public bool Recovering { get; }
 
-    internal string VerifyCommonOwner()
+    internal string VerifyCommonOwner(bool requireClean = false)
     {
         if (!string.Equals(_lockPath, LockPath, StringComparison.OrdinalIgnoreCase) || _file.SafeFileHandle.IsClosed)
             throw new InvalidOperationException("未持有共同桌面锁。");
         VerifyHandle(_file, _lockPath);
+        if (requireClean && _file.Length != 0)
+            throw new InvalidOperationException("桌面锁仍有待恢复标记。");
         return Encoding.UTF8.GetString(_owner);
     }
 

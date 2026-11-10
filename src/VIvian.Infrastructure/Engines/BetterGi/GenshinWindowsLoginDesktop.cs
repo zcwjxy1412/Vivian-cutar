@@ -185,6 +185,8 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     private static LoginSwitchOutcome CleanupFailed(string detail) =>
         LoginSwitchOutcome.Fail(LoginSwitchStage.Failed, detail) with { Fatal = true };
 
+    internal static bool HasRunningClient() => HasRunningProcess(ClientProcessName);
+
     private static bool HasRunningProcess(string processName)
     {
         var processes = Process.GetProcessesByName(processName);

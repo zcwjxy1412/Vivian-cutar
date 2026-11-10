@@ -245,6 +245,10 @@ public partial class App : Application
                 Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
             _stage = "加载界面数据";
             var vm = _host.Services.GetRequiredService<MainViewModel>();
+            if (unified && !_smoke && reward is null && _instance is { IsOwner: true } installedInstance)
+                vm.ConfigureHomeGenshinReward(new GenshinHomeReward(root,
+                    (destination, ct) => UnifiedProfilePreparation.CreateGenshinHomeRewardSnapshotAsync(destination, installedInstance, ct),
+                    BetterGiAccountBatch.VerifySavedDailyAsync));
             try
             {
                 await vm.InitializeAsync(autoPrepare: !_smoke && reward is null);

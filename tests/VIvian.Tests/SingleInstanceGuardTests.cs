@@ -32,6 +32,19 @@ public sealed class SingleInstanceGuardTests
     }
 
     [Fact]
+    public void SnapshotAuthorityRequiresTheLiveOwnerOfTheSameDirectory()
+    {
+        var directory = NewDataDirectory();
+        using var owner = SingleInstanceGuard.Acquire(directory);
+        using var refused = SingleInstanceGuard.Acquire(directory);
+        Assert.True(owner.Owns(directory));
+        Assert.False(owner.Owns(NewDataDirectory()));
+        Assert.False(refused.Owns(directory));
+        owner.Dispose();
+        Assert.False(owner.Owns(directory));
+    }
+
+    [Fact]
     public void NameIgnoresCaseAndTrailingSeparator()
     {
         var dir = NewDataDirectory();

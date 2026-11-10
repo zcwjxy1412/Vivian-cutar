@@ -259,66 +259,6 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         return SendPair(Mouse(WindowsNative.MouseEventLeftDown), Mouse(WindowsNative.MouseEventLeftUp));
     }
 
-    internal async Task<(int Original, int Condensed)> ReadResinInventoryAsync(GenshinVerifiedWorld world,
-        GenshinResinInventoryReader reader, CancellationToken ct)
-    {
-        const ushort mapKey = 0x4D;
-        ct.ThrowIfCancellationRequested();
-        var current = Interlocked.Exchange(ref _current, null);
-        if (current is not { View: GenshinView.World, Window: { } window, Main: { } anchor } ||
-            window.ClientHeight < 1080 ||
-            window.Handle != world.WindowHandle || window.ProcessId != world.ProcessId || window.ProcessStartedAt != world.ProcessStartedAt ||
-            Stopwatch.GetElapsedTime(_readAt) > TimeSpan.FromSeconds(3) || !StillMatches(window, anchor) || !CanRead(window) ||
-            !SendPair(Key(0, mapKey), Key(2, mapKey)))
-            throw new InvalidOperationException("无法从已核对的原神世界安全打开地图读取树脂。");
-
-        var readiness = new GenshinResinReadiness(TimeProvider.System);
-        (int Original, int Condensed)? inventory = null;
-        while (!readiness.Expired)
-        {
-            await Task.Delay(500, ct).ConfigureAwait(false);
-            if (!CanRead(window)) break;
-            var (frame, check) = ScreenCapture.CaptureChecked(window, ClientProcessName);
-            var counts = frame is not null && CaptureVerdict.Evaluate(check).Accept
-                ? await reader.ReadAsync(frame, ct).ConfigureAwait(false) : null;
-            if (readiness.Observe(counts))
-            {
-                inventory = counts;
-                break;
-            }
-        }
-
-        ct.ThrowIfCancellationRequested();
-        if (!CanRead(window)) throw new InvalidOperationException("树脂核对期间原神窗口或桌面归属发生变化。");
-        var (map, finalCheck) = ScreenCapture.CaptureChecked(window, ClientProcessName);
-        string? resinEvidence = null;
-        if (inventory is null && map is not null && CaptureVerdict.Evaluate(finalCheck).Accept && reader.IsMap(map, ct))
-        {
-            // Keep only the resource bar, excluding the map, chat and UID, for recognition calibration.
-            resinEvidence = Path.Combine(Path.GetTempPath(), "VIvian-resin-" + Guid.NewGuid().ToString("N") + ".png");
-            await WindowsOcrReader.SavePngAsync(map.Crop(0, 0, map.Width, Math.Min(map.Height, map.Height / 9)),
-                resinEvidence, ct).ConfigureAwait(false);
-        }
-        if (map is null || !CaptureVerdict.Evaluate(finalCheck).Accept || !reader.IsMap(map, ct) || !CanRead(window) ||
-            !SendPair(Key(0), Key(2)))
-            throw new InvalidOperationException("无法确认当前原神地图并安全退出，树脂库存未确认。");
-
-        var returnStarted = Stopwatch.GetTimestamp();
-        while (Stopwatch.GetElapsedTime(returnStarted) < GenshinResinReadiness.ReturnToWorldTimeout)
-        {
-            await Task.Delay(350, ct).ConfigureAwait(false);
-            var returned = await ReadAsync(ct).ConfigureAwait(false);
-            if (returned.Window != window) break;
-            if (returned.View == GenshinView.World)
-                return inventory ?? throw new InvalidOperationException("等待地图与树脂库存就绪已达 60 秒，仍未从连续两帧读到一致库存。" +
-                    (resinEvidence is null ? "" : " 资源栏识别证据：" + resinEvidence));
-        }
-        throw new InvalidOperationException("地图关闭后未能确认回到同一原神世界。");
-
-        bool CanRead(StarRailWindowInfo expected) => _active && FindForeground() == expected &&
-            !_instances.IsBusy(betterGiProgram) && !StarRailWindow.IsProcessRunning();
-    }
-
     private bool StillMatches(StarRailWindowInfo window, ScreenRegion point)
     {
         if (_pixels is not { } before) return false;

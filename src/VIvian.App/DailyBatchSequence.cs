@@ -29,12 +29,4 @@ internal static class DailyBatchSequence
         }
     }
 
-    internal static string FindGenshinArchive(string programDirectory)
-    {
-        var name = EngineCatalog.For(GameId.Genshin).OfficialAssets.Single().FileName;
-        var path = Path.GetFullPath(Path.Combine(programDirectory, "..", "M4D-downloads", name));
-        if (!File.Exists(path))
-            throw new FileNotFoundException($"找不到 BetterGI 固定发行包。请确认文件存在：{path}", path);
-        return path;
-    }
 }

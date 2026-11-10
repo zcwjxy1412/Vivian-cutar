@@ -7,7 +7,7 @@ namespace VIvian.Infrastructure.Engines.BetterGi;
 
 internal sealed record BetterGiProfileRevision(string Revision, string CompletionAction);
 
-/// <summary>Temporary override for an isolated one-dragon profile. No UI or scheduler writes through this class yet.</summary>
+/// <summary>Temporarily changes only the native profile's completion action, with conflict-aware recovery.</summary>
 internal sealed class BetterGiProfileOverride
 {
     private readonly string _profileName;
@@ -64,7 +64,7 @@ internal sealed class BetterGiProfileOverride
             throw new InvalidDataException("BetterGI 临时值在写入前校验失败。");
 
         EnsureStopped();
-        var journal = JsonSerializer.SerializeToUtf8Bytes(new Recovery(original, snapshot.Revision, expected.Revision));
+        var journal = JsonSerializer.SerializeToUtf8Bytes(new Recovery(original, snapshot.Revision, expected.Revision, completionAction));
         PublishNew(_recovery, journal);
         ReplaceUnchanged(snapshot.Revision, replacement);
         return expected;
@@ -82,14 +82,37 @@ internal sealed class BetterGiProfileOverride
                 return new(RestoreState.Blocked, "BetterGI 恢复记录无法确认。");
 
             RestoreDisplaced(recovery);
-            var currentRevision = Hash(ReadBytes(_profile, BetterGiConfiguration.MaxConfigBytes));
-            if (currentRevision == recovery.OriginalRevision)
+            var currentBytes = ReadBytes(_profile, BetterGiConfiguration.MaxConfigBytes);
+            var currentRevision = Hash(currentBytes);
+            if (currentRevision == recovery.OriginalRevision || currentRevision == recovery.MergeTargetRevision)
             {
                 File.Delete(_recovery);
                 return new(RestoreState.NothingToRestore, "BetterGI 配置已经是原值。");
             }
             if (currentRevision != recovery.TemporaryRevision)
-                return new(RestoreState.Blocked, "BetterGI 配置已有新修改，保留当前配置及恢复记录。");
+            {
+                // BetterGI saves its own defaults/progress at startup. Preserve those updates; we own only this field.
+                if (recovery.TemporaryAction is null || Inspect(currentBytes).CompletionAction != recovery.TemporaryAction)
+                    return new(RestoreState.Blocked, "BetterGI 结束后动作已有新修改，保留当前配置及恢复记录。");
+                using var document = Parse(currentBytes);
+                var updated = JsonNode.Parse(document.RootElement.GetRawText())!.AsObject();
+                var field = updated.Select(p => p.Key).SingleOrDefault(k => k.Equals("CompletionAction", StringComparison.OrdinalIgnoreCase))
+                    ?? "CompletionAction";
+                updated[field] = Inspect(recovery.Original).CompletionAction;
+                var replacement = JsonSerializer.SerializeToUtf8Bytes(updated, new JsonSerializerOptions { WriteIndented = true });
+                recovery = recovery with { MergeSourceRevision = currentRevision, MergeTargetRevision = Hash(replacement) };
+                var journalStage = _recovery + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                try
+                {
+                    WriteNew(journalStage, JsonSerializer.SerializeToUtf8Bytes(recovery));
+                    File.Move(journalStage, _recovery, overwrite: true);
+                }
+                finally { File.Delete(journalStage); }
+                EnsureStopped();
+                ReplaceUnchanged(currentRevision, replacement);
+                File.Delete(_recovery);
+                return new(RestoreState.Restored, "BetterGI 结束后动作已恢复，其余原生配置更新已保留。");
+            }
 
             EnsureStopped();
             ReplaceUnchanged(recovery.TemporaryRevision, recovery.Original);
@@ -152,7 +175,7 @@ internal sealed class BetterGiProfileOverride
     {
         if (!File.Exists(_displaced)) return;
         var revision = Hash(ReadBytes(_displaced, BetterGiConfiguration.MaxConfigBytes));
-        if (revision != recovery.OriginalRevision && revision != recovery.TemporaryRevision)
+        if (!IsKnownRevision(revision, recovery))
             throw new InvalidDataException("BetterGI 已保留冲突配置，需核对后恢复。");
         if (!File.Exists(_profile))
         {
@@ -160,7 +183,7 @@ internal sealed class BetterGiProfileOverride
             return;
         }
         var live = Hash(ReadBytes(_profile, BetterGiConfiguration.MaxConfigBytes));
-        if (live != recovery.OriginalRevision && live != recovery.TemporaryRevision)
+        if (!IsKnownRevision(live, recovery))
             throw new InvalidDataException("BetterGI 配置已发生变化，已保留现值和备份。");
         File.Delete(_displaced);
     }
@@ -212,5 +235,9 @@ internal sealed class BetterGiProfileOverride
     }
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
-    private sealed record Recovery(byte[] Original, string OriginalRevision, string TemporaryRevision);
+    private static bool IsKnownRevision(string revision, Recovery recovery) =>
+        revision == recovery.OriginalRevision || revision == recovery.TemporaryRevision ||
+        revision == recovery.MergeSourceRevision || revision == recovery.MergeTargetRevision;
+    private sealed record Recovery(byte[] Original, string OriginalRevision, string TemporaryRevision,
+        string? TemporaryAction = null, string? MergeSourceRevision = null, string? MergeTargetRevision = null);
 }

@@ -899,8 +899,7 @@ public sealed class MainViewModel : ObservableObject
                     BatchStatus = homeReward is null ? "原神 · 正在核对本次日常验收" : "原神 · 正在准备已保存的日常计划";
                     Log.Information("Genshin reward acceptance {Attempt} starting", acceptance.Attempt);
                 }
-                var archive = await ReadOnlyFileAccess.BoundedAsync(() => DailyBatchSequence.FindGenshinArchive(AppContext.BaseDirectory),
-                    ReadOnlyFileAccess.QueryTimeout, token);
+                const string archive = ""; // Kept in the legacy delegate signature; native runs use the installed engine.
                 runGenshin = async ct =>
                 {
                     var total = acceptance is null ? genshin.Length : acceptance.RewardOnly ? 1
@@ -908,7 +907,7 @@ public sealed class MainViewModel : ObservableObject
                     var progress = Track(GameId.Genshin, total);
                     BatchRunning = true;
                     Queue.HomeRewardRunning = homeReward is not null;
-                    BatchStatus = $"原神 · 已完成 0/{total} · 正在核对账号和固定发行包";
+                    BatchStatus = $"原神 · 已完成 0/{total} · 正在核对账号和原版 BetterGI";
                     MultiAccountOutcome outcome;
                     try
                     {

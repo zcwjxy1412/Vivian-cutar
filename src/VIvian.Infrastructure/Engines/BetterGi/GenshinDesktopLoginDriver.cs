@@ -131,11 +131,6 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
             : ReachCardAsync(policy.LoginScreen, verified, cancellationToken);
     }
 
-    internal Task<(int Original, int Condensed)> ReadResinInventoryAsync(GenshinVerifiedWorld world,
-        GenshinResinInventoryReader reader, CancellationToken ct) => _desktop is GenshinWindowsLoginDesktop native
-        ? native.ReadResinInventoryAsync(world, reader, ct)
-        : throw new InvalidOperationException("当前原神桌面会话不能核对树脂库存。");
-
     public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken)
     {
         _window = null;

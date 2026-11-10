@@ -76,23 +76,6 @@ public sealed class DailyBatchTests
         finally { root.Delete(recursive: true); }
     }
 
-    [Fact]
-    public void MissingArchiveNamesTheExactSiblingDownload()
-    {
-        var root = Directory.CreateTempSubdirectory("vivian-app-archive-");
-        try
-        {
-            var app = Path.Combine(root.FullName, "VIvian");
-            var archive = Path.Combine(root.FullName, "M4D-downloads", "BetterGI_v0.66.0.7z");
-            var error = Assert.Throws<FileNotFoundException>(() => DailyBatchSequence.FindGenshinArchive(app));
-            Assert.Contains(archive, error.Message);
-            Directory.CreateDirectory(Path.GetDirectoryName(archive)!);
-            File.WriteAllText(archive, "仅用于路径查找");
-            Assert.Equal(archive, DailyBatchSequence.FindGenshinArchive(app));
-        }
-        finally { root.Delete(recursive: true); }
-    }
-
     private static MultiAccountOutcome Outcome(bool completed = true, bool gameClean = true, bool hostClean = true) =>
         new(Guid.NewGuid(), completed, 1, 0, "模拟", HostCleanupConfirmed: hostClean, GameCleanupConfirmed: gameClean);
 }

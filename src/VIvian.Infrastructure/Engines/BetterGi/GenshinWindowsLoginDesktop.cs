@@ -320,7 +320,8 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             new(window, view, [], main, secondary, uid);
 
         var card = GenshinLoginScreen.Analyze(frame.Width, frame.Height, lines);
-        if (card.State == GenshinLoginScreenState.NeedsUser) return View(GenshinView.NeedsUser);
+        if (card.State == GenshinLoginScreenState.NeedsUser)
+            return View(GenshinView.NeedsUser) with { UserActionMarker = card.UserActionMarker };
         var normalized = lines.Select(line => line with { Text = string.Concat(line.Text.Where(c => !char.IsWhiteSpace(c))) }).ToArray();
         var brand = Label(normalized, Region(835, 280, 250, 190), t =>
             t.Equals("miHoYo", StringComparison.OrdinalIgnoreCase) || t.Equals("HO", StringComparison.OrdinalIgnoreCase));

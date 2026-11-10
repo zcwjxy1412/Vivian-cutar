@@ -23,16 +23,18 @@ public sealed partial class GenshinLoginScreen
         ["退出登录", "注销登录", "确定退出", "登录失败", "登录异常", "网络错误", "网络异常", "账号异常"];
 
     private GenshinLoginScreen(GenshinLoginScreenState state, LoginAccountObservation? account = null,
-        ScreenRegion? enterLabel = null)
+        ScreenRegion? enterLabel = null, string? userActionMarker = null)
     {
         State = state;
         Account = account;
         EnterLabel = enterLabel;
+        UserActionMarker = userActionMarker;
     }
 
     public GenshinLoginScreenState State { get; }
     public LoginAccountObservation? Account { get; }
     internal ScreenRegion? EnterLabel { get; }
+    internal string? UserActionMarker { get; }
 
     public static GenshinLoginScreen Analyze(int width, int height, IReadOnlyList<RecognizedText> lines) =>
         Analyze(width, height, lines, null);
@@ -41,8 +43,13 @@ public sealed partial class GenshinLoginScreen
         ScreenRegion? closedCaret)
     {
         var compact = lines.Select(line => line with { Text = Compact(line.Text) }).ToArray();
-        if (compact.Any(line => IsUserOnly(line.Text)))
-            return new(GenshinLoginScreenState.NeedsUser);
+        foreach (var line in compact)
+        {
+            if (FindUserOnlyMarker(line.Text) is not { } marker) continue;
+            var position = width > 0 && height > 0 && WithinFrame(line, width, height)
+                ? $"，位置约为窗口横向 {line.CenterX / width:P0}、纵向 {line.CenterY / height:P0}" : "";
+            return new(GenshinLoginScreenState.NeedsUser, userActionMarker: $"{marker}{position}");
+        }
 
         if (width <= 0 || height <= 0 || compact.Any(line => !WithinFrame(line, width, height) || IsBlockingOverlay(line.Text)))
             return new(GenshinLoginScreenState.Unrecognized);
@@ -149,8 +156,10 @@ public sealed partial class GenshinLoginScreen
         Math.Abs(caret.Y + caret.Height / 2 - header.CenterY) <= header.Height &&
         (caret.X + caret.Width / 2 - header.CenterX) / header.Width is >= 1.5 and <= 4.5;
 
-    private static bool IsUserOnly(string compactText) => compactText == "密码" ||
-        UserOnlyText.Any(marker => compactText.Contains(marker, StringComparison.Ordinal));
+    private static bool IsUserOnly(string compactText) => FindUserOnlyMarker(compactText) is not null;
+
+    private static string? FindUserOnlyMarker(string compactText) => compactText == "密码" ? "密码" :
+        UserOnlyText.FirstOrDefault(marker => compactText.Contains(marker, StringComparison.Ordinal));
 
     internal static bool IsBlockingOverlay(string compactText) => compactText is "确定" or "确认" or "取消" ||
         UnsupportedOverlayText.Any(marker => compactText.Contains(marker, StringComparison.Ordinal));

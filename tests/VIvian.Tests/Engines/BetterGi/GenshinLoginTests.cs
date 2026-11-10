@@ -149,6 +149,16 @@ public sealed class GenshinLoginTests
         Assert.Null(session.Next(Read(Card())).ActionRegion);
     }
 
+    [Fact]
+    public void UserActionDiagnosticRetainsOnlyKnownMarkerAndRelativePosition()
+    {
+        var screen = Read([new("请输入验证码 987654", 850, 550, 220, 26)]);
+
+        Assert.Equal(GenshinLoginScreenState.NeedsUser, screen.State);
+        Assert.StartsWith("验证码，位置约为窗口横向", screen.UserActionMarker);
+        Assert.DoesNotContain("987654", screen.UserActionMarker);
+    }
+
     [Theory]
     [InlineData("点击进入")]
     [InlineData("退出登录")]

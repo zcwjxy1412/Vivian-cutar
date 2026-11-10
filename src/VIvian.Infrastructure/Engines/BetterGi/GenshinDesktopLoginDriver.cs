@@ -17,7 +17,8 @@ internal enum GenshinInput
 }
 
 internal sealed record GenshinDesktopFrame(StarRailWindowInfo? Window, GenshinView View,
-    IReadOnlyList<LoginAccountObservation> Rows, ScreenRegion? Main, ScreenRegion? Secondary = null, string? Uid = null);
+    IReadOnlyList<LoginAccountObservation> Rows, ScreenRegion? Main, ScreenRegion? Secondary = null, string? Uid = null,
+    string? UserActionMarker = null);
 
 internal sealed record GenshinVerifiedWorld(Guid AccountId, IntPtr WindowHandle, int ProcessId,
     DateTimeOffset ProcessStartedAt, string? Uid);
@@ -311,7 +312,9 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
                     throw new LoginInterruptedException("原神窗口不在前台，或客户端身份已经变化。");
                 _window = window;
                 if (frame.View == GenshinView.NeedsUser)
-                    throw new LoginInterruptedException("原神需要手动完成登录验证或协议确认。", true);
+                    throw new LoginInterruptedException(frame.UserActionMarker is { } marker
+                        ? $"原神需要手动完成登录验证或协议确认。画面标志为「{marker}」。"
+                        : "原神需要手动完成登录验证或协议确认。", true);
                 timeoutSource.Token.ThrowIfCancellationRequested();
                 if (ready(frame)) return frame;
                 await Task.Delay(_poll, timeoutSource.Token).ConfigureAwait(false);

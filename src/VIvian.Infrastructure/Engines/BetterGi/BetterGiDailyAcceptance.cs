@@ -529,17 +529,8 @@ internal static class BetterGiDailyAcceptance
 
     private static void WriteEvidence<T>(string path, T evidence)
     {
-        var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-        var system = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var security = new FileSecurity();
-        security.SetOwner(admins);
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new(admins, FileSystemRights.FullControl, AccessControlType.Allow));
-        security.AddAccessRule(new(system, FileSystemRights.FullControl, AccessControlType.Allow));
-        // This stream writes synchronously and verifies the ACL on the same exclusive handle before storing evidence.
-        const FileSystemRights access = FileSystemRights.Read | FileSystemRights.Write | FileSystemRights.Synchronize;
-        using var file = new FileInfo(path).Create(FileMode.CreateNew, access, FileShare.None,
-            4096, FileOptions.None, security);
+        // The validated stage already provides the administrator-only ACL. Verify it on the newly created file.
+        using var file = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);
         if (!IsAdministratorOnly(file.GetAccessControl()) || !ReadOnlyFileAccess.HandlePathMatches(file.SafeFileHandle, path) ||
             ReadOnlyFileAccess.LinkCount(file.SafeFileHandle) != 1)
             throw new InvalidDataException("无法核对新建验收证据的权限、路径或链接数。");

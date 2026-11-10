@@ -79,7 +79,6 @@ public sealed class MainViewModel : ObservableObject
         _busy = value;
         Raise(nameof(IsIdle));
         Raise(nameof(CanEditWorkspace));
-        Raise(nameof(CanConfirmHomeGenshinReward));
     }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
@@ -132,7 +131,7 @@ public sealed class MainViewModel : ObservableObject
     public bool BatchRunning
     {
         get => _batchRunning;
-        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); Raise(nameof(RunStateText)); Raise(nameof(CanConfirmHomeGenshinReward)); }
+        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); Raise(nameof(RunStateText)); }
     }
     /// <summary>The home stop button and F10 also cancel a login verification.</summary>
     public bool CanStopAll => BatchRunning || Queue.IsRunning || GenshinConfiguration.IsVerifyingLogin;
@@ -415,8 +414,7 @@ public sealed class MainViewModel : ObservableObject
             () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinOperationAsync, CanOperateWorkspace);
         GenshinConfiguration.PropertyChanged += (_, e) =>
         {
-            if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin))
-            { Raise(nameof(CanStopAll)); Raise(nameof(CanConfirmHomeGenshinReward)); }
+            if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin)) Raise(nameof(CanStopAll));
             if (e.PropertyName == nameof(GenshinConfigurationViewModel.SelectedForDaily)) Raise(nameof(SelectedAccountsText));
         };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
@@ -424,7 +422,7 @@ public sealed class MainViewModel : ObservableObject
         Queue.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(QueueViewModel.IsRunning) or nameof(QueueViewModel.IsIdle) or nameof(QueueViewModel.HasUnresolved))
-            { RaiseAdmission(); RaiseHome(); Raise(nameof(CanConfirmHomeGenshinReward)); }
+            { RaiseAdmission(); RaiseHome(); }
         };
         SaveCommand = new(() => RunAsync(SaveAsync), HandleError);
         AutoDiscoverCommand = new(() => RunAsync(() => AutoDiscoverAsync(persist: true)), HandleError);
@@ -465,7 +463,6 @@ public sealed class MainViewModel : ObservableObject
         RecoverDesktopCommand = new(() => RunAsync(RecoverDesktopAsync), HandleError);
         OneClickCommand = new(scope => OneClickAsync(scope is GameId game ? game : null), HandleError);
         PlayGameCardCommand = new(scope => PlayGameCardAsync(scope is GameId game ? game : null), HandleError);
-        CancelHomeGenshinRewardCommand = new(() => ShowHomeGenshinReward = false);
         foreach (var card in Engines)
         {
             card.CanOperateWorkspace = CanOperateWorkspace;
@@ -606,22 +603,7 @@ public sealed class MainViewModel : ObservableObject
     }
     public AsyncCommand OneClickCommand { get; }
     public AsyncCommand PlayGameCardCommand { get; }
-    public RelayCommand CancelHomeGenshinRewardCommand { get; }
-    public IReadOnlyList<GameAccount> HomeGenshinRewardAccounts { get; private set; } = [];
-    private GameAccount? _homeGenshinRewardAccount;
-    public GameAccount? HomeGenshinRewardAccount
-    {
-        get => _homeGenshinRewardAccount;
-        set { Set(ref _homeGenshinRewardAccount, value); Raise(nameof(CanConfirmHomeGenshinReward)); }
-    }
-    private bool _showHomeGenshinReward;
-    public bool ShowHomeGenshinReward
-    {
-        get => _showHomeGenshinReward;
-        private set { Set(ref _showHomeGenshinReward, value); Raise(nameof(CanConfirmHomeGenshinReward)); }
-    }
-    public bool CanConfirmHomeGenshinReward => ShowHomeGenshinReward && IsIdle && !CanStopAll
-        && !Queue.HasUnresolved && HomeGenshinRewardAccount is not null;
+    internal Func<Func<Task<int?>>, Task<int?>>? RunWithHomeRewardStopKey { private get; set; }
 
     internal void ConfigureHomeGenshinReward(GenshinHomeReward home)
     {
@@ -630,38 +612,32 @@ public sealed class MainViewModel : ObservableObject
         Queue.HomeRewardHistory = home.ReadRecentRunsAsync;
     }
 
-    private Task PlayGameCardAsync(GameId? game)
+    internal Task PlayGameCardAsync(GameId? game)
     {
         if (game is null) return Task.CompletedTask;
-        if (game != GameId.Genshin || _homeGenshinReward is null || _genshinDailyBatch is not null)
+        if (game != GameId.Genshin || _homeGenshinReward is not { } home || _genshinDailyBatch is not null)
             return OneClickAsync(game);
-        if (!CanOperateWorkspace || !IsIdle || CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
-        { Status = "请先结束任务并核对桌面交接。"; return Task.CompletedTask; }
-        if (!Engines.Single(card => card.Id == GameId.Genshin).CanPlayFromHome)
-        { Status = "请先保存并核对固定版本的 BetterGI 安装目录。"; return Task.CompletedTask; }
-        HomeGenshinRewardAccounts = GenshinConfiguration.Accounts
-            .Where(account => account.Enabled && account.LoginState == "recognized").ToArray();
-        Raise(nameof(HomeGenshinRewardAccounts));
-        HomeGenshinRewardAccount = null;
-        ShowHomeGenshinReward = HomeGenshinRewardAccounts.Count > 0;
-        Status = ShowHomeGenshinReward ? "请选择本次要验收的原神账号。"
-            : "请先在账号管理为原神账号绑定登录截图。";
-        return Task.CompletedTask;
-    }
-
-    internal Task RunHomeGenshinRewardAsync() => RunAsync(async () =>
-    {
-        if (_homeGenshinReward is not { } home || !CanOperateWorkspace || !ShowHomeGenshinReward ||
-            HomeGenshinRewardAccount is not { } selected || !HomeGenshinRewardAccounts.Contains(selected)) return;
-        ShowHomeGenshinReward = false;
-        try
+        return RunAsync(async () =>
         {
+            if (!CanOperateWorkspace || CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+            { Status = "请先结束任务并核对桌面交接。"; return; }
+            if (!Engines.Single(card => card.Id == GameId.Genshin).CanPlayFromHome)
+            { Status = "请先保存并核对固定版本的 BetterGI 安装目录。"; return; }
+            if (GenshinConfiguration.SelectedForDaily.FirstOrDefault() is not { } selected)
+            { Status = "请在「账号管理 → 原神」勾选并排序已识别的账号。"; return; }
+            if (RunWithHomeRewardStopKey is not { } withStopKey)
+            { Status = "主窗口的停止功能尚未就绪，原神首验未启动。"; return; }
+
             var request = home.CreateRequest(selected);
-            await RunAccountBatchAsync(GameId.Genshin, acceptance: request, homeReward: home);
-            Status = BatchStatus;
-        }
-        catch (Exception ex) { HandleError(ex); }
-    });
+            Status = $"原神首验 · {selected.Name} · 领取每日奖励 · 0 树脂";
+            await withStopKey(async () =>
+            {
+                await RunAccountBatchAsync(GameId.Genshin, acceptance: request, homeReward: home);
+                Status = BatchStatus;
+                return null;
+            });
+        });
+    }
 
     internal async Task<int?> OneClickAsync(GameId? scope = null, GenshinRewardAcceptance? acceptance = null,
         GenshinDailyVerification? verify = null)
@@ -676,7 +652,16 @@ public sealed class MainViewModel : ObservableObject
             { Status = "原神领奖验收仅接受本次启动指定的单账号请求。"; return; }
             if (scope is not (null or GameId.StarRail or GameId.Genshin))
             { Status = "所选游戏的真实日常入口尚未开放。"; return; }
-            exitCode = await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
+            var deferGenshin = scope is null && acceptance is null && _genshinDailyBatch is null &&
+                GenshinConfiguration.SelectedForDaily.Count > 0;
+            var genshinHint = _homeGenshinReward is not null
+                ? "原神完整日常尚待验收。请点首页原神卡片，按勾选顺序对第一个账号进行零树脂领奖首验。"
+                : "原神完整日常尚未开放。";
+            if (deferGenshin && Accounts.SelectedRows.Count == 0)
+            { Status = BatchStatus = genshinHint; return; }
+
+            exitCode = await RunAccountBatchAsync(deferGenshin ? GameId.StarRail : scope, acceptance: acceptance, verify: verify);
+            if (deferGenshin) BatchStatus += " " + genshinHint;
             Status = BatchStatus;
         });
         return exitCode;

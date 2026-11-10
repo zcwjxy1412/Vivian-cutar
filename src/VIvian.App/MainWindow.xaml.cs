@@ -6,6 +6,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        viewModel.RunWithHomeRewardStopKey = RunWithRewardAcceptanceStopKeyAsync;
         var area = SystemParameters.WorkArea;
         MinWidth = Math.Min(MinWidth, area.Width);
         MinHeight = Math.Min(MinHeight, area.Height);
@@ -72,7 +73,7 @@ public partial class MainWindow : Window
 
     internal async Task<int?> RunWithRewardAcceptanceStopKeyAsync(Func<Task<int?>> run)
     {
-        if (DataContext is not MainViewModel viewModel) return null;
+        if (DataContext is not MainViewModel viewModel || viewModel.CanStopAll) return null;
         var alreadyRegistered = _hotkey?.IsRegistered == true;
         if (_hotkey?.Register() != true)
         {
@@ -82,17 +83,7 @@ public partial class MainWindow : Window
         }
         viewModel.StopKeyText = "游戏全屏时也可以按 F10 立即停止。";
         try { return await run(); }
-        finally { if (!alreadyRegistered) _hotkey.Unregister(); }
-    }
-
-    private async void ConfirmHomeGenshinReward(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel { CanConfirmHomeGenshinReward: true } viewModel) return;
-        await RunWithRewardAcceptanceStopKeyAsync(async () =>
-        {
-            await viewModel.RunHomeGenshinRewardAsync();
-            return null;
-        });
+        finally { if (!alreadyRegistered && !viewModel.CanStopAll) _hotkey.Unregister(); }
     }
 
     private void BrowseReleaseArchive(object sender, RoutedEventArgs e)

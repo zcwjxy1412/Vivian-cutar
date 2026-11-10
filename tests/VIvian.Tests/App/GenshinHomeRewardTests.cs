@@ -12,15 +12,17 @@ namespace VIvian.Tests.App;
 public sealed class GenshinHomeRewardTests
 {
     [Fact]
-    public async Task FormalPlayCardOpensAnExplicitSelectionWithoutAdmittingFullDaily()
+    public async Task FormalPlayCardRunsFirstCheckedAccountInSavedOrderAndKeepsTheRegularQueue()
     {
         var folder = Directory.CreateTempSubdirectory("vivian-home-card-");
         try
         {
             var database = new LocalDatabase(Path.Combine(folder.FullName, "vivian.db"));
             await database.InitializeAsync();
-            var account = await database.AddAccountAsync(GameId.Genshin, "领奖账号", "", null);
-            await database.SaveLoginProfileAsync(account.Id, "130****01", "130****01", 0, .95, null, "合成");
+            var first = await database.AddAccountAsync(GameId.Genshin, "先建档", "", null);
+            var second = await database.AddAccountAsync(GameId.Genshin, "排在最前", "", null);
+            await database.SaveLoginProfileAsync(first.Id, "130****01", "130****01", 0, .95, null, "合成");
+            await database.SaveLoginProfileAsync(second.Id, "130****02", "130****02", 1, .95, null, "合成");
             var paths = new AppPaths(folder.FullName);
             var supervisor = new RefusingProcessSupervisor();
             var queue = new QueueViewModel(new QueueScheduler(database, supervisor), database, paths);
@@ -29,8 +31,8 @@ public sealed class GenshinHomeRewardTests
             var vm = new MainViewModel(database, database, database, database, paths, queue, supervisor,
                 accounts, new MultiAccountOrchestrator(database, null!), new GamePathProvider());
             vm.ConfigureHomeGenshinReward(new GenshinHomeReward(paths.DataDirectory,
-                (_, _) => throw new InvalidOperationException("打开选择区不应准备快照"),
-                (_, _, _, _, _, _, _, _) => throw new InvalidOperationException("打开选择区不应启动引擎")));
+                (_, _) => throw new InvalidOperationException("此用例不准备快照"),
+                (_, _, _, _, _, _, _, _) => throw new InvalidOperationException("此用例不启动引擎")));
             await vm.GenshinConfiguration.LoadAsync();
             var card = vm.Engines.Single(x => x.Id == GameId.Genshin);
             card.InstallPath = card.SavedInstallPath = @"C:\PinnedBetterGI";
@@ -40,15 +42,53 @@ public sealed class GenshinHomeRewardTests
             Assert.True(card.CanPlayFromHome);
             Assert.False(card.CanRunForReal);
             Assert.Contains("0 树脂", card.RunHint);
-            vm.PlayGameCardCommand.Execute(GameId.Genshin);
-            Assert.True(vm.ShowHomeGenshinReward);
-            Assert.Equal(account.Id, Assert.Single(vm.HomeGenshinRewardAccounts).Id);
-            Assert.Null(vm.HomeGenshinRewardAccount);
-            Assert.False(vm.CanConfirmHomeGenshinReward);
-            vm.HomeGenshinRewardAccount = Assert.Single(vm.HomeGenshinRewardAccounts);
-            Assert.True(vm.CanConfirmHomeGenshinReward);
-            vm.CancelHomeGenshinRewardCommand.Execute(null);
-            Assert.False(vm.CanConfirmHomeGenshinReward);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var stopScopes = 0;
+            vm.RunWithHomeRewardStopKey = async _ =>
+            {
+                stopScopes++;
+                Assert.Contains(second.Name, vm.Status);
+                await release.Task;
+                return null;
+            };
+            await vm.PlayGameCardAsync(GameId.Genshin);
+            Assert.Contains("账号管理", vm.Status);
+            Assert.Equal(0, stopScopes);
+
+            GameAccount Row(Guid id) => vm.GenshinConfiguration.Accounts.Single(a => a.Id == id);
+            await vm.GenshinConfiguration.ToggleAutoRunAsync(Row(first.Id));
+            await vm.GenshinConfiguration.ToggleAutoRunAsync(Row(second.Id));
+            await vm.GenshinConfiguration.MoveAccountAsync(-1, Row(second.Id));
+            var running = vm.PlayGameCardAsync(GameId.Genshin);
+            try
+            {
+                Assert.Equal(1, stopScopes);
+                var duplicate = vm.PlayGameCardAsync(GameId.Genshin);
+                Assert.True(duplicate.IsCompleted);
+                await duplicate;
+                Assert.Equal(1, stopScopes);
+            }
+            finally { release.SetResult(); }
+            await running;
+
+            if (RealExecutionPolicy.IsM5DailyTest)
+            {
+                await vm.OneClickAsync();
+                Assert.Contains("原神卡片", vm.BatchStatus);
+                Assert.Equal(1, stopScopes);
+
+                var star = await database.AddAccountAsync(GameId.StarRail, "星铁日常", "", null);
+                await database.SaveLoginProfileAsync(star.Id, "130****03", "130****03", 0, .95, null, "合成");
+                await accounts.ReloadAsync();
+                accounts.Rows.Single(row => row.Id == star.Id).IsSelected = true;
+                await vm.PlayGameCardAsync(GameId.StarRail);
+                var starRailStatus = vm.BatchStatus;
+                Assert.DoesNotContain("原神卡片", starRailStatus);
+                await vm.OneClickAsync();
+                Assert.StartsWith(starRailStatus, vm.BatchStatus);
+                Assert.Contains("原神卡片", vm.BatchStatus);
+                Assert.Equal(1, stopScopes);
+            }
             vm.GenshinConfiguration.Close();
         }
         finally { folder.Delete(recursive: true); }

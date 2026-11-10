@@ -649,7 +649,7 @@ public sealed class MainViewModel : ObservableObject
             { Status = "此版本未启用真实日常批次。"; return; }
             if ((!CanOperateWorkspace) != (acceptance is not null) ||
                 (acceptance is not null && (scope != GameId.Genshin || acceptance.ReviewOnly || verify is null)))
-            { Status = "原神领奖验收仅接受本次启动指定的单账号请求。"; return; }
+            { Status = "原神验收仅接受本次启动指定的请求。"; return; }
             if (scope is not (null or GameId.StarRail or GameId.Genshin))
             { Status = "所选游戏的真实日常入口尚未开放。"; return; }
             var deferGenshin = scope is null && acceptance is null && _genshinDailyBatch is null &&
@@ -846,7 +846,8 @@ public sealed class MainViewModel : ObservableObject
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return null; }
 
-        using var deadline = acceptance is null ? null : new CancellationTokenSource(GenshinRewardAcceptance.RunLimit);
+        using var deadline = acceptance is null ? null : new CancellationTokenSource(acceptance.RewardOnly
+            ? GenshinRewardAcceptance.RunLimit : TimeSpan.FromMinutes(30));
         using var cancellation = deadline is null ? new CancellationTokenSource()
             : CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
         var token = cancellation.Token;
@@ -895,14 +896,15 @@ public sealed class MainViewModel : ObservableObject
                 {
                     BatchRunning = true;
                     Queue.HomeRewardRunning = homeReward is not null;
-                    BatchStatus = homeReward is null ? "原神 · 正在核对本次领奖验收" : "原神首跑 · 正在准备零树脂领奖";
+                    BatchStatus = homeReward is null ? "原神 · 正在核对本次日常验收" : "原神首跑 · 正在准备零树脂领奖";
                     Log.Information("Genshin reward acceptance {Attempt} starting", acceptance.Attempt);
                 }
                 var archive = await ReadOnlyFileAccess.BoundedAsync(() => DailyBatchSequence.FindGenshinArchive(AppContext.BaseDirectory),
                     ReadOnlyFileAccess.QueryTimeout, token);
                 runGenshin = async ct =>
                 {
-                    var total = acceptance is null ? genshin.Length : 1;
+                    var total = acceptance is null ? genshin.Length : acceptance.RewardOnly ? 1
+                        : GenshinConfiguration.SelectedForDaily.Count;
                     var progress = Track(GameId.Genshin, total);
                     BatchRunning = true;
                     BatchStatus = $"原神 · 已完成 0/{total} · 正在核对账号和固定发行包";
@@ -930,8 +932,8 @@ public sealed class MainViewModel : ObservableObject
                     if (acceptance is not null)
                     {
                         acceptanceOutcome = outcome;
-                        acceptancePassed = finished && outcome.Succeeded == 1 && outcome.Failed == 0 && !token.IsCancellationRequested;
-                        label = acceptancePassed ? "领奖验收通过" : "领奖验收未通过";
+                        acceptancePassed = finished && outcome.Succeeded == acceptance.ExpectedAccountCount && outcome.Failed == 0 && !token.IsCancellationRequested;
+                        label = acceptancePassed ? "日常验收通过" : "日常验收未通过";
                         Log.Information("Genshin reward acceptance {Attempt} batch {Batch} passed {Passed}; game cleanup {GameCleanup}; host cleanup {HostCleanup}",
                             acceptance.Attempt, outcome.BatchId, acceptancePassed, outcome.GameCleanupConfirmed, outcome.HostCleanupConfirmed);
                     }

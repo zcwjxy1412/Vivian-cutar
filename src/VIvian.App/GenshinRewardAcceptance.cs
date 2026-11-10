@@ -40,6 +40,7 @@ internal sealed class GenshinRewardActivation(TimeProvider clock)
 internal sealed class GenshinRewardAcceptance
 {
     private const string RunOption = "--genshin-reward-acceptance";
+    private const string DailyOption = "--genshin-daily-acceptance";
     private const string ReviewOption = "--genshin-reward-review";
     internal const string Marker = "VIvian-GenshinRewardAcceptance.marker";
     internal static readonly TimeSpan RunLimit = TimeSpan.FromMinutes(10);
@@ -63,10 +64,12 @@ internal sealed class GenshinRewardAcceptance
     private long Revision { get; }
     internal string ProfileDirectory { get; }
     internal bool ReviewOnly => AccountId is null;
+    internal bool RewardOnly { get; private init; } = true;
+    internal int ExpectedAccountCount { get; private set; } = 1;
     internal string WorkspaceScope =>
-        $"隔离验收 · {(ReviewOnly ? "查阅与恢复" : "原神单账号领奖 · 0 树脂")}\n验收编号 {Attempt:D}";
+        $"隔离验收 · {(ReviewOnly ? "查阅与恢复" : RewardOnly ? "原神单账号领奖 · 0 树脂" : "原神已保存日常与自动切号")}\n验收编号 {Attempt:D}";
 
-    internal static bool HasCommand(string[] args) => args.Any(arg => arg is RunOption or ReviewOption);
+    internal static bool HasCommand(string[] args) => args.Any(arg => arg is RunOption or DailyOption or ReviewOption);
 
     internal static GenshinRewardAcceptance? Parse(string[] args, bool candidateBuild, bool hasMarker, string localAppData)
     {
@@ -78,9 +81,9 @@ internal sealed class GenshinRewardAcceptance
         var profileRoot = Path.Combine(localAppData, "VIvian-M6-GenshinAcceptance");
         if (args is [ReviewOption, var reviewAttempt] && TryId(reviewAttempt, out var prior))
             return new(prior, null, 0, profileRoot);
-        if (args is [RunOption, var attempt, var account, var revision] && TryId(attempt, out var runId) &&
+        if (args is [RunOption or DailyOption, var attempt, var account, var revision] && TryId(attempt, out var runId) &&
             TryId(account, out var accountId) && long.TryParse(revision, NumberStyles.None, CultureInfo.InvariantCulture, out var value))
-            return new(runId, accountId, value, profileRoot);
+            return new(runId, accountId, value, profileRoot) { RewardOnly = args[0] == RunOption };
         throw new ArgumentException("请提供唯一的验收编号、一个原神账号 GUID 及账号 revision，或用 --genshin-reward-review 查看既有验收。");
     }
 
@@ -101,9 +104,14 @@ internal sealed class GenshinRewardAcceptance
         var target = accounts.SingleOrDefault(account => account.Id == id);
         if (target is not { Enabled: true, LoginState: "recognized" } || target.Revision != Revision)
             throw new InvalidOperationException("原神验收账号缺失、未识别、已停用或 revision 已变化。");
+        var selected = RewardOnly ? [target] : accounts.Where(a => a.Enabled && a.AutoRun)
+            .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
+        if (selected.Length == 0 || selected[0].Id != id || selected.Any(a => a.LoginState != "recognized"))
+            throw new InvalidOperationException("原神日常验收的勾选顺序或登录档案已变化。");
+        ExpectedAccountCount = selected.Length;
         ct.ThrowIfCancellationRequested();
         beforeVerify?.Invoke();
-        return await verify(database, [target], betterGiRoot, archivePath, recoveryProfileDirectory ?? profileDirectory,
-            rewardOnly: true, progress, ct).ConfigureAwait(false);
+        return await verify(database, selected, betterGiRoot, archivePath, recoveryProfileDirectory ?? profileDirectory,
+            rewardOnly: RewardOnly, progress, ct).ConfigureAwait(false);
     }
 }

@@ -15,6 +15,43 @@ public sealed class GenshinRewardAcceptanceTests
     private static readonly Guid Account = Guid.NewGuid();
 
     [Fact]
+    public async Task SavedDailyAcceptanceRunsCheckedAccountsInOrderWithoutRewardOnlyOverride()
+    {
+        var folder = Directory.CreateTempSubdirectory("vivian-daily-app-");
+        try
+        {
+            var db = new LocalDatabase(Path.Combine(folder.FullName, "test.db"));
+            await db.InitializeAsync();
+            var first = await db.AddAccountAsync(GameId.Genshin, "A", "", null);
+            var second = await db.AddAccountAsync(GameId.Genshin, "B", "", null);
+            await db.SaveLoginProfileAsync(first.Id, "130****01", "130****01", 0, .95, null, "模拟");
+            await db.SaveLoginProfileAsync(second.Id, "130****02", "130****02", 1, .95, null, "模拟");
+            var saved = await db.LoadAccountsAsync(GameId.Genshin);
+            foreach (var account in saved.Where(a => a.Id == first.Id || a.Id == second.Id))
+                await db.SaveAccountAsync(account with { AutoRun = true });
+            saved = (await db.LoadAccountsAsync(GameId.Genshin)).Where(a => a.AutoRun && a.Enabled).ToArray();
+            first = saved.OrderBy(a => a.Order).ThenBy(a => a.Id).First();
+            var request = GenshinRewardAcceptance.Parse(["--genshin-daily-acceptance", Attempt.ToString("D"),
+                first.Id.ToString("D"), first.Revision.ToString()], true, true, folder.FullName)!;
+            Assert.DoesNotContain("0 树脂", request.WorkspaceScope);
+            var called = false;
+            await request.RunAsync(db, "root", "archive", request.ProfileDirectory,
+                (_, selected, _, _, _, rewardOnly, _, _) =>
+                {
+                    called = true;
+                    Assert.False(rewardOnly);
+                    Assert.Equal(saved.OrderBy(a => a.Order).ThenBy(a => a.Id), selected);
+                    return Task.FromResult(new MultiAccountOutcome(Guid.NewGuid(), true, 2, 0, "模拟"));
+                }, null, CancellationToken.None);
+            Assert.True(called);
+            await db.SaveAccountAsync(first with { AutoRun = false });
+            await Assert.ThrowsAsync<InvalidOperationException>(() => request.RunAsync(db, "root", "archive",
+                request.ProfileDirectory, (_, _, _, _, _, _, _, _) => throw new Exception("不应运行"), null, CancellationToken.None));
+        }
+        finally { folder.Delete(true); }
+    }
+
+    [Fact]
     public void AutomaticLaunchRequiresRenderingAndActualActivationExactlyOnce()
     {
         var gate = new GenshinRewardActivation(new FakeTimeProvider());

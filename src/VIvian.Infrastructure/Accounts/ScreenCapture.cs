@@ -32,14 +32,18 @@ public static class ScreenCapture
     /// hide failures. The controller reads the displayed frame. Unity can return nonblank stale frames from
     /// PrintWindow, so require the game to own the sampled desktop region before returning any pixels.
     /// </summary>
-    public static (CapturedFrame? Frame, Core.Accounts.CaptureCheck Check) CaptureChecked(StarRailWindowInfo window)
+    public static (CapturedFrame? Frame, Core.Accounts.CaptureCheck Check) CaptureChecked(StarRailWindowInfo window) =>
+        CaptureChecked(window, StarRailWindow.ProcessName);
+
+    internal static (CapturedFrame? Frame, Core.Accounts.CaptureCheck Check) CaptureChecked(StarRailWindowInfo window,
+        string processName)
     {
         WindowsNative.EnsureDpiAwareness();
         var handle = window.Handle;
         if (handle == IntPtr.Zero || !WindowsNative.IsWindow(handle))
             return (null, new(false, false, false, "none", 0, 0, false));
         var isGame = OwnerName(handle) is { } owner &&
-                     string.Equals(owner, StarRailWindow.ProcessName, StringComparison.OrdinalIgnoreCase);
+                     string.Equals(owner, processName, StringComparison.OrdinalIgnoreCase);
         if (!isGame) return (null, new(true, false, false, "none", 0, 0, false));
         if (WindowsNative.IsIconic(handle) ||
             !WindowsNative.GetClientRect(handle, out var client) || client.Width <= 0 || client.Height <= 0)

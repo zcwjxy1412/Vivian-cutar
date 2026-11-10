@@ -122,18 +122,12 @@ public sealed class BetterGiAcceptanceStage
 
         using var profile = JsonDocument.Parse(plan.ProfileJson, PlanJson);
         using var settings = JsonDocument.Parse(plan.SettingsJson, PlanJson);
-        var guild = BetterGiConfiguration.ReadString(profile.RootElement, "AdventurersGuildCountry");
-        var party = BetterGiConfiguration.ReadString(profile.RootElement, "DailyRewardPartyName");
-        if (guild is null || party is null)
-            throw new InvalidDataException("隔离任务计划缺少原神领奖地区或队伍。");
-        var source = new BetterGiOneDragonPlan(plan.ProfileName, [BetterGiMarkers.DailyRewardTask],
-            "", "", 0, "", "", false, guild, party);
-        var expected = BetterGiAccountPlans.RenderDailyAcceptance(accountId, source, gameExecutable);
+        var expected = BetterGiAccountPlans.RebuildSavedRun(accountId, gameExecutable, profile.RootElement);
         using var expectedProfile = JsonDocument.Parse(expected.ProfileJson);
         using var expectedSettings = JsonDocument.Parse(expected.SettingsJson);
         if (!JsonElement.DeepEquals(profile.RootElement, expectedProfile.RootElement)
             || !JsonElement.DeepEquals(settings.RootElement, expectedSettings.RootElement))
-            throw new InvalidDataException("隔离目录只接受与当前客户端相符的固定原神每日奖励计划。");
+            throw new InvalidDataException("隔离目录只接受与当前客户端相符的固定原神任务计划。");
     }
 
     private static async Task<BetterGiAcceptanceStage?> FindUnusedAsync(DirectoryInfo parent, BetterGiPlanFiles plan, CancellationToken ct)

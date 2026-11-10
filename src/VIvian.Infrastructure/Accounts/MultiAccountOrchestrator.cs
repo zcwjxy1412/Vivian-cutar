@@ -186,11 +186,13 @@ public sealed class MultiAccountOrchestrator
                     break;
                 }
 
-                if (result.Outcome is RunOutcome.Indeterminate or RunOutcome.Cancelled)
+                if (result.Outcome is RunOutcome.Indeterminate or RunOutcome.Cancelled || (game == GameId.Genshin && !result.Success))
                 {
                     cancelled = result.Outcome == RunOutcome.Cancelled;
                     aborted = true;
-                    stopReason = "上一账号的任务结果未确认，已阻断下一个账号。";
+                    stopReason = result.Outcome == RunOutcome.Failed
+                        ? "上一账号的任务失败，已阻断下一个账号。"
+                        : "上一账号的任务结果未确认，已阻断下一个账号。";
                     break;
                 }
 

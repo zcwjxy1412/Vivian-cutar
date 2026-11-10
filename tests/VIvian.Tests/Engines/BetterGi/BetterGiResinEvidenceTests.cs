@@ -24,6 +24,20 @@ public sealed class BetterGiResinEvidenceTests
         Assert.Contains(verdict.Evidence, evidence => evidence.Kind == EvidenceKind.Note && evidence.Source.Contains("入包核查", StringComparison.Ordinal));
     }
 
+    [Theory]
+    [InlineData("合成\"浓缩树脂\"", true, (int)BetterGiCraftAction.Attempt)]
+    [InlineData("无需合成浓缩树脂", true, (int)BetterGiCraftAction.Skipped)]
+    [InlineData("合成\"浓缩树脂\"", false, (int)BetterGiCraftAction.Conflict)]
+    public void CaptureTheCraftActionOnlyInsideItsOwnedFlowSlot(string action, bool hasEnd, int expected)
+    {
+        var request = Request("合成树脂");
+        var trace = new[] { Flow("一条龙任务执行: 1/1"), Task("→ \"前往合成台\" 开始"), Task(action) };
+        var evidence = ReadTrace(request, hasEnd ? [.. trace, Task("→ \"前往合成台\" 结束")] : trace);
+
+        Assert.Equal((BetterGiCraftAction)expected, evidence.Observe(0).CraftAction);
+        Assert.False(evidence.Observe(0).PlannedTasksVerified);
+    }
+
     [Fact]
     public void DomainEndingAfterResinShortageDoesNotProveCompletion()
     {
@@ -114,6 +128,9 @@ public sealed class BetterGiResinEvidenceTests
     };
 
     private static RunVerdict Replay(BetterGiTaskRequest request, params IEnumerable<string>[] taskLines)
+        => ReadTrace(request, taskLines).Evaluate(0, stoppedByVivian: false, detached: false, contractVerified: true, Start);
+
+    private static BetterGiRunEvidence ReadTrace(BetterGiTaskRequest request, IEnumerable<string>[] taskLines)
     {
         var parser = new BetterGiLogRecordParser();
         var evidence = new BetterGiRunEvidence(Guid.NewGuid(), request, new(Pid, Start, TimeSpan.Zero));
@@ -122,7 +139,7 @@ public sealed class BetterGiResinEvidenceTests
         foreach (var line in lines)
             if (parser.Feed(line) is { } record) evidence.Add(record, Start);
         evidence.Add(parser.Flush()!, Start);
-        return evidence.Evaluate(0, stoppedByVivian: false, detached: false, contractVerified: true, Start);
+        return evidence;
     }
 
     private static IEnumerable<string> Flow(string message) => BgiLog.Record(Pid, Start, message);

@@ -54,6 +54,18 @@ public sealed class BetterGiDailyAcceptanceTests
     }
 
     [Fact]
+    public async Task StockCraftProfileRequiresTheInventoryObservationPath()
+    {
+        await using var fixture = new BetterGiFixture();
+        var plan = BetterGiAccountPlans.RenderSavedRun(Account,
+            new(BetterGiAccountPlan.SourceProfileName(Account), ["合成树脂", "领取每日奖励"], "关闭软件", "枫丹", 0, "", "", false, "枫丹", ""), Client);
+        Write(fixture.Root, plan);
+
+        Assert.Throws<InvalidDataException>(() => BetterGiDailyAcceptance.ValidateDailyFiles(fixture.Root, Account, plan));
+        Assert.Equal(Client, BetterGiDailyAcceptance.ValidateDailyFiles(fixture.Root, Account, plan, allowStockCraft: true));
+    }
+
+    [Fact]
     public async Task TreatsAnIncompleteStageAsInvalidData()
     {
         await using var fixture = new BetterGiFixture();
@@ -71,7 +83,10 @@ public sealed class BetterGiDailyAcceptanceTests
 
         Assert.True(result.DiagnosticPassed);
         Assert.Equal(RunOutcome.Indeterminate, result.Outcome);
+        Assert.True(result.ScopedCompletionConfirmed);
         Assert.False((result with { Restored = false }).DiagnosticPassed);
+        Assert.False((result with { Cleanup = CleanupState.NotRequired }).ScopedCompletionConfirmed);
+        Assert.False((result with { Verdict = new(RunOutcome.Failed, ReasonCodes.ReportedFailure, []) }).ScopedCompletionConfirmed);
     }
 
     [Fact]

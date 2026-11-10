@@ -11,6 +11,8 @@ internal readonly record struct BetterGiResinEvent(BetterGiResinSession Session,
 
 internal readonly record struct BetterGiResinInventory(BetterGiResinEvent Event, int? Original, int? Condensed);
 
+internal enum BetterGiCraftAction { None, Attempt, Skipped, Conflict }
+
 internal static class BetterGiResinSafety
 {
     private const int CondensedCapacity = 5;
@@ -19,18 +21,35 @@ internal static class BetterGiResinSafety
     internal static bool CraftVerified(BetterGiResinSession session, BetterGiResinInventory before, BetterGiResinEvent submission,
         BetterGiResinInventory after, int expectedCount, int minimumReserve)
     {
-        if (!session.IsBound || before.Event.Session != session || submission.Session != session || after.Event.Session != session
-            || before.Event.Sequence <= 0 || before.Event.Sequence >= submission.Sequence || submission.Sequence >= after.Event.Sequence
-            || before.Event.Timestamp >= submission.Timestamp || submission.Timestamp >= after.Event.Timestamp
-            || expectedCount is < 1 or > CondensedCapacity || minimumReserve < 0
-            || before.Original is not >= 0 || after.Original is not >= 0
-            || before.Condensed is not (>= 0 and <= CondensedCapacity) || after.Condensed is not (>= 0 and <= CondensedCapacity))
+        if (!ValidInventoryChange(session, before, submission, after) || expectedCount is < 1 or > CondensedCapacity || minimumReserve < 0)
             return false;
 
         return after.Condensed - before.Condensed == expectedCount
             && before.Original - after.Original == expectedCount * OriginalPerCraft
             && after.Original >= minimumReserve;
     }
+
+    /// <summary>The stock engine's attempt needs an independent inventory delta. A logged skip also needs proof.</summary>
+    internal static int? ConfirmStockCraft(BetterGiResinSession session, BetterGiResinInventory before, BetterGiResinEvent observedAction,
+        BetterGiResinInventory after, BetterGiCraftAction action)
+    {
+        if (!ValidInventoryChange(session, before, observedAction, after)) return null;
+        var created = after.Condensed - before.Condensed;
+        return action switch
+        {
+            BetterGiCraftAction.Attempt when created is >= 1 && before.Original - after.Original == created * OriginalPerCraft => created,
+            BetterGiCraftAction.Skipped when created == 0 && before.Original == after.Original &&
+                (before.Condensed == CondensedCapacity || before.Original < OriginalPerCraft) => 0,
+            _ => null,
+        };
+    }
+
+    private static bool ValidInventoryChange(BetterGiResinSession session, BetterGiResinInventory before, BetterGiResinEvent action,
+        BetterGiResinInventory after) => session.IsBound && before.Event.Session == session && action.Session == session &&
+        after.Event.Session == session && before.Event.Sequence > 0 && before.Event.Sequence < action.Sequence &&
+        action.Sequence < after.Event.Sequence && before.Event.Timestamp < action.Timestamp && action.Timestamp < after.Event.Timestamp &&
+        before.Original is >= 0 && after.Original is >= 0 && before.Condensed is >= 0 and <= CondensedCapacity &&
+        after.Condensed is >= 0 and <= CondensedCapacity;
 }
 
 internal enum BetterGiResinKind { Unknown, Original20, Original40, Condensed }

@@ -23,6 +23,8 @@ internal sealed record BetterGiDailyAcceptanceResult(Guid RunId, RunVerdict? Ver
     public RunOutcome Outcome => Restored && Cleanup == CleanupState.Confirmed && !Cancelled && !TimedOut
         ? Verdict?.Outcome ?? RunOutcome.Indeterminate : RunOutcome.Indeterminate;
     public bool DiagnosticPassed => Restored && Cleanup == CleanupState.Confirmed && EvidenceObserved && !Cancelled && !TimedOut;
+    internal bool ScopedCompletionConfirmed => DiagnosticPassed && (Verdict?.Outcome == RunOutcome.Success ||
+        Verdict is { Outcome: RunOutcome.Indeterminate, ReasonCode: ReasonCodes.RealAdapterUnverified or ReasonCodes.NoCompletionEvidence });
 }
 
 internal static class BetterGiDailyAcceptance
@@ -51,17 +53,18 @@ internal static class BetterGiDailyAcceptance
     private static readonly JsonDocumentOptions StrictJson = new() { AllowDuplicateProperties = false };
 
     internal static async Task<BetterGiDailyAcceptanceResult> RunAsync(string stage, Guid accountId, BetterGiPlanFiles expected,
-        DesktopOperationLease lease, Func<CancellationToken, Task<GenshinVerifiedWorld>> recheckWorld, CancellationToken ct)
+        DesktopOperationLease lease, Func<CancellationToken, Task<GenshinVerifiedWorld>> recheckWorld, CancellationToken ct,
+        Func<GenshinVerifiedWorld, CancellationToken, Task<(int Original, int Condensed)>>? readInventory = null)
     {
         ArgumentNullException.ThrowIfNull(recheckWorld);
         var owner = lease.VerifyCommonOwner();
         if (lease.Recovering) throw new InvalidOperationException("待恢复的桌面锁不能启动新任务。");
         var validated = await ValidateStageAsync(stage, ct).ConfigureAwait(false);
-        var expectedGame = ValidateDailyFiles(validated.Root, accountId, expected);
+        var expectedGame = ValidateDailyFiles(validated.Root, accountId, expected, allowStockCraft: readInventory is not null);
         return await RunCoreAsync(validated, expected.ProfileName, expectedGame, lease, owner, accountId,
             allowAccountTasks: false, async token => await recheckWorld(token).ConfigureAwait(false),
-            revalidate: () => ValidateDailyFiles(validated.Root, accountId, expected),
-            status: null, ct).ConfigureAwait(false);
+            revalidate: () => ValidateDailyFiles(validated.Root, accountId, expected, allowStockCraft: readInventory is not null),
+            status: null, ct, readInventory).ConfigureAwait(false);
     }
 
     internal static async Task<BetterGiDailyAcceptanceResult> RunLegacyAsync(string stage,
@@ -82,21 +85,22 @@ internal static class BetterGiDailyAcceptance
                 return null;
             },
             revalidate: () => ReadGamePath(Path.Combine(validated.Root, "User", "config.json"), profileName),
-            status, ct).ConfigureAwait(false);
+            status, ct, readInventory: null).ConfigureAwait(false);
     }
 
     private static async Task<BetterGiDailyAcceptanceResult> RunCoreAsync(
         (string Stage, string Root, string Program) validated, string profileName, string expectedGame,
         DesktopOperationLease lease, string owner, Guid? accountId, bool allowAccountTasks,
         Func<CancellationToken, Task<GenshinVerifiedWorld?>> recheckWorld, Func<string> revalidate,
-        Action<string>? status, CancellationToken ct)
+        Action<string>? status, CancellationToken ct,
+        Func<GenshinVerifiedWorld, CancellationToken, Task<(int Original, int Condensed)>>? readInventory)
     {
         if (!await Operation.WaitAsync(0, ct).ConfigureAwait(false))
             throw new InvalidOperationException("已有原神日常验收正在运行。");
         try
         {
             return await RunLockedAsync(validated, profileName, expectedGame, lease, owner, accountId,
-                allowAccountTasks, recheckWorld, revalidate, status, ct).ConfigureAwait(false);
+                allowAccountTasks, recheckWorld, revalidate, status, ct, readInventory).ConfigureAwait(false);
         }
         finally { Operation.Release(); }
     }
@@ -105,7 +109,8 @@ internal static class BetterGiDailyAcceptance
         (string Stage, string Root, string Program) validated, string profileName, string expectedGame,
         DesktopOperationLease lease, string owner, Guid? accountId, bool allowAccountTasks,
         Func<CancellationToken, Task<GenshinVerifiedWorld?>> recheckWorld, Func<string> revalidate,
-        Action<string>? status, CancellationToken ct)
+        Action<string>? status, CancellationToken ct,
+        Func<GenshinVerifiedWorld, CancellationToken, Task<(int Original, int Condensed)>>? readInventory)
     {
         var (stage, root, program) = validated;
         var recovery = Path.Combine(stage, RecoveryFile);
@@ -113,8 +118,9 @@ internal static class BetterGiDailyAcceptance
         var plan = await BetterGiConfiguration.InspectOneDragonAsync(root, profileName, ct).ConfigureAwait(false);
         if (plan.CompletionAction != "关闭软件" || plan.EnabledTasks.Count == 0)
             throw new InvalidDataException("验收档案需要已启用的任务，结束后关闭 BetterGI。");
-        if (!allowAccountTasks && !plan.EnabledTasks.SequenceEqual([BetterGiMarkers.DailyRewardTask]))
-            throw new InvalidDataException("单次诊断只允许领取每日奖励。");
+        var verifyCraft = readInventory is not null && plan.EnabledTasks.SequenceEqual([BetterGiMarkers.CraftResinTask, BetterGiMarkers.DailyRewardTask]);
+        if (!allowAccountTasks && !verifyCraft && !plan.EnabledTasks.SequenceEqual([BetterGiMarkers.DailyRewardTask]))
+            throw new InvalidDataException("需要独立库存核验才能运行合成任务。");
         if (allowAccountTasks && plan.EnabledTasks.Any(task => task is not ("领取每日奖励" or "合成树脂" or "自动秘境")))
             throw new InvalidDataException("隔离账号档案包含尚未登记的任务。");
         if (plan.EnabledTasks.Contains(BetterGiMarkers.DomainTask) && !BetterGiContract.DomainSpendLimitVerified)
@@ -146,6 +152,15 @@ internal static class BetterGiDailyAcceptance
         if (!string.Equals(revalidate(), expectedGame, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("原神客户端配置在启动前发生变化。");
         VerifyActiveGame(expectedGame, accountId, world);
+        var resinSession = world is null ? default : new BetterGiResinSession(runId, world.ProcessId, world.ProcessStartedAt);
+        BetterGiResinInventory? before = null;
+        if (verifyCraft)
+        {
+            var startWorld = world ?? throw new InvalidOperationException("合成任务缺少原神入场身份。");
+            var stock = await readInventory!(startWorld, recheck.Token).ConfigureAwait(false);
+            before = new(new(resinSession, 1, TimeProvider.System.GetTimestamp()), stock.Original, stock.Condensed);
+            world = await ConfirmSameWorldAsync(startWorld, recheckWorld, recheck.Token).ConfigureAwait(false);
+        }
 
         var request = BetterGiArguments.OneDragon(profileName).Request!;
         var adapter = new BetterGiAdapter(() => root, request);
@@ -181,6 +196,30 @@ internal static class BetterGiDailyAcceptance
             cleanup = await run.ReconcileAsync(reconcileLimit.Token).ConfigureAwait(false);
             verdict ??= await run.WaitForVerdictAsync(reconcileLimit.Token).ConfigureAwait(false);
             observation = ((BetterGiRun)run).Observe();
+            if (before is { } startingStock && cleanup == CleanupState.Confirmed && !stop.IsCancellationRequested &&
+                observation is { OwnedPrimary: true, FlowEnded: true, DailyRewardVerified: true, ForeignActivitySeen: false,
+                    AdverseSignal: false, ExitCode: 0, CraftAction: BetterGiCraftAction.Attempt or BetterGiCraftAction.Skipped })
+            {
+                using var inventoryLimit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                inventoryLimit.CancelAfter(TimeSpan.FromSeconds(25));
+                try
+                {
+                    var same = await ConfirmSameWorldAsync(world!, recheckWorld, inventoryLimit.Token).ConfigureAwait(false);
+                    var stock = await readInventory!(same, inventoryLimit.Token).ConfigureAwait(false);
+                    var after = new BetterGiResinInventory(new(resinSession, 3, TimeProvider.System.GetTimestamp()), stock.Original, stock.Condensed);
+                    var action = new BetterGiResinEvent(resinSession, 2, observation.CraftActionTimestamp);
+                    var crafted = BetterGiResinSafety.ConfirmStockCraft(resinSession, startingStock, action, after, observation.CraftAction);
+                    if (crafted is not null)
+                    {
+                        observation = observation with { CraftedCount = crafted, PlannedTasksVerified = true };
+                        verdict = WithCraftEvidence(verdict, runId, crafted.Value);
+                    }
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or OperationCanceledException)
+                {
+                    // The engine is already reconciled. Keep the uncertain result and still restore its protocol.
+                }
+            }
         }
         catch (EngineStartException ex)
         {
@@ -213,7 +252,27 @@ internal static class BetterGiDailyAcceptance
             stop.IsCancellationRequested && !ct.IsCancellationRequested, reportPath, startError);
     }
 
-    internal static string ValidateDailyFiles(string root, Guid accountId, BetterGiPlanFiles expected)
+    private static async Task<GenshinVerifiedWorld> ConfirmSameWorldAsync(GenshinVerifiedWorld previous,
+        Func<CancellationToken, Task<GenshinVerifiedWorld?>> recheck, CancellationToken ct)
+    {
+        var current = await recheck(ct).WaitAsync(ct).ConfigureAwait(false);
+        if (current is null || !MatchesVerifiedWorld(previous, current.AccountId, current.WindowHandle, current.ProcessId, current.ProcessStartedAt) ||
+            (previous.Uid is not null && previous.Uid != current.Uid))
+            throw new InvalidOperationException("合成前后的原神游戏会话不一致。");
+        return current;
+    }
+
+    private static RunVerdict WithCraftEvidence(RunVerdict verdict, Guid runId, int crafted)
+    {
+        var detail = crafted == 0 ? "库存已证实无需合成。" : $"库存变化证实已合成 {crafted} 个浓缩树脂。";
+        var evidence = new Evidence(runId, BetterGiContract.CompletionSignalsVerified ? EvidenceKind.CompletionReported : EvidenceKind.Note,
+            detail, DateTimeOffset.UtcNow);
+        return BetterGiContract.CompletionSignalsVerified
+            ? new(RunOutcome.Success, ReasonCodes.Completed, [.. verdict.Evidence, evidence])
+            : verdict with { Evidence = [.. verdict.Evidence, evidence] };
+    }
+
+    internal static string ValidateDailyFiles(string root, Guid accountId, BetterGiPlanFiles expected, bool allowStockCraft = false)
     {
         ArgumentNullException.ThrowIfNull(expected);
         var name = BetterGiAccountPlan.SourceProfileName(accountId);
@@ -227,13 +286,14 @@ internal static class BetterGiDailyAcceptance
         using var settings = ReadConfig(settingsPath);
         var game = ReadGamePath(settings.RootElement, name);
         var fields = profile.RootElement;
-        var source = new BetterGiOneDragonPlan(name, [BetterGiMarkers.DailyRewardTask], "关闭软件", "枫丹", 0, "", "", false,
-            ReadMember(fields, "AdventurersGuildCountry").GetString() ?? "",
-            ReadMember(fields, "DailyRewardPartyName").GetString() ?? "");
-        var canonical = BetterGiAccountPlans.RenderDailyAcceptance(accountId, source, game);
+        var enabled = ReadMember(fields, "TaskEnabledList");
+        if (!allowStockCraft && enabled.ValueKind == JsonValueKind.Object &&
+            enabled.TryGetProperty("genshin.craft_condensed_resin", out var craft) && craft.ValueKind == JsonValueKind.True)
+            throw new InvalidDataException("合成任务没有独立库存核验，已阻断启动。");
+        var canonical = BetterGiAccountPlans.RebuildSavedRun(accountId, game, fields);
         if (!JsonEqual(profile, expected.ProfileJson) || !JsonEqual(settings, expected.SettingsJson)
             || !JsonEqual(profile, canonical.ProfileJson) || !JsonEqual(settings, canonical.SettingsJson))
-            throw new InvalidDataException("隔离设置与本次账号已渲染的零树脂档案不一致。");
+            throw new InvalidDataException("隔离设置与本次账号已渲染的受控档案不一致。");
         return game;
 
         static bool JsonEqual(JsonDocument actual, string rendered)

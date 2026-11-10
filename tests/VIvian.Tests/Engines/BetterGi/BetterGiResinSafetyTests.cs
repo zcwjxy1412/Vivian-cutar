@@ -40,6 +40,27 @@ public sealed class BetterGiResinSafetyTests
             after with { Event = new(Session, 3, 19) }, 1, 0));
     }
 
+    [Theory]
+    [InlineData(180, 2, 120, 3, (int)BetterGiCraftAction.Attempt, 1)]
+    [InlineData(180, 2, 180, 2, (int)BetterGiCraftAction.Attempt, null)]
+    [InlineData(180, 2, 121, 3, (int)BetterGiCraftAction.Attempt, null)]
+    [InlineData(180, 2, 120, 3, (int)BetterGiCraftAction.None, null)]
+    [InlineData(180, 2, 120, 3, (int)BetterGiCraftAction.Conflict, null)]
+    [InlineData(180, 5, 180, 5, (int)BetterGiCraftAction.Skipped, 0)]
+    [InlineData(59, 2, 59, 2, (int)BetterGiCraftAction.Skipped, 0)]
+    [InlineData(60, 2, 60, 2, (int)BetterGiCraftAction.Skipped, null)]
+    [InlineData(59, 2, 60, 2, (int)BetterGiCraftAction.Skipped, null)]
+    [InlineData(180, 5, 180, null, (int)BetterGiCraftAction.Skipped, null)]
+    public void StockCraftNeedsAValidDeltaOrAnIndependentlyVerifiedNoWorkReason(int originalBefore, int condensedBefore,
+        int originalAfter, int? condensedAfter, int action, int? expected)
+    {
+        var before = new BetterGiResinInventory(new(Session, 1, 10), originalBefore, condensedBefore);
+        var after = new BetterGiResinInventory(new(Session, 3, 30), originalAfter, condensedAfter);
+
+        Assert.Equal(expected, BetterGiResinSafety.ConfirmStockCraft(Session, before, new(Session, 2, 20), after, (BetterGiCraftAction)action));
+        Assert.Null(BetterGiResinSafety.ConfirmStockCraft(Session, before, new(Session, 2, 10), after, (BetterGiCraftAction)action));
+    }
+
     [Fact]
     public void DomainChecksExactFreshOfferBeforeDispatchAndNeverExceedsTheTypeBudget()
     {

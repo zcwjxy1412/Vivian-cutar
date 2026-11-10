@@ -7,6 +7,7 @@ internal sealed record BetterGiRunObservation(int ProcessId, DateTimeOffset Proc
     bool FlowEnded, bool DailyRewardVerified, bool ForeignActivitySeen, bool AdverseSignal, int? ExitCode,
     bool DomainRewardsVerified, bool PlannedTasksVerified)
 {
+    public bool DailyRewardClaimUnconfirmed { get; init; }
     public BetterGiCraftAction CraftAction { get; init; }
     public long CraftActionTimestamp { get; init; }
     public int? CraftedCount { get; init; }
@@ -62,6 +63,8 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
             return new(attribution.RootProcessId, attribution.RootStartTime, OwnedPrimarySeen, FlowEnded, DailyRewardVerified,
                 ForeignActivitySeen, _signals.Count != 0, exitCode, DomainRewardsVerified, PlannedTasksVerified)
             {
+                DailyRewardClaimUnconfirmed = FlowEnded && !ForeignActivitySeen && !_builtInSequenceInvalid &&
+                    _dailyRewardCheck == BetterGiMarkerKind.DailyRewardUnverified,
                 CraftAction = _requiresCraft && (_builtInSequenceInvalid || !_craftEnded ||
                     _builtInFlowSteps != request.OneDragonPlan!.EnabledTasks.Count) ? BetterGiCraftAction.Conflict : _craftAction,
                 CraftActionTimestamp = _craftActionTimestamp,

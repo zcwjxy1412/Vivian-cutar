@@ -161,6 +161,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             RunOutcome.Cancelled => "已停止原神日常，BetterGI 已清理并恢复。",
             RunOutcome.Failed => "原神日常失败（" + reason + "）。",
             _ when !clean => "BetterGI 清理或配置恢复未确认，已停止批次。",
+            _ when result.DailyRewardClaimUnconfirmed => "BetterGI 结束了流程，但未识别到「今日奖励已领取」。已停止批次。",
             _ => "原神日常结果未确认（" + reason + "），已停止批次。",
         };
         if (outcome == RunOutcome.Indeterminate && result.EvidenceObserved)

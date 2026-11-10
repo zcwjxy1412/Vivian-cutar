@@ -351,6 +351,27 @@ public sealed class BetterGiLifecycleTests
     }
 
     [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task OnlyTheOwnedRewardCheckCanReportTheMissingClaimConfirmation(bool ownedCheck)
+    {
+        await using var f = new BetterGiFixture();
+        File.WriteAllText(Path.Combine(f.Root, "User", "OneDragon", "日常.json"),
+            """{ "Name": "日常", "TaskEnabledList": { "领取每日奖励": true }, "CompletionAction": "关闭软件" }""");
+        var (run, group) = await f.LaunchAsync(f.Adapter(BetterGiArguments.OneDragon("日常").Request, contractVerified: true));
+        await using var owned = run;
+
+        var lines = BgiLog.Record(group.RootProcessId, Own(group), "启用一条龙配置：日常")
+            .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙任务执行: 1/1"))
+            .Concat(BgiLog.Record(ownedCheck ? group.RootProcessId : 9999, Own(group),
+                "检查每日奖励结果：\"未领取\"，请手动检查！", "WRN", "BetterGenshinImpact.GameTask.Common.TaskControl"))
+            .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙和配置组任务结束"));
+
+        Assert.Equal(RunOutcome.Indeterminate, (await FinishAsync(f, run, group, lines, 0)).Outcome);
+        Assert.Equal(ownedCheck, run.Observe().DailyRewardClaimUnconfirmed);
+    }
+
+    [Theory]
     [InlineData("一条龙任务执行: 2/2", BetterGiMarkers.FlowSource, BetterGiMarkers.FlowSource)]
     [InlineData("配置组任务执行: 1/1", BetterGiMarkers.FlowSource, BetterGiMarkers.FlowSource)]
     [InlineData("一条龙任务执行: 1/1", "UnrelatedTask", BetterGiMarkers.FlowSource)]

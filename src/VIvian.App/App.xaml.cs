@@ -559,8 +559,16 @@ public partial class App : Application
             throw new InvalidOperationException("The Zenless account tab is not bound to Zenless accounts");
         main.AccountTabs.SelectedIndex = 0;
         tabs.SelectedIndex = Array.IndexOf(headers, "游戏管理");
+        main.GameTabs.SelectedIndex = 0;
+        window.UpdateLayout();
+        var starRailSettingsWidth = ((main.GameTabs.SelectedItem as System.Windows.Controls.TabItem)?.Content
+            as System.Windows.Controls.Border)?.ActualWidth ?? 0;
         main.GameTabs.SelectedIndex = 1;
         window.UpdateLayout();
+        var genshinSettings = (main.GameTabs.SelectedItem as System.Windows.Controls.TabItem)?.Content as System.Windows.Controls.Border;
+        if (starRailSettingsWidth <= 0 || genshinSettings is null ||
+            Math.Abs(starRailSettingsWidth - genshinSettings.ActualWidth) > 1)
+            throw new InvalidOperationException("Star Rail and Genshin must use the same full-width configuration panel");
         var genshin = vm.GenshinConfiguration;
         if (genshin.SelectedAccount is not { Enabled: true, LoginState: "recognized" })
             throw new InvalidOperationException("The first selected Genshin account must be the enabled recognized fixture");

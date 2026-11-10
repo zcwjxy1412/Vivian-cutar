@@ -113,7 +113,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             if (outcome.Completed) return outcome;
 
             var cleanup = await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false);
-            return cleanup.Ok ? outcome : outcome with { Detail = outcome.Detail + " " + cleanup.Detail };
+            return outcome with { GameCleanupConfirmed = cleanup.Ok, Detail = outcome.Detail + " " + cleanup.Detail };
         }, ct).ConfigureAwait(false);
     }
 

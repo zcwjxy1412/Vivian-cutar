@@ -57,6 +57,11 @@ internal sealed class GenshinRewardAcceptance
 
     private static bool TryId(string value, out Guid id) => Guid.TryParseExact(value, "D", out id) && id != Guid.Empty;
 
+    internal static int? AutoExitCode(MultiAccountOutcome? outcome, bool passed, bool pendingRecovery,
+        Func<bool> confirmDesktopClean) =>
+        outcome is { GameCleanupConfirmed: true, HostCleanupConfirmed: true } &&
+            !pendingRecovery && confirmDesktopClean() ? (passed ? 0 : 1) : null;
+
     internal async Task<MultiAccountOutcome> RunAsync(LocalDatabase database, string betterGiRoot, string archivePath,
         string profileDirectory, GenshinDailyVerification verify, Action<BatchAccountProgress>? progress, CancellationToken ct)
     {

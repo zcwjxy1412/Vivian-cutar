@@ -11,6 +11,27 @@ public sealed class GenshinRewardAcceptanceTests
     private static readonly Guid Attempt = Guid.NewGuid();
     private static readonly Guid Account = Guid.NewGuid();
 
+    [Theory]
+    [InlineData(true, true, true, false, true, 0)]
+    [InlineData(false, true, true, false, true, 1)]
+    [InlineData(true, false, true, false, true, null)]
+    [InlineData(true, true, false, false, true, null)]
+    [InlineData(true, true, true, true, true, null)]
+    [InlineData(true, true, true, false, false, null)]
+    public void CommandLineExitRequiresProcessCleanupAndNoPendingRecovery(bool passed, bool gameClean,
+        bool hostClean, bool pendingRecovery, bool desktopClean, int? expectedExitCode)
+    {
+        var outcome = new MultiAccountOutcome(Guid.NewGuid(), passed, passed ? 1 : 0, passed ? 0 : 1,
+            "模拟", GameCleanupConfirmed: gameClean, HostCleanupConfirmed: hostClean);
+        var checkedDesktop = false;
+        Assert.Equal(expectedExitCode, GenshinRewardAcceptance.AutoExitCode(outcome, passed, pendingRecovery, () =>
+        {
+            checkedDesktop = true;
+            return desktopClean;
+        }));
+        Assert.Equal(gameClean && hostClean && !pendingRecovery, checkedDesktop);
+    }
+
     [Fact]
     public void LaunchRequiresCandidateAndMarkerAndRejectsMixedArguments()
     {

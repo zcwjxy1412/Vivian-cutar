@@ -72,17 +72,17 @@ public partial class MainWindow : Window
 
     private StopHotkey? _hotkey;
 
-    internal async Task RunWithRewardAcceptanceStopKeyAsync(Func<Task> run)
+    internal async Task<int?> RunWithRewardAcceptanceStopKeyAsync(Func<Task<int?>> run)
     {
-        if (DataContext is not MainViewModel viewModel) return;
+        if (DataContext is not MainViewModel viewModel) return null;
         if (_hotkey?.Register() != true)
         {
             viewModel.StopKeyText = "无法注册 F10 停止键，本次验收未启动。";
             Serilog.Log.Warning("Genshin reward acceptance did not start because F10 could not be registered");
-            return;
+            return null;
         }
         viewModel.StopKeyText = "游戏全屏时也可以按 F10 立即停止。";
-        try { await run(); }
+        try { return await run(); }
         finally { _hotkey.Unregister(); }
     }
 

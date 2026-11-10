@@ -561,19 +561,24 @@ public sealed class MainViewModel : ObservableObject
     }
     public AsyncCommand OneClickCommand { get; }
 
-    internal Task OneClickAsync(GameId? scope = null, GenshinRewardAcceptance? acceptance = null,
-        GenshinDailyVerification? verify = null) => RunAsync(async () =>
+    internal async Task<int?> OneClickAsync(GameId? scope = null, GenshinRewardAcceptance? acceptance = null,
+        GenshinDailyVerification? verify = null)
     {
-        if (!RealExecutionPolicy.IsM5DailyTest)
-        { Status = "此版本未启用真实日常批次。"; return; }
-        if (GenshinRewardAcceptance.IsCandidateBuild != (acceptance is not null) ||
-            (acceptance is not null && (scope != GameId.Genshin || acceptance.ReviewOnly || verify is null)))
-        { Status = "原神领奖验收仅接受本次启动指定的单账号请求。"; return; }
-        if (scope is not (null or GameId.StarRail or GameId.Genshin))
-        { Status = "所选游戏的真实日常入口尚未开放。"; return; }
-        await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
-        Status = BatchStatus;
-    });
+        int? exitCode = null;
+        await RunAsync(async () =>
+        {
+            if (!RealExecutionPolicy.IsM5DailyTest)
+            { Status = "此版本未启用真实日常批次。"; return; }
+            if (GenshinRewardAcceptance.IsCandidateBuild != (acceptance is not null) ||
+                (acceptance is not null && (scope != GameId.Genshin || acceptance.ReviewOnly || verify is null)))
+            { Status = "原神领奖验收仅接受本次启动指定的单账号请求。"; return; }
+            if (scope is not (null or GameId.StarRail or GameId.Genshin))
+            { Status = "所选游戏的真实日常入口尚未开放。"; return; }
+            exitCode = await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
+            Status = BatchStatus;
+        });
+        return exitCode;
+    }
     /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>
     public static string RealResultLabel(RunRecord r) =>
         r.Cleanup == CleanupState.Unconfirmed ? "清理未确认（结果未知，队列已阻断）"
@@ -734,22 +739,22 @@ public sealed class MainViewModel : ObservableObject
         return outcome;
     }
 
-    private async Task RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null,
+    private async Task<int?> RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null,
         GenshinRewardAcceptance? acceptance = null, GenshinDailyVerification? verify = null)
     {
         if (CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
-        { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return; }
+        { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return null; }
         if (approved is not null && (!RealExecutionPolicy.IsM5DailyTest || !Assistant.EnableScheduleProposals
             || approved.Target.Game != GameId.StarRail || approved.Expires <= DateTimeOffset.UtcNow
             || Accounts.SelectedStarRail?.Id != approved.Target.AccountId))
-        { BatchStatus = "运行计划已失效，或当前选中账号和计划不一致。"; return; }
+        { BatchStatus = "运行计划已失效，或当前选中账号和计划不一致。"; return null; }
         var starRail = scope == GameId.Genshin ? [] : Accounts.SelectedRows
             .Where(row => approved is null || row.Id == approved.Target.AccountId).Select(row => row.Account).ToArray();
         var genshin = scope == GameId.StarRail || acceptance is not null ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
         if (starRail.Length == 0 && genshin.Length == 0 && acceptance is null)
-        { BatchStatus = "请先在账号管理勾选要执行的账号。"; return; }
+        { BatchStatus = "请先在账号管理勾选要执行的账号。"; return null; }
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
-        { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
+        { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return null; }
 
         using var deadline = acceptance is null ? null : new CancellationTokenSource(GenshinRewardAcceptance.RunLimit);
         using var cancellation = deadline is null ? new CancellationTokenSource()
@@ -758,6 +763,8 @@ public sealed class MainViewModel : ObservableObject
         _batchCts = cancellation;
         GameId? activeGame = null;
         var results = new List<string>();
+        MultiAccountOutcome? acceptanceOutcome = null;
+        var acceptancePassed = false;
 
         Action<BatchAccountProgress> Track(GameId game, int total)
         {
@@ -829,10 +836,11 @@ public sealed class MainViewModel : ObservableObject
                     var label = finished ? "批次结束" : "批次已停止";
                     if (acceptance is not null)
                     {
-                        var passed = finished && outcome.Succeeded == 1 && outcome.Failed == 0 && !token.IsCancellationRequested;
-                        label = passed ? "领奖验收通过" : "领奖验收未通过";
+                        acceptanceOutcome = outcome;
+                        acceptancePassed = finished && outcome.Succeeded == 1 && outcome.Failed == 0 && !token.IsCancellationRequested;
+                        label = acceptancePassed ? "领奖验收通过" : "领奖验收未通过";
                         Log.Information("Genshin reward acceptance {Attempt} batch {Batch} passed {Passed}; game cleanup {GameCleanup}; host cleanup {HostCleanup}",
-                            acceptance.Attempt, outcome.BatchId, passed, outcome.GameCleanupConfirmed, outcome.HostCleanupConfirmed);
+                            acceptance.Attempt, outcome.BatchId, acceptancePassed, outcome.GameCleanupConfirmed, outcome.HostCleanupConfirmed);
                     }
                     results.Add($"{RunPresentation.GameName(game)} · {label} · {outcome.Detail}");
                     BatchStatus = string.Join("  ", results);
@@ -862,6 +870,24 @@ public sealed class MainViewModel : ObservableObject
                 catch (Exception ex) { Log.Warning("Refresh after daily batch failed: {ErrorType}", ex.GetType().Name); }
             }
         }
+        if (acceptanceOutcome is null) return null;
+
+        var pendingRecovery = Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
+        var exitCode = await Task.Run(() => GenshinRewardAcceptance.AutoExitCode(acceptanceOutcome, acceptancePassed, pendingRecovery, () =>
+        {
+            try
+            {
+                using var cleanDesktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                Log.Warning("Genshin reward acceptance desktop handoff not available: {ErrorType}", ex.GetType().Name);
+                return false;
+            }
+        }));
+        if (exitCode is null) BatchStatus += " 请先核对本轮清理与桌面交接。";
+        return exitCode;
     }
 
     private async Task<MultiAccountOutcome> RunStarRailBatchAsync(GameAccount[] accounts, AssistantRunPlan? approved,

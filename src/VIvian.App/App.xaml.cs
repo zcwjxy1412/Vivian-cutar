@@ -275,8 +275,9 @@ public partial class App : Application
                     async void RunRewardAcceptance(object? sender, EventArgs args)
                     {
                         window.ContentRendered -= RunRewardAcceptance;
-                        await window.RunWithRewardAcceptanceStopKeyAsync(
+                        var exitCode = await window.RunWithRewardAcceptanceStopKeyAsync(
                             () => vm.OneClickAsync(GameId.Genshin, reward, BetterGiAccountBatch.VerifySavedDailyAsync));
+                        if (exitCode is { } code && !Dispatcher.HasShutdownStarted) Shutdown(code);
                     }
                     window.ContentRendered += RunRewardAcceptance;
                 }

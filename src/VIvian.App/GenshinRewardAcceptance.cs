@@ -114,7 +114,9 @@ internal sealed class GenshinRewardAcceptance
             if (selected.Length > 0 && selected[0].Id != id)
                 throw new InvalidOperationException("原神日常验收的勾选顺序已变化。");
         }
-        if (selected.Length == 0 || selected.Any(a => a.LoginState is not ("recognized" or "logged_in")))
+        if (selected.Length == 0 || selected.Any(a => InstalledDaily
+                ? !a.HasGenshinLoginBinding
+                : a.LoginState is not ("recognized" or "logged_in")))
             throw new InvalidOperationException("原神日常需要至少一个已绑定登录账号的有效勾选队列。");
         ExpectedAccountCount = selected.Length;
         ct.ThrowIfCancellationRequested();

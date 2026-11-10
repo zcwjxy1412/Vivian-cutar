@@ -129,6 +129,7 @@ public sealed class GenshinHomeRewardTests
                     return new MultiAccountOutcome(run, false, 0, 1, "模拟");
                 });
             var stale = home.CreateRequest(selected[0]);
+            await live.RecordAccountSwitchAsync(null, selected[0].Id, "identity_uncertain", "上一轮未读到 UID");
             await live.SaveAccountAsync(selected[0] with { Name = "已修改" });
             await home.RunAsync(stale, "root", "archive", null, default);
             Assert.Equal(1, called);

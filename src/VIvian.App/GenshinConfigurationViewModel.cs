@@ -87,7 +87,7 @@ public sealed class GenshinConfigurationViewModel
 
     public ObservableCollection<GameAccount> Accounts { get; } = [];
     public IReadOnlyList<GameAccount> SelectedForDaily => Accounts
-        .Where(a => a.Enabled && a.LoginState is ("recognized" or "logged_in") && a.AutoRun)
+        .Where(a => a.Enabled && a.HasGenshinLoginBinding && a.AutoRun)
         .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
     public ObservableCollection<ParameterRow> Parameters { get; } = [];
     private IEnumerable<ParameterRow> EffectivePlanParameters => Parameters.Select(row =>
@@ -138,7 +138,7 @@ public sealed class GenshinConfigurationViewModel
     public string Status { get => _status; private set => Set(ref _status, value); }
     public bool IsIdle => !_busy && !IsVerifyingLogin;
     public bool CanEditWorkspace => _canOperateWorkspace && IsIdle;
-    public bool CanBindLoginScreenshot => CanEditWorkspace && SelectedAccount is { Enabled: true, LoginState: not ("recognized" or "logged_in") };
+    public bool CanBindLoginScreenshot => CanEditWorkspace && SelectedAccount is { Enabled: true, HasGenshinLoginBinding: false };
     public bool CanEdit => CanEditWorkspace && Source.IsIdle && _snapshot is { WriteUnavailableReason: null };
     public bool CanConnect => CanEdit && Source.CanConnect;
 
@@ -193,7 +193,7 @@ public sealed class GenshinConfigurationViewModel
         : Task.CompletedTask;
 
     internal Task ToggleAutoRunAsync(GameAccount? account) =>
-        account is { Enabled: true, LoginState: "recognized" or "logged_in" } && Accounts.Contains(account)
+        account is { Enabled: true, HasGenshinLoginBinding: true } && Accounts.Contains(account)
             ? SaveExecutionChoiceAsync(async () =>
             {
                 await _database.SaveAccountAsync(account with { AutoRun = !account.AutoRun }, _close.Token);
@@ -337,8 +337,8 @@ public sealed class GenshinConfigurationViewModel
     private async Task VerifySelectedAccountsAsync()
     {
         if (!IsIdle || !Source.IsIdle || !_desktopIdle() || _close.IsCancellationRequested) return;
-        if (SelectedAccount is not { LoginState: "recognized" or "logged_in", Enabled: true } first ||
-            SecondLoginAccount is { } second && (second.Id == first.Id || !second.Enabled || second.LoginState is not ("recognized" or "logged_in")))
+        if (SelectedAccount is not { HasGenshinLoginBinding: true, Enabled: true } first ||
+            SecondLoginAccount is { } second && (second.Id == first.Id || !second.Enabled || !second.HasGenshinLoginBinding))
         {
             LoginStatus = "请选择一个或两个不同、已从截图识别的原神档案。";
             return;
@@ -442,7 +442,7 @@ public sealed class GenshinConfigurationViewModel
         var current = await RefreshAccountRowsAsync();
         var selected = current.FirstOrDefault(a => a.Id == accountId);
         await SelectAsync(exact ? selected : selected
-            ?? current.FirstOrDefault(a => a.Enabled && a.LoginState is ("recognized" or "logged_in")) ?? current.FirstOrDefault());
+            ?? current.FirstOrDefault(a => a.Enabled && a.HasGenshinLoginBinding) ?? current.FirstOrDefault());
     }
 
     private async Task<IReadOnlyList<GameAccount>> RefreshAccountRowsAsync()

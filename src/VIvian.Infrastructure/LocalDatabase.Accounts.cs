@@ -7,7 +7,10 @@ namespace VIvian.Infrastructure;
 
 public sealed record GameAccount(Guid Id, GameId Game, string Name, string Region, string? Uid, string InstallPath,
     bool Enabled, bool AutoRun, int Order, string LoginState, string VerificationState,
-    DateTimeOffset? LastRunAt, string? LastResult, long Revision);
+    DateTimeOffset? LastRunAt, string? LastResult, long Revision)
+{
+    public bool HasGenshinLoginBinding { get; init; }
+}
 public sealed record AccountSettingsSnapshot(Guid AccountId, IReadOnlyDictionary<string, string> Values, long Revision);
 public sealed record AccountTaskPlan(Guid AccountId, bool DailyEnabled, long Revision);
 public sealed record AccountBatch(Guid Id, GameId Game, DateTimeOffset StartedAt, DateTimeOffset UpdatedAt,
@@ -23,9 +26,10 @@ public sealed partial class LocalDatabase
         using var cmd = c.CreateCommand();
         cmd.CommandText = """
             SELECT a.account_id,a.game,a.display_name,a.region,a.uid,a.install_path,a.enabled,a.auto_run,a.sort_order,
-                a.login_state,a.verification_state,a.last_run_at,a.last_result,a.revision,p.masked_phone
+                a.login_state,a.verification_state,a.last_run_at,a.last_result,a.revision,
+                CASE WHEN p.detail=$importSource THEN p.masked_phone END, p.normalized_phone
             FROM game_accounts a LEFT JOIN account_login_profiles p ON a.game=$genshin
-                AND a.account_id=p.account_id AND p.detail=$importSource
+                AND a.account_id=p.account_id
             WHERE ($game IS NULL OR a.game=$game) ORDER BY a.game,a.sort_order,a.account_id;
             """;
         cmd.Parameters.AddWithValue("$game", game is null ? DBNull.Value : (object)(int)game);
@@ -43,7 +47,10 @@ public sealed partial class LocalDatabase
                 reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(5), reader.GetInt32(6) != 0, reader.GetInt32(7) != 0,
                 reader.GetInt32(8), reader.GetString(9), reader.GetString(10),
                 reader.IsDBNull(11) ? null : DateTimeOffset.Parse(reader.GetString(11)),
-                reader.IsDBNull(12) ? null : reader.GetString(12), reader.GetInt64(13)));
+                reader.IsDBNull(12) ? null : reader.GetString(12), reader.GetInt64(13))
+            {
+                HasGenshinLoginBinding = !reader.IsDBNull(15) && !string.IsNullOrWhiteSpace(reader.GetString(15)),
+            });
         }
         return result;
     }

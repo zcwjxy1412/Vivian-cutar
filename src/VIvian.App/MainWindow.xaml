@@ -412,10 +412,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
           AutomationProperties.Name="{Binding Name, StringFormat=选择 {0}}">
 <CheckBox.Style><Style TargetType="CheckBox"><Setter Property="IsEnabled" Value="False"/><Style.Triggers>
 <MultiDataTrigger><MultiDataTrigger.Conditions>
-<Condition Binding="{Binding Enabled}" Value="True"/><Condition Binding="{Binding LoginState}" Value="recognized"/>
-</MultiDataTrigger.Conditions><Setter Property="IsEnabled" Value="True"/></MultiDataTrigger>
-<MultiDataTrigger><MultiDataTrigger.Conditions>
-<Condition Binding="{Binding Enabled}" Value="True"/><Condition Binding="{Binding LoginState}" Value="logged_in"/>
+<Condition Binding="{Binding Enabled}" Value="True"/><Condition Binding="{Binding HasGenshinLoginBinding}" Value="True"/>
 </MultiDataTrigger.Conditions><Setter Property="IsEnabled" Value="True"/></MultiDataTrigger>
 </Style.Triggers></Style></CheckBox.Style>
 </CheckBox>
@@ -425,8 +422,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </StackPanel>
 <TextBlock Grid.Column="2" VerticalAlignment="Top"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}">
 <Setter Property="Text" Value="待绑定"/><Setter Property="Foreground" Value="{StaticResource Warn}"/>
-<Style.Triggers><DataTrigger Binding="{Binding LoginState}" Value="recognized"><Setter Property="Text" Value="已绑定"/><Setter Property="Foreground" Value="{StaticResource Ok}"/></DataTrigger>
-<DataTrigger Binding="{Binding LoginState}" Value="logged_in"><Setter Property="Text" Value="已绑定"/><Setter Property="Foreground" Value="{StaticResource Ok}"/></DataTrigger></Style.Triggers>
+<Style.Triggers><DataTrigger Binding="{Binding HasGenshinLoginBinding}" Value="True"><Setter Property="Text" Value="已绑定"/><Setter Property="Foreground" Value="{StaticResource Ok}"/></DataTrigger></Style.Triggers>
 </Style></TextBlock.Style></TextBlock>
 </Grid>
 </Border>

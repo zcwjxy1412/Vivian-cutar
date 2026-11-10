@@ -11,6 +11,32 @@ internal delegate Task<MultiAccountOutcome> GenshinDailyVerification(LocalDataba
     string betterGiRoot, string archivePath, string profileDirectory, bool rewardOnly,
     Action<BatchAccountProgress>? progress, CancellationToken cancellationToken);
 
+internal sealed class GenshinRewardActivation(TimeProvider clock)
+{
+    internal static readonly TimeSpan Timeout = TimeSpan.FromSeconds(15);
+    private readonly long _started = clock.GetTimestamp();
+    private bool _rendered;
+    private bool _finished;
+
+    private bool Expired => clock.GetElapsedTime(_started) >= Timeout;
+
+    internal bool TryMarkRendered()
+    {
+        if (_rendered || _finished || Expired) return false;
+        _rendered = true;
+        return true;
+    }
+
+    internal bool TryStart(bool isActive) => _rendered && isActive && !Expired && StopWaiting();
+
+    internal bool StopWaiting()
+    {
+        if (_finished) return false;
+        _finished = true;
+        return true;
+    }
+}
+
 internal sealed class GenshinRewardAcceptance
 {
     private const string RunOption = "--genshin-reward-acceptance";

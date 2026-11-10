@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using VIvian.App;
 using VIvian.Core;
 using VIvian.Core.Execution;
@@ -12,6 +13,46 @@ public sealed class GenshinRewardAcceptanceTests
 {
     private static readonly Guid Attempt = Guid.NewGuid();
     private static readonly Guid Account = Guid.NewGuid();
+
+    [Fact]
+    public void AutomaticLaunchRequiresRenderingAndActualActivationExactlyOnce()
+    {
+        var gate = new GenshinRewardActivation(new FakeTimeProvider());
+        Assert.False(gate.TryStart(isActive: true));
+        Assert.True(gate.TryMarkRendered());
+        Assert.False(gate.TryMarkRendered());
+        Assert.False(gate.TryStart(isActive: false));
+        Assert.True(gate.TryStart(isActive: true));
+        Assert.False(gate.TryStart(isActive: true));
+        Assert.False(gate.StopWaiting());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CloseCancelsWaitingEvenIfActivationArrivesLater(bool rendered)
+    {
+        var gate = new GenshinRewardActivation(new FakeTimeProvider());
+        if (rendered) Assert.True(gate.TryMarkRendered());
+        Assert.True(gate.StopWaiting());
+        Assert.False(gate.TryMarkRendered());
+        Assert.False(gate.TryStart(isActive: true));
+        Assert.False(gate.StopWaiting());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExpiredWaitRejectsActivationBeforeDispatcherTimerCanRun(bool rendered)
+    {
+        var time = new FakeTimeProvider();
+        var gate = new GenshinRewardActivation(time);
+        if (rendered) Assert.True(gate.TryMarkRendered());
+        time.Advance(GenshinRewardActivation.Timeout);
+        Assert.False(gate.TryMarkRendered());
+        Assert.False(gate.TryStart(isActive: true));
+        Assert.True(gate.StopWaiting());
+    }
 
     [Fact]
     public async Task AcceptanceWorkspaceKeepsLogReviewAndBlocksOrdinaryOperations()

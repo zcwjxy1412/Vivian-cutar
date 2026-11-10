@@ -1076,6 +1076,8 @@ public sealed class MainViewModel : ObservableObject
         if (count > 0) Status = $"上次 VIvian 意外退出，{count} 条运行已标记为结果未知，请在“调度与监控”中查看并确认。";
     }
 
+    internal void ReportGenshinRewardActivation(string message) => Status = BatchStatus = message;
+
     private async Task RunAsync(Func<Task> action)
     {
         if (!await _operation.WaitAsync(0)) return;

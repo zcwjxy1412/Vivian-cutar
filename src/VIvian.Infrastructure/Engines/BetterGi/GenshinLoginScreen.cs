@@ -60,7 +60,9 @@ public sealed partial class GenshinLoginScreen
         if (brand is null || enter is null || other is null || !MatchesReferenceLayout(brand, enter, other, width, height))
             return new(GenshinLoginScreenState.Unrecognized);
 
-        var possibleRows = compact.Where(line => line.CenterY > brand.Bottom && line.CenterY < other.Y &&
+        // The logo's tagline may be read with digits. It sits above the account area.
+        var accountAreaTop = Math.Max(brand.Bottom, brand.CenterY + .20 * (enter.CenterY - brand.CenterY));
+        var possibleRows = compact.Where(line => line.CenterY > accountAreaTop && line.CenterY < other.Y &&
                 Math.Abs(line.CenterX - enter.CenterX) <= enter.Width * 3.5 &&
                 line.Text.Any(IsPossibleAccountCharacter))
             .Take(2).ToArray();
@@ -84,7 +86,8 @@ public sealed partial class GenshinLoginScreen
     }
 
     internal static IReadOnlyList<LoginAccountObservation> AnalyzeExpandedList(int width, int height,
-        IReadOnlyList<RecognizedText> lines, ScreenRegion? openCaret = null)
+        IReadOnlyList<RecognizedText> lines, ScreenRegion? openCaret = null,
+        IReadOnlyList<RecognizedText>? alternateCaptions = null)
     {
         var compact = lines.Select(line => line with { Text = Compact(line.Text) }).ToArray();
         if (compact.Any(line => !WithinFrame(line, width, height) || line.Text == "进入游戏" ||
@@ -110,8 +113,13 @@ public sealed partial class GenshinLoginScreen
             (openCaret is not null && !IsCaretAligned(openCaret, header)))
             return [];
 
-        var captions = compact.Where(line => line.Y > header.Bottom && line.Bottom < footer.Y &&
-            Math.Abs(line.X - header.X) <= header.Width * .6 && IsLastUsed(line.Text)).ToArray();
+        RecognizedText[] FindCaptions(IEnumerable<RecognizedText> source) => source.Where(line =>
+            WithinFrame(line, width, height) && line.Y > header.Bottom && line.Bottom < footer.Y &&
+            Math.Abs(line.X - header.X) <= header.Width * .6 && IsLastUsed(Compact(line.Text))).ToArray();
+
+        var captions = FindCaptions(compact);
+        if (captions.Length < rows.Length - 1 && alternateCaptions is not null)
+            captions = FindCaptions(alternateCaptions);
         if (captions.Length != rows.Length - 1) return [];
 
         var accounts = new List<LoginAccountObservation>(rows.Length - 1);

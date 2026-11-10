@@ -33,10 +33,12 @@ internal sealed class GenshinRewardAcceptance
     }
 
     internal Guid Attempt { get; }
-    private Guid? AccountId { get; }
+    internal Guid? AccountId { get; }
     private long Revision { get; }
     internal string ProfileDirectory { get; }
     internal bool ReviewOnly => AccountId is null;
+    internal string WorkspaceScope =>
+        $"隔离验收 · {(ReviewOnly ? "查阅与恢复" : "原神单账号领奖 · 0 树脂")}\n验收编号 {Attempt:D}";
 
     internal static bool HasCommand(string[] args) => args.Any(arg => arg is RunOption or ReviewOption);
 

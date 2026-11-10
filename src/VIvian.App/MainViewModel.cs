@@ -20,7 +20,7 @@ using VIvian.Infrastructure.Processes;
 namespace VIvian.App;
 
 /// <summary>Where VIvian keeps its own files. Nothing outside these folders is written by the application.</summary>
-public sealed record AppPaths(string DataDirectory)
+public sealed record AppPaths(string DataDirectory, string? RewardAcceptanceScope = null, Guid? RewardAcceptanceAccount = null)
 {
     public string LogDirectory => Path.Combine(DataDirectory, "logs");
     public string ExportDirectory => Path.Combine(DataDirectory, "exports");
@@ -71,17 +71,22 @@ public sealed class MainViewModel : ObservableObject
     public string StopKeyText { get => _stopKeyText; set => Set(ref _stopKeyText, value); }
     private bool _busy;
     public bool IsIdle => !_busy;
-    private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); }
+    public bool CanOperateWorkspace => _paths.RewardAcceptanceScope is null;
+    public bool CanEditWorkspace => CanOperateWorkspace && IsIdle;
+    private void Busy(bool value) { _busy = value; Raise(nameof(IsIdle)); Raise(nameof(CanEditWorkspace)); }
     public bool LastCheckPassed { get; private set; }
     public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
         + (RealExecutionPolicy.IsUnifiedInstall ? "VIvian 合流版" : RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
             : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
             : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
-    public string ExecutionBanner => RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次 · 首页启动"
+    public string ExecutionBanner => _paths.RewardAcceptanceScope ?? (RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次 · 首页启动"
         : RealExecutionPolicy.IsReusableManualTest
         ? "手动实测版 · 星铁 screen_test · 每次需本人确认与 UAC · 无定时/无人值守执行"
         : RealExecutionPolicy.BuildPermitsRealExecution
-        ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放";
+        ? "星铁单次界面测试 · 需本人确认与 UAC" : "预桌面开发版 · 模拟引擎 · 真实任务未开放");
+    public string DailyStartHint => CanOperateWorkspace
+        ? "账号管理勾选并排序，游戏管理保存任务设置。完成打开程序时的管理员授权后，在这里启动一次。"
+        : "隔离验收使用独立快照。日常入口和配置仅供查看，可在这里停止本轮验收或核对桌面交接。";
     public string DataDirectoryText => "数据目录：" + _paths.DataDirectory;
     /// <summary>Page title of the home page, e.g. "11月6日 星期五".</summary>
     public string TodayText => DateTime.Now.ToString("M月d日 dddd", System.Globalization.CultureInfo.GetCultureInfo("zh-CN"));
@@ -222,6 +227,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RestoreConfigurationAsync()
     {
+        if (!CanOperateWorkspace) return;
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory, recovery: true);
         var result = await Task.Run(_control.RestorePendingConfiguration);
         ShowRestore(result);
@@ -254,7 +260,7 @@ public sealed class MainViewModel : ObservableObject
                 return;
             }
         }
-        if (GenshinRewardAcceptance.IsCandidateBuild)
+        if (!CanOperateWorkspace)
         {
             Status = "本验收档案没有可核对的原神恢复记录。";
             return;
@@ -312,7 +318,7 @@ public sealed class MainViewModel : ObservableObject
                 Queue.IsIdle, Queue.IsRunning, Queue.HasUnresolved, _oneShotConsumed));
         }
     }
-    public bool CanStartMarch7th => Admission.Allowed;
+    public bool CanStartMarch7th => CanOperateWorkspace && Admission.Allowed;
     /// <summary>Current state in plain Chinese (未通过安装核验 / 清理未确认 / 正在执行 / 可以进行手动实测 …).</summary>
     public string ManualTestStateText => "当前状态：" + Admission.Text;
     private string _lastRealResult = "上次结果：本版本尚无真实运行记录。";
@@ -368,13 +374,13 @@ public sealed class MainViewModel : ObservableObject
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
-            () => CanStopAll, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
-        accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
+            () => !CanOperateWorkspace || CanStopAll, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
+        if (CanOperateWorkspace) accounts.SelectionChanged += () => { _ = Configuration.SelectAccountAsync(); };
         GenshinConfiguration = new GenshinConfigurationViewModel(accounts.Database,
             new GenshinAccountConfigurationProvider(accounts.Database),
-            () => IsIdle && !BatchRunning && !Queue.IsRunning, paths.DataDirectory,
-            () => IsIdle && !BatchRunning && !Queue.IsRunning && !Queue.HasUnresolved && !_control.HasPendingConfigurationRestore,
-            () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinOperationAsync);
+            () => CanEditWorkspace && !BatchRunning && !Queue.IsRunning, paths.DataDirectory,
+            () => CanEditWorkspace && !BatchRunning && !Queue.IsRunning && !Queue.HasUnresolved && !_control.HasPendingConfigurationRestore,
+            () => Engines.Single(e => e.Id == GameId.Genshin).SavedInstallPath, SerializeGenshinOperationAsync, CanOperateWorkspace);
         GenshinConfiguration.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin)) Raise(nameof(CanStopAll));
@@ -400,6 +406,8 @@ public sealed class MainViewModel : ObservableObject
         StartMarch7thCommand = new(() => RunAsync(StartMarch7thAsync), HandleError);
         Accounts.ExecuteScan = action => RunAsync(async () =>
         {
+            if (!CanOperateWorkspace)
+            { Status = "隔离验收档案仅供查看，账号扫描未启动。"; return; }
             if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
             { Status = "任务运行或清理未确认时不能扫描切换账号。"; return; }
             using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
@@ -425,11 +433,12 @@ public sealed class MainViewModel : ObservableObject
         OneClickCommand = new(scope => OneClickAsync(scope is GameId game ? game : null), HandleError);
         foreach (var card in Engines)
         {
+            card.CanOperateWorkspace = CanOperateWorkspace;
             card.GenshinDailyWired = card.Id == GameId.Genshin && _genshinDailyBatch is not null;
             card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
             card.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(EngineCard.Compatibility)) RaiseHome(); };
         }
-        bool ConfigurationBlocked() => CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
+        bool ConfigurationBlocked() => !CanOperateWorkspace || CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
         var starRailConfiguration = new VIvian.Infrastructure.Assistant.StarRailAccountConfigurationProvider(
             accounts.Database, _control, () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath, ConfigurationBlocked,
             () => DesktopOperationLease.Acquire(paths.DataDirectory));
@@ -475,7 +484,7 @@ public sealed class MainViewModel : ObservableObject
         await Queue.InitializeAsync();
         await Accounts.ReloadAsync();
         await Accounts.ReloadZenlessAsync();
-        await GenshinConfiguration.LoadAsync();
+        await GenshinConfiguration.LoadAsync(_paths.RewardAcceptanceAccount);
         await RefreshLastRunsAsync();
         if (autoPrepare) await AutoDiscoverAsync(persist: true);
         await CheckEnginesCoreAsync();
@@ -553,7 +562,8 @@ public sealed class MainViewModel : ObservableObject
     public string SelectedAccountsText => (Accounts.SelectedRows.Count + GenshinConfiguration.SelectedForDaily.Count).ToString();
     public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
     public string RunStateText => BatchRunning || Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
-    public string ConfigSyncText => Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
+    public string ConfigSyncText => !CanOperateWorkspace ? "只读"
+        : Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
     private void RaiseHome()
     {
         foreach (var name in new[] { nameof(RunnableText), nameof(SelectedAccountsText), nameof(InstalledText), nameof(RunStateText), nameof(ConfigSyncText) })
@@ -569,7 +579,7 @@ public sealed class MainViewModel : ObservableObject
         {
             if (!RealExecutionPolicy.IsM5DailyTest)
             { Status = "此版本未启用真实日常批次。"; return; }
-            if (GenshinRewardAcceptance.IsCandidateBuild != (acceptance is not null) ||
+            if ((!CanOperateWorkspace) != (acceptance is not null) ||
                 (acceptance is not null && (scope != GameId.Genshin || acceptance.ReviewOnly || verify is null)))
             { Status = "原神领奖验收仅接受本次启动指定的单账号请求。"; return; }
             if (scope is not (null or GameId.StarRail or GameId.Genshin))
@@ -646,6 +656,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task StartMarch7thAsync()
     {
+        if (!CanOperateWorkspace) return;
         if (Accounts.SelectedStarRail is { Id: var selectedId } && selectedId != Guid.Parse("00000000-0000-4000-8000-000000000002"))
         { Status = "当前选择的是新增账号。其设置尚未加载到上游；为避免用错账号配置，本次没有启动。"; return; }
         var admission = Admission;
@@ -742,6 +753,8 @@ public sealed class MainViewModel : ObservableObject
     private async Task<int?> RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null,
         GenshinRewardAcceptance? acceptance = null, GenshinDailyVerification? verify = null)
     {
+        if (!CanOperateWorkspace && acceptance is null)
+        { BatchStatus = "隔离验收只执行本次启动指定的原神任务。"; return null; }
         if (CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
         { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return null; }
         if (approved is not null && (!RealExecutionPolicy.IsM5DailyTest || !Assistant.EnableScheduleProposals
@@ -992,6 +1005,8 @@ public sealed class MainViewModel : ObservableObject
 
     internal async Task SerializeGenshinOperationAsync(Func<Task> action)
     {
+        if (!CanOperateWorkspace)
+            throw new InvalidOperationException("隔离验收档案仅供查看，原神设置和其他执行入口已锁定。");
         // The main operation gate also owns saving and auto-discovering engine paths.
         if (!await _operation.WaitAsync(0))
             throw new InvalidOperationException("主程序正在保存设置或处理任务，请稍后重试。");

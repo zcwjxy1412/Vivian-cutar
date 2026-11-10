@@ -23,6 +23,7 @@ public sealed class GenshinConfigurationViewModel
     private readonly Func<bool> _desktopIdle;
     private readonly Func<string> _betterGiRoot;
     private readonly Func<Func<Task>, Task> _serializeOperation;
+    private readonly bool _canOperateWorkspace;
     private readonly string _profileDirectory;
     private CancellationTokenSource? _verification;
     private AccountConfigurationView? _snapshot;
@@ -36,7 +37,8 @@ public sealed class GenshinConfigurationViewModel
     private bool _busy;
 
     public GenshinConfigurationViewModel(LocalDatabase database, IAccountConfigurationProvider provider, Func<bool> hostIdle,
-        string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot, Func<Func<Task>, Task> serializeOperation)
+        string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot, Func<Func<Task>, Task> serializeOperation,
+        bool canOperateWorkspace = true)
     {
         _database = database;
         _provider = provider;
@@ -44,6 +46,7 @@ public sealed class GenshinConfigurationViewModel
         _desktopIdle = desktopIdle;
         _betterGiRoot = betterGiRoot;
         _serializeOperation = serializeOperation;
+        _canOperateWorkspace = canOperateWorkspace;
         _profileDirectory = profileDirectory;
         _import = new(database);
         Source = new(profileDirectory, desktopIdle, () => IsIdle && !Parameters.Any(row => row.IsChanged), betterGiRoot,
@@ -116,8 +119,9 @@ public sealed class GenshinConfigurationViewModel
     public string NewAccountName { get => _newAccountName; set => Set(ref _newAccountName, value); }
     public string Status { get => _status; private set => Set(ref _status, value); }
     public bool IsIdle => !_busy && !IsVerifyingLogin;
-    public bool CanBindLoginScreenshot => IsIdle && SelectedAccount is { Enabled: true, LoginState: not "recognized" };
-    public bool CanEdit => IsIdle && Source.IsIdle && _snapshot is { WriteUnavailableReason: null };
+    public bool CanEditWorkspace => _canOperateWorkspace && IsIdle;
+    public bool CanBindLoginScreenshot => CanEditWorkspace && SelectedAccount is { Enabled: true, LoginState: not "recognized" };
+    public bool CanEdit => CanEditWorkspace && Source.IsIdle && _snapshot is { WriteUnavailableReason: null };
     public bool CanConnect => CanEdit && Source.CanConnect;
 
     internal void Close()
@@ -164,7 +168,9 @@ public sealed class GenshinConfigurationViewModel
         }
     }
 
-    internal Task LoadAsync() => ConfirmDiscard(includeSource: false) ? RunAsync(() => LoadAccountsAsync(SelectedAccount?.Id)) : Task.CompletedTask;
+    internal Task LoadAsync(Guid? focusAccount = null) => ConfirmDiscard(includeSource: false)
+        ? RunAsync(() => LoadAccountsAsync(focusAccount ?? SelectedAccount?.Id, exact: focusAccount.HasValue))
+        : Task.CompletedTask;
 
     internal Task ToggleAutoRunAsync(GameAccount? account) =>
         account is { Enabled: true, LoginState: "recognized" } && Accounts.Contains(account)
@@ -294,7 +300,7 @@ public sealed class GenshinConfigurationViewModel
 
     private async Task VerifyLoginAsync()
     {
-        if (!IsLoginVerificationAvailable || !IsIdle || !Source.IsIdle) return;
+        if (!IsLoginVerificationAvailable || !CanEditWorkspace || !Source.IsIdle) return;
         if (!_desktopIdle()) { LoginStatus = "请先结束正在运行的任务，并核对清理和恢复状态。"; return; }
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         {
@@ -369,6 +375,7 @@ public sealed class GenshinConfigurationViewModel
     {
         Raise(nameof(IsVerifyingLogin));
         Raise(nameof(IsIdle));
+        Raise(nameof(CanEditWorkspace));
         Raise(nameof(CanEdit));
         Raise(nameof(CanConnect));
         Raise(nameof(CanBindLoginScreenshot));
@@ -410,12 +417,12 @@ public sealed class GenshinConfigurationViewModel
         return true;
     }
 
-    private async Task LoadAccountsAsync(Guid? accountId)
+    private async Task LoadAccountsAsync(Guid? accountId, bool exact = false)
     {
         var current = await RefreshAccountRowsAsync();
-        await SelectAsync(current.FirstOrDefault(a => a.Id == accountId)
-            ?? current.FirstOrDefault(a => a.Enabled && a.LoginState == "recognized")
-            ?? current.FirstOrDefault());
+        var selected = current.FirstOrDefault(a => a.Id == accountId);
+        await SelectAsync(exact ? selected : selected
+            ?? current.FirstOrDefault(a => a.Enabled && a.LoginState == "recognized") ?? current.FirstOrDefault());
     }
 
     private async Task<IReadOnlyList<GameAccount>> RefreshAccountRowsAsync()
@@ -458,6 +465,7 @@ public sealed class GenshinConfigurationViewModel
         if (!IsIdle) return;
         _busy = true;
         Raise(nameof(IsIdle));
+        Raise(nameof(CanEditWorkspace));
         Raise(nameof(CanEdit));
         Raise(nameof(CanConnect));
         Raise(nameof(CanBindLoginScreenshot));
@@ -472,6 +480,7 @@ public sealed class GenshinConfigurationViewModel
         {
             _busy = false;
             Raise(nameof(IsIdle));
+            Raise(nameof(CanEditWorkspace));
             Raise(nameof(CanEdit));
             Raise(nameof(CanConnect));
             Raise(nameof(CanBindLoginScreenshot));

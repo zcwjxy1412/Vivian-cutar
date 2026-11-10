@@ -175,7 +175,7 @@ public partial class App : Application
                 services.AddSingleton<IRunHistory>(database);
                 services.AddSingleton<ITaskPlanStore>(database);
                 services.AddSingleton<IPreferenceStore>(database);
-                services.AddSingleton(new AppPaths(root));
+                services.AddSingleton(new AppPaths(root, reward?.WorkspaceScope, reward?.AccountId));
                 // The current build still injects the refusing supervisor. A separately reviewed
                 // real-execution build would use the existing Windows Job supervisor.
                 services.AddSingleton<IProcessSupervisor>(_ => RealExecutionPolicy.BuildPermitsRealExecution
@@ -267,20 +267,16 @@ public partial class App : Application
             _stage = "创建主窗口";
             var window = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = window;
-            if (reward is not null)
+            if (reward is { ReviewOnly: false })
             {
-                window.ShowGenshinRewardAcceptance(reward.Attempt, reward.ReviewOnly);
-                if (!reward.ReviewOnly)
+                async void RunRewardAcceptance(object? sender, EventArgs args)
                 {
-                    async void RunRewardAcceptance(object? sender, EventArgs args)
-                    {
-                        window.ContentRendered -= RunRewardAcceptance;
-                        var exitCode = await window.RunWithRewardAcceptanceStopKeyAsync(
-                            () => vm.OneClickAsync(GameId.Genshin, reward, BetterGiAccountBatch.VerifySavedDailyAsync));
-                        if (exitCode is { } code && !Dispatcher.HasShutdownStarted) Shutdown(code);
-                    }
-                    window.ContentRendered += RunRewardAcceptance;
+                    window.ContentRendered -= RunRewardAcceptance;
+                    var exitCode = await window.RunWithRewardAcceptanceStopKeyAsync(
+                        () => vm.OneClickAsync(GameId.Genshin, reward, BetterGiAccountBatch.VerifySavedDailyAsync));
+                    if (exitCode is { } code && !Dispatcher.HasShutdownStarted) Shutdown(code);
                 }
+                window.ContentRendered += RunRewardAcceptance;
             }
             if (_smoke)
             {

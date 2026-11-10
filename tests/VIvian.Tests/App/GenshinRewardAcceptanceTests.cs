@@ -1,7 +1,9 @@
 using VIvian.App;
 using VIvian.Core;
+using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Accounts;
+using VIvian.Infrastructure.Simulation;
 using Xunit;
 
 namespace VIvian.Tests.App;
@@ -10,6 +12,57 @@ public sealed class GenshinRewardAcceptanceTests
 {
     private static readonly Guid Attempt = Guid.NewGuid();
     private static readonly Guid Account = Guid.NewGuid();
+
+    [Fact]
+    public async Task AcceptanceWorkspaceKeepsLogReviewAndBlocksOrdinaryOperations()
+    {
+        var folder = Directory.CreateTempSubdirectory("vivian-acceptance-shell-");
+        try
+        {
+            var database = new LocalDatabase(Path.Combine(folder.FullName, "vivian.db"));
+            await database.InitializeAsync();
+            var paths = new AppPaths(folder.FullName, "隔离验收 · 原神单账号领奖 · 0 树脂");
+            var supervisor = new RefusingProcessSupervisor();
+            var queue = new QueueViewModel(new QueueScheduler(database, supervisor), database, paths);
+            var accounts = new AccountViewModel(database, new AccountRecognitionService(database, new LoginScreenReader()),
+                NoScanWindowShield.Instance);
+            var vm = new MainViewModel(database, database, database, database, paths, queue, supervisor,
+                accounts, new MultiAccountOrchestrator(database, null!), new GamePathProvider());
+
+            Assert.Contains("隔离验收", vm.ExecutionBanner);
+            Assert.False(vm.CanOperateWorkspace);
+            Assert.False(vm.CanEditWorkspace);
+            Assert.False(vm.CanStartMarch7th);
+            Assert.False(queue.CanOperateWorkspace);
+            Assert.False(queue.CanAcknowledge);
+            Assert.False(vm.GenshinConfiguration.CanEditWorkspace);
+            Assert.All(vm.Engines, card => Assert.False(card.CanRunForReal));
+            var first = await database.AddAccountAsync(GameId.Genshin, "先入档", "", null);
+            await database.SaveLoginProfileAsync(first.Id, "130****01", "130****01", 0, .95, null, "模拟");
+            var target = await database.AddAccountAsync(GameId.Genshin, "实际验收账号", "", null);
+            await vm.GenshinConfiguration.LoadAsync(target.Id);
+            Assert.Equal(target.Id, vm.GenshinConfiguration.SelectedAccount?.Id);
+            await vm.GenshinConfiguration.LoadAsync(Guid.NewGuid());
+            Assert.Null(vm.GenshinConfiguration.SelectedAccount);
+            Assert.Null(await queue.RunDemoAsync([(GameId.StarRail, DemoScenario.Success)]));
+            var runId = Guid.NewGuid();
+            await database.PublishAsync(new RunUpdate(runId, runId, GameId.Genshin, "fixture/acceptance", false,
+                RunPhase.Finished, RunOutcome.Indeterminate, CleanupState.Unconfirmed, ReasonCodes.CleanupUnconfirmed,
+                DateTimeOffset.UtcNow), CancellationToken.None);
+            await queue.RefreshAsync();
+            Assert.Equal(runId, Assert.Single(queue.Runs).RunId);
+            await queue.AcknowledgeAllAsync();
+            Assert.Equal(runId, Assert.Single(await database.ReadUnresolvedAsync()).RunId);
+            vm.Accounts.ScanCommand.Execute(null);
+            Assert.Contains("隔离验收", vm.Status);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => vm.SerializeGenshinOperationAsync(
+                () => throw new Exception("不应修改源档案")));
+            vm.Configuration.OpenUpstreamCommand.Execute(null);
+            Assert.Contains("任务运行中", vm.Configuration.Status);
+            vm.GenshinConfiguration.Close();
+        }
+        finally { folder.Delete(recursive: true); }
+    }
 
     [Theory]
     [InlineData(true, true, true, false, true, 0)]
@@ -43,6 +96,7 @@ public sealed class GenshinRewardAcceptanceTests
         var request = Assert.IsType<GenshinRewardAcceptance>(GenshinRewardAcceptance.Parse(args, true, true, @"C:\Data"));
         Assert.Equal(Path.Combine(@"C:\Data", "VIvian-M6-GenshinAcceptance", Attempt.ToString("N")), request.ProfileDirectory);
         Assert.False(request.ReviewOnly);
+        Assert.Contains("0 树脂", request.WorkspaceScope);
         Assert.True(GenshinRewardAcceptance.Parse(["--genshin-reward-review", Attempt.ToString("D")],
             true, true, @"C:\Data")!.ReviewOnly);
     }

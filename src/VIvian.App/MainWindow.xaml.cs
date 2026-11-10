@@ -1,6 +1,4 @@
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
 namespace VIvian.App;
 public partial class MainWindow : Window
 {
@@ -86,61 +84,22 @@ public partial class MainWindow : Window
         finally { _hotkey.Unregister(); }
     }
 
-    internal void ShowGenshinRewardAcceptance(Guid attempt, bool reviewOnly)
-    {
-        Title = "VIvian · 原神领奖验收";
-        var panel = new StackPanel { Margin = new Thickness(24) };
-        panel.Children.Add(new TextBlock
-        {
-            Text = reviewOnly ? "原神领奖验收 · 查阅与恢复" : "首页一键日常 · 原神单账号领奖验收",
-            FontSize = 24,
-            Margin = new Thickness(0, 0, 0, 12),
-        });
-        panel.Children.Add(new TextBlock { Text = $"验收编号 {attempt:D} · 仅领取每日奖励 · 0 树脂" });
-        var progress = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
-        if (!reviewOnly)
-        {
-            progress.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.BatchStatus)));
-            panel.Children.Add(progress);
-        }
-        var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
-        status.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.Status)));
-        panel.Children.Add(status);
-        if (!reviewOnly)
-        {
-            var stopKey = new TextBlock { TextWrapping = TextWrapping.Wrap };
-            stopKey.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.StopKeyText)));
-            panel.Children.Add(stopKey);
-        }
-        var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
-        AddAction("停止", nameof(MainViewModel.StopAllCommand), nameof(MainViewModel.CanStopAll));
-        AddAction("核对桌面交接", nameof(MainViewModel.RecoverDesktopCommand), nameof(MainViewModel.IsIdle));
-        panel.Children.Add(actions);
-        Content = panel;
-
-        void AddAction(string text, string command, string enabled)
-        {
-            var button = new Button { Content = text, Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 0, 8, 0) };
-            button.SetBinding(Button.CommandProperty, new Binding(command));
-            button.SetBinding(IsEnabledProperty, new Binding(enabled));
-            actions.Children.Add(button);
-        }
-    }
-
     private void BrowseReleaseArchive(object sender, RoutedEventArgs e)
     {
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择官方 March7thAssistant 发行包",
             Filter = "官方发行包 (*.zip;*.7z)|*.zip;*.7z|所有文件 (*.*)|*.*",
             CheckFileExists = true,
         };
-        if (dialog.ShowDialog(this) == true && DataContext is MainViewModel vm) vm.ReleaseArchivePath = dialog.FileName;
+        if (dialog.ShowDialog(this) == true) vm.ReleaseArchivePath = dialog.FileName;
     }
 
     private void BrowseEngineFolder(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is not EngineCard card) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } ||
+            (sender as FrameworkElement)?.Tag is not EngineCard card) return;
         var dialog = new Microsoft.Win32.OpenFolderDialog { Title = $"选择 {card.Engine} 的安装目录", Multiselect = false };
         if (dialog.ShowDialog(this) == true) card.InstallPath = dialog.FolderName;
     }
@@ -150,7 +109,7 @@ public partial class MainWindow : Window
     /// <summary>Clicking the character opens the floating assistant (one window, kept between clicks).</summary>
     private void OpenAssistant(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         if (_assistant is null)
         {
             _assistant = new AssistantWindow(vm.Assistant) { Owner = this };
@@ -174,7 +133,7 @@ public partial class MainWindow : Window
     private void GenshinSourceVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
         if (DataContext is MainViewModel vm)
-            vm.GenshinConfiguration.Source.SetVisible(e.NewValue is true);
+            vm.GenshinConfiguration.Source.SetVisible(vm.CanOperateWorkspace && e.NewValue is true);
     }
 
     private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem =
@@ -182,13 +141,13 @@ public partial class MainWindow : Window
 
     private async void GenshinLoginVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
-        if (e.NewValue is true && DataContext is MainViewModel vm)
+        if (e.NewValue is true && DataContext is MainViewModel { CanOperateWorkspace: true } vm)
             await vm.GenshinConfiguration.DiscoverGameExecutableAsync();
     }
 
     private void BrowseGenshinExecutable(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择原神国服 YuanShen.exe",
@@ -201,7 +160,7 @@ public partial class MainWindow : Window
     /// <summary>Creates the assets folder and copies its path (VIvian starts no external processes outside the supervisor).</summary>
     private void CopyThemeFolder(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         try { System.IO.Directory.CreateDirectory(vm.Theme.Folder); Clipboard.SetText(vm.Theme.Folder); vm.ReportCopied(vm.Theme.Folder); }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
     }

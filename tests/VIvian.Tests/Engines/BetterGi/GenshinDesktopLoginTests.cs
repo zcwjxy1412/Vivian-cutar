@@ -23,6 +23,17 @@ public sealed class GenshinDesktopLoginTests
     private static readonly SwitchPolicy Policy = new(StepTimeout: TimeSpan.FromSeconds(1));
 
     [Theory]
+    [InlineData(false, true, false, "Missing")]
+    [InlineData(true, true, false, "Minimized")]
+    [InlineData(true, false, false, "IncompatibleViewport")]
+    [InlineData(true, false, true, "Background")]
+    public void ColdLaunchCanRestoreOnlyItsVerifiedWindowBeforeCheckingTheViewport(
+        bool owned, bool minimized, bool usableViewport, string expected)
+    {
+        Assert.Equal(expected, GenshinWindowsLoginDesktop.ClassifyLaunchWindow(owned, minimized, usableViewport).ToString());
+    }
+
+    [Theory]
     [InlineData(LoginScanFailure.WindowOccluded, "画面被遮挡")]
     [InlineData(LoginScanFailure.CaptureFailed, "未获得可核对的游戏画面")]
     [InlineData(null, "画面尚未识别")]

@@ -364,7 +364,7 @@ public sealed class BetterGiLifecycleTests
         var lines = BgiLog.Record(group.RootProcessId, Own(group), "启用一条龙配置：日常")
             .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙任务执行: 1/1"))
             .Concat(BgiLog.Record(ownedCheck ? group.RootProcessId : 9999, Own(group),
-                "检查每日奖励结果：\"未领取\"，请手动检查！", "WRN", "BetterGenshinImpact.GameTask.Common.TaskControl"))
+                "检查每日奖励结果：\"未领取\"，请手动检查！", level: "WRN", source: "BetterGenshinImpact.GameTask.Common.TaskControl"))
             .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙和配置组任务结束"));
 
         Assert.Equal(RunOutcome.Indeterminate, (await FinishAsync(f, run, group, lines, 0)).Outcome);

@@ -7,6 +7,16 @@ namespace VIvian.Tests.Engines.BetterGi;
 
 public sealed class GenshinDesktopLoginTests
 {
+    [Fact]
+    public async Task AuthenticodeReceivesASynchronousReadOnlyFileHandle()
+    {
+        await using var fixture = new BetterGiFixture();
+        using var file = GenshinGameExecutable.OpenForSignatureVerification(Path.Combine(fixture.Root, "BetterGI.exe"));
+        Assert.False(file.IsAsync);
+        Assert.True(file.CanRead);
+        Assert.False(file.CanWrite);
+    }
+
     private static readonly StarRailWindowInfo Window = new((IntPtr)123, 45, "", 1920, 1080, 0, 0, DateTimeOffset.UtcNow);
     private static readonly LoginTarget A = new("130****01", "130******01", 0, null);
     private static readonly LoginTarget B = new("130****02", "130******02", 1, "234567891", A.MaskedPhone, "234567890");

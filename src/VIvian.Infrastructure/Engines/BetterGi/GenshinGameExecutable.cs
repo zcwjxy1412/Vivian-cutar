@@ -9,6 +9,10 @@ internal static class GenshinGameExecutable
 {
     private const string Publisher = "miHoYo Co.,Ltd.";
 
+    // Authenticode reads this handle synchronously. An overlapped handle can reject a valid publisher signature.
+    internal static FileStream OpenForSignatureVerification(string path) =>
+        new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.SequentialScan);
+
     public static void Verify(string path, FileStream file)
     {
         if (new DriveInfo(Path.GetPathRoot(path)!).DriveType != DriveType.Fixed ||

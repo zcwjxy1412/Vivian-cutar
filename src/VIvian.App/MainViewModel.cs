@@ -55,6 +55,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly IPreferenceStore _preferences;
     private readonly IRunHistory _runs;
     private readonly IUnifiedTaskControl _control;
+    private readonly GenshinDailyBatch? _genshinDailyBatch;
+    private readonly GenshinDailyRecovery? _genshinDailyRecovery;
     private readonly MultiAccountOrchestrator _orchestrator;
     private readonly AppPaths _paths;
     private readonly SemaphoreSlim _operation = new(1, 1);
@@ -118,7 +120,7 @@ public sealed class MainViewModel : ObservableObject
     public bool BatchRunning
     {
         get => _batchRunning;
-        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); }
+        private set { Set(ref _batchRunning, value); Raise(nameof(CanStopAll)); Raise(nameof(RunStateText)); }
     }
     /// <summary>The home stop button and F10 also cancel a login verification.</summary>
     public bool CanStopAll => BatchRunning || Queue.IsRunning || GenshinConfiguration.IsVerifyingLogin;
@@ -134,10 +136,10 @@ public sealed class MainViewModel : ObservableObject
         GenshinConfiguration.CancelLogin();
         if (BatchRunning)
         {
-            _batchCts?.Cancel();
             BatchStatus = "正在停止批次并等待清理…";
             Status = BatchStatus;
         }
+        _batchCts?.Cancel();
         if (Queue.IsRunning) Queue.EmergencyStop();
     }
     private string _batchStatus = "尚未运行多账号批次。";
@@ -229,7 +231,30 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task RecoverDesktopAsync()
     {
-        if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved)
+        if (CanStopAll)
+        {
+            Status = "请先停止任务并等待本轮清理结束。";
+            return;
+        }
+        if (_genshinDailyRecovery is { } recoverGenshin)
+        {
+            Guid? recovered;
+            try { recovered = await Task.Run(() => recoverGenshin(_paths.DataDirectory, CancellationToken.None)); }
+            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or TimeoutException)
+            {
+                Status = "原神桌面交接待确认：" + ex.Message;
+                return;
+            }
+            if (recovered is { } runId)
+            {
+                await Queue.RefreshAsync();
+                Status = $"已核对并恢复原神日常的桌面交接（RunId {runId:D}）。";
+                if (Queue.Unresolved.Any(row => row.Game == GameId.Genshin && row.RunId == runId))
+                    Status += " 请在运行日志确认该条记录的清理。";
+                return;
+            }
+        }
+        if (Queue.HasUnresolved)
         {
             Status = "请先停止任务，并在运行记录确认所有待清理进程。";
             return;
@@ -321,9 +346,15 @@ public sealed class MainViewModel : ObservableObject
 
     public MainViewModel(ISettingsStore settings, IDiagnosticStore history, IPreferenceStore preferences,
         IRunHistory runs, AppPaths paths, QueueViewModel queue, IProcessSupervisor statusSupervisor,
-        AccountViewModel accounts, MultiAccountOrchestrator orchestrator, GamePathProvider gamePath)
+        AccountViewModel accounts, MultiAccountOrchestrator orchestrator, GamePathProvider gamePath,
+        GenshinDailyBatch? genshinDailyBatch = null, GenshinDailyRecovery? genshinDailyRecovery = null)
     {
         _orchestrator = orchestrator;
+        if (RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall)
+        {
+            _genshinDailyRecovery = genshinDailyRecovery;
+            _genshinDailyBatch = genshinDailyRecovery is not null ? genshinDailyBatch : null;
+        }
         gamePath.Resolve = () => March7thGamePath.Read(Engines.Single(e => e.Id == GameId.StarRail).InstallPath);
         _settings = settings; _history = history; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
         Accounts = accounts;
@@ -342,6 +373,7 @@ public sealed class MainViewModel : ObservableObject
         GenshinConfiguration.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(GenshinConfigurationViewModel.IsVerifyingLogin)) Raise(nameof(CanStopAll));
+            if (e.PropertyName == nameof(GenshinConfigurationViewModel.SelectedForDaily)) Raise(nameof(SelectedAccountsText));
         };
         // Only the M4-D one-attempt package is consumed by a marker; the reusable manual-test build re-checks every run.
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
@@ -385,9 +417,10 @@ public sealed class MainViewModel : ObservableObject
         Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Raise(nameof(CanStopAll)); };
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         RecoverDesktopCommand = new(() => RunAsync(RecoverDesktopAsync), HandleError);
-        OneClickCommand = new(() => RunAsync(OneClickAsync), HandleError);
+        OneClickCommand = new(scope => RunAsync(() => OneClickAsync(scope is GameId game ? game : null)), HandleError);
         foreach (var card in Engines)
         {
+            card.GenshinDailyWired = card.Id == GameId.Genshin && _genshinDailyBatch is not null;
             card.Banner = new ArtSlot(card.Id switch { GameId.Genshin => Theme.BannerGenshin, GameId.StarRail => Theme.BannerStarRail, _ => Theme.BannerZenless });
             card.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(EngineCard.Compatibility)) RaiseHome(); };
         }
@@ -512,9 +545,9 @@ public sealed class MainViewModel : ObservableObject
     private string _estimate = "—";
     public string EstimateText { get => _estimate; private set => Set(ref _estimate, value); }
     public string RunnableText => $"{Engines.Count(e => e.CanRunForReal)} / {Engines.Count}";
-    public string SelectedAccountsText => Accounts.SelectedRows.Count.ToString();
+    public string SelectedAccountsText => (Accounts.SelectedRows.Count + GenshinConfiguration.SelectedForDaily.Count).ToString();
     public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
-    public string RunStateText => Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
+    public string RunStateText => BatchRunning || Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
     public string ConfigSyncText => Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
     private void RaiseHome()
     {
@@ -523,11 +556,13 @@ public sealed class MainViewModel : ObservableObject
     }
     public AsyncCommand OneClickCommand { get; }
 
-    internal async Task OneClickAsync()
+    internal async Task OneClickAsync(GameId? scope = null)
     {
         if (!RealExecutionPolicy.IsM5DailyTest)
-        { Status = "此版本未启用真实星铁批次。"; return; }
-        await RunAccountBatchAsync();
+        { Status = "此版本未启用真实日常批次。"; return; }
+        if (scope is not (null or GameId.StarRail or GameId.Genshin))
+        { Status = "所选游戏的真实日常入口尚未开放。"; return; }
+        await RunAccountBatchAsync(scope);
         Status = BatchStatus;
     }
     /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>
@@ -684,108 +719,184 @@ public sealed class MainViewModel : ObservableObject
         var outcome = "调度器正在处理其他操作。";
         await RunAsync(async () =>
         {
-            await RunAccountBatchAsync(plan);
+            await RunAccountBatchAsync(GameId.StarRail, plan);
             outcome = BatchStatus;
         });
         return outcome;
     }
 
-    private async Task RunAccountBatchAsync(AssistantRunPlan? approved = null)
+    private async Task RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null)
     {
-        if (BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+        if (CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
         { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return; }
         if (approved is not null && (!RealExecutionPolicy.IsM5DailyTest || !Assistant.EnableScheduleProposals
             || approved.Target.Game != GameId.StarRail || approved.Expires <= DateTimeOffset.UtcNow
             || Accounts.SelectedStarRail?.Id != approved.Target.AccountId))
         { BatchStatus = "运行计划已失效，或当前选中账号和计划不一致。"; return; }
-        var selected = Accounts.SelectedRows.Where(row => approved is null || row.Id == approved.Target.AccountId).ToArray();
-        if (selected.Length == 0)
-        { BatchStatus = "请先在账号管理勾选要执行的星铁账号。"; return; }
+        var starRail = scope == GameId.Genshin ? [] : Accounts.SelectedRows
+            .Where(row => approved is null || row.Id == approved.Target.AccountId).Select(row => row.Account).ToArray();
+        var genshin = scope == GameId.StarRail ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
+        if (starRail.Length == 0 && genshin.Length == 0)
+        { BatchStatus = "请先在账号管理勾选要执行的账号。"; return; }
+        if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
+        { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
+
+        using var cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        _batchCts = cancellation;
+        GameId? activeGame = null;
+        var results = new List<string>();
+
+        Action<BatchAccountProgress> Track(GameId game, int total)
+        {
+            activeGame = game;
+            var gameName = RunPresentation.GameName(game);
+            var completed = new HashSet<Guid>();
+            return progress =>
+            {
+                void Show()
+                {
+                    if (activeGame != game || token.IsCancellationRequested || !ReferenceEquals(_batchCts, cancellation)) return;
+                    if (progress.State == BatchRunState.Completed) completed.Add(progress.AccountId);
+                    BatchStatus = $"{gameName} · 已完成 {completed.Count}/{total} · {progress.AccountName} · " +
+                        $"{BatchProgressText.Describe(progress.State)} · {progress.Detail}";
+                }
+
+                if (Application.Current?.Dispatcher is { } dispatcher && !dispatcher.CheckAccess())
+                    _ = dispatcher.InvokeAsync(Show);
+                else Show();
+            };
+        }
+
+        try
+        {
+            Func<CancellationToken, Task<MultiAccountOutcome>>? runGenshin = null;
+            if (genshin.Length > 0)
+            {
+                var batch = _genshinDailyBatch ?? throw new InvalidOperationException("当前构建尚未接入原神日常执行与恢复。");
+                var card = Engines.Single(e => e.Id == GameId.Genshin);
+                var root = card.SavedInstallPath;
+                if (string.IsNullOrWhiteSpace(root) || !card.CanRunForReal)
+                    throw new InvalidOperationException("请先在「引擎与环境」保存并核对 BetterGI 安装目录。");
+                var archive = await ReadOnlyFileAccess.BoundedAsync(() => DailyBatchSequence.FindGenshinArchive(AppContext.BaseDirectory),
+                    ReadOnlyFileAccess.QueryTimeout, token);
+                runGenshin = async ct =>
+                {
+                    var progress = Track(GameId.Genshin, genshin.Length);
+                    BatchRunning = true;
+                    BatchStatus = $"原神 · 已完成 0/{genshin.Length} · 正在核对账号和固定发行包";
+                    MultiAccountOutcome outcome;
+                    try
+                    {
+                        outcome = await Task.Run(() => batch(Accounts.Database, genshin, root, archive, _paths.DataDirectory, progress, ct), ct);
+                    }
+                    finally { await Queue.RefreshAsync(); }
+                    return outcome;
+                };
+            }
+
+            await DailyBatchSequence.RunAsync(scope, starRail.Length == 0 ? null :
+                ct => RunStarRailBatchAsync(starRail, approved, Track(GameId.StarRail, starRail.Length), ct),
+                runGenshin, (game, outcome) =>
+                {
+                    activeGame = null;
+                    var finished = outcome.Completed && outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed;
+                    results.Add($"{RunPresentation.GameName(game)} · {(finished ? "批次结束" : "批次已停止")} · {outcome.Detail}");
+                    BatchStatus = string.Join("  ", results);
+                }, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        { BatchStatus = string.Join("  ", results.Append("批次已由用户停止。")); }
+        catch (Exception ex)
+        {
+            Log.Warning("Daily batch failed: {ErrorType}", ex.GetType().Name);
+            var detail = ex is InvalidOperationException or InvalidDataException or FileNotFoundException or TimeoutException
+                ? ex.Message : UserFacingError.Describe(ex);
+            BatchStatus = string.Join("  ", results.Append("批次失败：" + detail));
+        }
+        finally
+        {
+            var started = BatchRunning;
+            _batchCts = null;
+            BatchRunning = false;
+            if (started)
+            {
+                try
+                {
+                    if (starRail.Length > 0) await Accounts.ReloadAsync();
+                    await RefreshLastRunsAsync();
+                }
+                catch (Exception ex) { Log.Warning("Refresh after daily batch failed: {ErrorType}", ex.GetType().Name); }
+            }
+        }
+    }
+
+    private async Task<MultiAccountOutcome> RunStarRailBatchAsync(GameAccount[] accounts, AssistantRunPlan? approved,
+        Action<BatchAccountProgress> progress, CancellationToken token)
+    {
         var card = Engines.Single(e => e.Id == GameId.StarRail);
         var evidence = _march7thEvidence;
         if (evidence is null || card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
-        { BatchStatus = "请先在引擎与环境核对星铁官方发行包与安装身份。"; return; }
-        if (!VIvian.Infrastructure.Processes.WindowsProcessSupervisor.IsCurrentProcessElevated())
-        { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
+            throw new InvalidOperationException("请先在引擎与环境核对星铁官方发行包与安装身份。");
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
         if (approved is null ? !Configuration.TryApplyPending(interactive: false, desktop) : Configuration.PendingCount > 0)
-        { BatchStatus = "请先在游戏管理保存尚未写入的设置。"; return; }
+            throw new InvalidOperationException("请先在游戏管理保存尚未写入的星铁设置。");
 
-        var accounts = selected.Select(r => r.Account).ToArray();
         var installPath = card.InstallPath;
         IReadOnlyDictionary<string, string>? approvedSettings = null;
         if (approved is not null)
         {
             var provider = new StarRailAccountConfigurationProvider(Accounts.Database, _control, () => installPath,
                 () => BatchRunning || Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore);
-            var current = await provider.ReadAsync(approved.Target, CancellationToken.None);
-            var plan = await Accounts.Database.LoadAccountTaskPlanAsync(approved.Target.AccountId);
+            var current = await provider.ReadAsync(approved.Target, token);
+            var plan = await Accounts.Database.LoadAccountTaskPlanAsync(approved.Target.AccountId, token);
             if (current.WriteUnavailableReason is not null || current.Revision != approved.ConfigurationRevision
                 || !plan.DailyEnabled || plan.Revision != approved.TaskPlanRevision
                 || current.Values.SingleOrDefault(v => v.Schema.Path == "break_down_level_four_relicset")?.Value != "false"
                 || Accounts.SelectedStarRail?.Id != approved.Target.AccountId || !Assistant.EnableScheduleProposals
                 || approved.Expires <= DateTimeOffset.UtcNow || card.InstallPath != installPath)
-            { BatchStatus = "账号、任务或资源配置已变化，请重新生成运行计划。"; return; }
+                throw new InvalidOperationException("账号、任务或资源配置已变化，请重新生成运行计划。");
             approvedSettings = current.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
                 .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
         }
-        using var cancellation = new CancellationTokenSource();
-        _batchCts = cancellation;
+        token.ThrowIfCancellationRequested();
         BatchRunning = true;
-        try
-        {
-            var token = cancellation.Token;
-            BatchStatus = $"已完成 0/{accounts.Length} · 正在读取游戏设置";
-            if (approved is null) await Accounts.SaveSelectionsAsync(token);
-            var upstream = _control.ReadConfiguration(GameId.StarRail, installPath);
-            var defaults = upstream.Values
-                .Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
-                .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
-            if (defaults.Count == 0)
-                throw new InvalidOperationException("星铁助手没有可读取的任务配置，请检查游戏管理。");
+        BatchStatus = $"星铁 · 已完成 0/{accounts.Length} · 正在读取游戏设置";
+        if (approved is null) await Accounts.SaveSelectionsAsync(token);
+        var upstream = _control.ReadConfiguration(GameId.StarRail, installPath);
+        var defaults = upstream.Values
+            .Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+            .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
+        if (defaults.Count == 0)
+            throw new InvalidOperationException("星铁助手没有可读取的任务配置，请检查游戏管理。");
 
-            var snapshots = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
-            foreach (var account in accounts)
+        var snapshots = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
+        foreach (var account in accounts)
+        {
+            var plan = await Accounts.Database.LoadAccountTaskPlanAsync(account.Id, token);
+            if (!plan.DailyEnabled)
+                throw new InvalidOperationException($"「{account.Name}」的日常任务已关闭，请在游戏管理启用或在账号管理取消勾选。");
+            var snapshot = new Dictionary<string, string>(approvedSettings ?? defaults, StringComparer.Ordinal);
+            if (approvedSettings is null && account.Id != LegacyStarRail)
             {
-                var plan = await Accounts.Database.LoadAccountTaskPlanAsync(account.Id, token);
-                if (!plan.DailyEnabled)
-                    throw new InvalidOperationException($"「{account.Name}」的日常任务已关闭，请在游戏管理启用或在账号管理取消勾选。");
-                var snapshot = new Dictionary<string, string>(approvedSettings ?? defaults, StringComparer.Ordinal);
-                if (approvedSettings is null && account.Id != LegacyStarRail)
-                {
-                    var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id, token);
-                    foreach (var (key, value) in saved.Values) snapshot[key] = value;
-                }
-                var desired = new Dictionary<string, string>(snapshot, StringComparer.Ordinal);
-                foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask))
-                    desired[key] = value;
-                _ = TemporaryConfigurationManager.Plan(upstream, desired);
-                snapshots.Add(account.Id, snapshot);
+                var saved = await Accounts.Database.LoadAccountSettingsAsync(account.Id, token);
+                foreach (var (key, value) in saved.Values) snapshot[key] = value;
             }
+            var desired = new Dictionary<string, string>(snapshot, StringComparer.Ordinal);
+            foreach (var (key, value) in March7thTaskRequirements.For(RealExecutionPolicy.M5RealTask))
+                desired[key] = value;
+            _ = TemporaryConfigurationManager.Plan(upstream, desired);
+            snapshots.Add(account.Id, snapshot);
+        }
 
-            var completedAccounts = new HashSet<Guid>();
-            var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, AccountConfigurationMode.Independent,
-                (account, _) => Task.FromResult(snapshots[account.Id]),
-                (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, desktop, ct),
-                progress =>
-                {
-                    if (progress.State == BatchRunState.Completed) completedAccounts.Add(progress.AccountId);
-                    BatchStatus = $"已完成 {completedAccounts.Count}/{accounts.Length} · {progress.AccountName} · " +
-                        $"{BatchProgressText.Describe(progress.State)} · {progress.Detail}";
-                }, token, approved?.Id, desktop.MarkDirty);
-            if (outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed && !Queue.HasUnresolved
-                && !_control.HasPendingConfigurationRestore)
-                desktop.ConfirmClean();
-            BatchStatus = (outcome.Completed ? "批次结束：" : "批次已停止：") + outcome.Detail;
-        }
-        catch (OperationCanceledException) { BatchStatus = "批次已由用户停止。"; }
-        catch (Exception ex) { BatchStatus = "批次失败：" + ex.Message; }
-        finally
-        {
-            _batchCts = null;
-            BatchRunning = false;
-            await Accounts.ReloadAsync();
-        }
+        var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, AccountConfigurationMode.Independent,
+            (account, _) => Task.FromResult(snapshots[account.Id]),
+            (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, desktop, ct),
+            progress, token, approved?.Id, desktop.MarkDirty);
+        if (Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+            return outcome with { Completed = false, Detail = outcome.Detail + " 清理或配置恢复待确认，已阻断后续执行。" };
+        if (outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed) desktop.ConfirmClean();
+        return outcome;
     }
 
     private static readonly Guid LegacyStarRail = Guid.Parse("00000000-0000-4000-8000-000000000002");

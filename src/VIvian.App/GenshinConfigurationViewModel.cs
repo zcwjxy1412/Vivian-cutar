@@ -58,6 +58,9 @@ public sealed class GenshinConfigurationViewModel
         AddAccountCommand = new(AddAccountAsync, ReportError);
         ImportCommand = new(() => ChooseScreenshotAsync(bindExisting: false), ReportError);
         BindLoginScreenshotCommand = new(() => ChooseScreenshotAsync(bindExisting: true), ReportError);
+        ToggleAutoRunCommand = new(account => ToggleAutoRunAsync(account as GameAccount), ReportError);
+        MoveUpCommand = new(() => MoveAccountAsync(-1, SelectedAccount), ReportError);
+        MoveDownCommand = new(() => MoveAccountAsync(1, SelectedAccount), ReportError);
         SaveCommand = new(SaveAsync, ReportError);
         ConnectSourceCommand = new(ConnectSourceAsync, ReportError);
         VerifyLoginCommand = new(VerifyLoginAsync, ex => LoginStatus = UserFacingError.Describe(ex));
@@ -66,6 +69,9 @@ public sealed class GenshinConfigurationViewModel
     }
 
     public ObservableCollection<GameAccount> Accounts { get; } = [];
+    public IReadOnlyList<GameAccount> SelectedForDaily => Accounts
+        .Where(a => a.Enabled && a.LoginState == "recognized" && a.AutoRun)
+        .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
     public ObservableCollection<ParameterRow> Parameters { get; } = [];
     public IEnumerable<ParameterRow> VisiblePlanParameters => Parameters.Select(row =>
         Source.ProfileRows.FirstOrDefault(source => source.Path == row.Path) ?? row);
@@ -73,6 +79,9 @@ public sealed class GenshinConfigurationViewModel
     public AsyncCommand AddAccountCommand { get; }
     public AsyncCommand ImportCommand { get; }
     public AsyncCommand BindLoginScreenshotCommand { get; }
+    public AsyncCommand ToggleAutoRunCommand { get; }
+    public AsyncCommand MoveUpCommand { get; }
+    public AsyncCommand MoveDownCommand { get; }
     public AsyncCommand SaveCommand { get; }
     public AsyncCommand ConnectSourceCommand { get; }
     public GenshinSourceConfigurationViewModel Source { get; }
@@ -156,6 +165,61 @@ public sealed class GenshinConfigurationViewModel
     }
 
     internal Task LoadAsync() => ConfirmDiscard(includeSource: false) ? RunAsync(() => LoadAccountsAsync(SelectedAccount?.Id)) : Task.CompletedTask;
+
+    internal Task ToggleAutoRunAsync(GameAccount? account) =>
+        account is { Enabled: true, LoginState: "recognized" } && Accounts.Contains(account)
+            ? SaveExecutionChoiceAsync(async () =>
+            {
+                await _database.SaveAccountAsync(account with { AutoRun = !account.AutoRun }, _close.Token);
+                return account.AutoRun ? "已取消勾选。" : "已勾选用于原神日常。";
+            }) : Task.CompletedTask;
+
+    internal Task MoveAccountAsync(int direction, GameAccount? account)
+    {
+        if (account is null) return Task.CompletedTask;
+        var index = Accounts.IndexOf(account);
+        var next = index + direction;
+        if (index < 0 || next < 0 || next >= Accounts.Count) return Task.CompletedTask;
+        var other = Accounts[next];
+        return SaveExecutionChoiceAsync(async () =>
+        {
+            await _database.SwapAccountOrderAsync(account, other, _close.Token);
+            return "原神执行顺序已保存。";
+        });
+    }
+
+    private Task SaveExecutionChoiceAsync(Func<Task<string>> save) => RunAsync(async () =>
+    {
+        async Task ReloadSelectionAsync()
+        {
+            if (_close.IsCancellationRequested) return;
+            var selectedId = _selectedAccount?.Id;
+            var current = await RefreshAccountRowsAsync();
+            _selectedAccount = current.FirstOrDefault(a => a.Id == selectedId);
+            Raise(nameof(SelectedAccount));
+            Raise(nameof(CanBindLoginScreenshot));
+        }
+
+        var entered = false;
+        try
+        {
+            await _serializeOperation(async () =>
+            {
+                entered = true;
+                try
+                {
+                    if (!_hostIdle())
+                        throw new InvalidOperationException("请先结束正在运行的操作，再更改原神执行选择。");
+                    Status = await save();
+                }
+                finally { await ReloadSelectionAsync(); }
+            });
+        }
+        finally
+        {
+            if (!entered) await ReloadSelectionAsync();
+        }
+    });
 
     private Task ReloadConfigurationAsync() => ConfirmDiscard() ? RunAsync(async () =>
     {
@@ -348,14 +412,21 @@ public sealed class GenshinConfigurationViewModel
 
     private async Task LoadAccountsAsync(Guid? accountId)
     {
-        var current = await _database.LoadAccountsAsync(GameId.Genshin);
+        var current = await RefreshAccountRowsAsync();
+        await SelectAsync(current.FirstOrDefault(a => a.Id == accountId)
+            ?? current.FirstOrDefault(a => a.Enabled && a.LoginState == "recognized")
+            ?? current.FirstOrDefault());
+    }
+
+    private async Task<IReadOnlyList<GameAccount>> RefreshAccountRowsAsync()
+    {
+        var current = await _database.LoadAccountsAsync(GameId.Genshin, _close.Token);
         var secondId = SecondLoginAccount?.Id;
         Accounts.Clear();
         foreach (var account in current) Accounts.Add(account);
         SecondLoginAccount = current.FirstOrDefault(a => a.Id == secondId);
-        await SelectAsync(current.FirstOrDefault(a => a.Id == accountId)
-            ?? current.FirstOrDefault(a => a.Enabled && a.LoginState == "recognized")
-            ?? current.FirstOrDefault());
+        Raise(nameof(SelectedForDaily));
+        return current;
     }
 
     private async Task SelectAsync(GameAccount? account)

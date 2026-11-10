@@ -146,7 +146,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,2" Margin="0,0,6,4"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
 <Button Content="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Click="OpenGameSettings" Tag="{Binding Id}" ToolTip="配置" Padding="10,8" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 配置}"/>
-<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.OneClickCommand, RelativeSource={RelativeSource AncestorType=Window}}" IsEnabled="{Binding CanRunForReal}" ToolTip="运行" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
+<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.OneClickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" IsEnabled="{Binding CanRunForReal}" ToolTip="运行" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
 </StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 
 <!-- 最近运行 + 本次运行 -->
@@ -369,14 +369,28 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </StackPanel></Border>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="选择原神账号" Style="{StaticResource H2}"/>
+<TextBlock Text="勾选参与日常的原神账号。执行按列表从上到下进行，勾选和顺序会立即保存。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
 <WrapPanel Margin="0,0,0,8">
 <Button x:Name="BindGenshinLoginButton" Content="为所选档案绑定登录截图" Command="{Binding BindLoginScreenshotCommand}" IsEnabled="{Binding CanBindLoginScreenshot}" Margin="0,0,8,0"/>
-<Button Content="打开原神配置" Tag="{x:Static core:GameId.Genshin}" Click="OpenGameSettings"/>
+<Button Content="打开原神配置" Tag="{x:Static core:GameId.Genshin}" Click="OpenGameSettings" Margin="0,0,8,0"/>
+<Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/>
+<Button Content="下移" Command="{Binding MoveDownCommand}"/>
 </WrapPanel>
 <ListBox x:Name="GenshinAccountList" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}"
          MinHeight="72" MaxHeight="320" HorizontalContentAlignment="Stretch" BorderThickness="0" Background="Transparent" Margin="0,4,0,0">
 <ListBox.ItemTemplate><DataTemplate>
 <Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,0,0,6">
+<DockPanel>
+<CheckBox DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,0,0,0" Content="参与日常"
+          IsChecked="{Binding AutoRun, Mode=OneWay}" CommandParameter="{Binding}"
+          Command="{Binding DataContext.ToggleAutoRunCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+          AutomationProperties.Name="{Binding Name, StringFormat=勾选 {0} 参与日常}">
+<CheckBox.Style><Style TargetType="CheckBox"><Setter Property="IsEnabled" Value="False"/><Style.Triggers>
+<MultiDataTrigger><MultiDataTrigger.Conditions>
+<Condition Binding="{Binding Enabled}" Value="True"/><Condition Binding="{Binding LoginState}" Value="recognized"/>
+</MultiDataTrigger.Conditions><Setter Property="IsEnabled" Value="True"/></MultiDataTrigger>
+</Style.Triggers></Style></CheckBox.Style>
+</CheckBox>
 <StackPanel>
 <TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
 <TextBlock><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}">
@@ -384,6 +398,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Style.Triggers><DataTrigger Binding="{Binding LoginState}" Value="recognized"><Setter Property="Text" Value="已从登录截图识别"/></DataTrigger></Style.Triggers>
 </Style></TextBlock.Style></TextBlock>
 </StackPanel>
+</DockPanel>
 </Border>
 </DataTemplate></ListBox.ItemTemplate></ListBox>
 </StackPanel></Border>

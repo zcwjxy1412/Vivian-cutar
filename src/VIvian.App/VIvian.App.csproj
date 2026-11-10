@@ -11,6 +11,7 @@
 <AssemblyName>VIvian</AssemblyName><Version>0.4.0</Version><InformationalVersion>0.4.0-dev</InformationalVersion>
 </PropertyGroup>
 <ItemGroup>
+<InternalsVisibleTo Include="VIvian.Tests" />
 <ProjectReference Include="../VIvian.Infrastructure/VIvian.Infrastructure.csproj" />
 <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
 <PackageReference Include="Serilog.Extensions.Hosting" Version="10.0.0" />

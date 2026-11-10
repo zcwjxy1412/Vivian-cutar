@@ -26,8 +26,15 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public IReadOnlyList<string> Chips => Profile.Tasks.Where(t => t.Frequency != TaskFrequency.OnDemand)
         .Select(t => t.Title.Split('（')[0]).Distinct().Take(3).ToList();
     /// <summary>True only when this build may run the engine for real and its installation is verified.</summary>
-    public bool CanRunForReal => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified;
-    public string RunHint => CanRunForReal ? "可以执行" : Id == GameId.StarRail ? "待安装核验" : "接入中";
+    internal bool GenshinDailyWired { get; set; }
+    public bool CanRunForReal => Id switch
+    {
+        GameId.StarRail => RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified,
+        GameId.Genshin => GenshinDailyWired && InstallPath == SavedInstallPath &&
+            Report?.Compatibility is CompatibilityClass.PendingValidation or CompatibilityClass.IdentityVerified,
+        _ => false,
+    };
+    public string RunHint => CanRunForReal ? "可以执行" : Id == GameId.StarRail || GenshinDailyWired ? "待安装核验" : "接入中";
     /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
     public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
     public string BannerTo => Id switch { GameId.Genshin => "#2B4C9A", GameId.StarRail => "#2A2F7A", _ => "#3A2A10" };
@@ -47,6 +54,8 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
             Set(ref _installPath, value);
             Report = null;
             Compatibility = "路径已改变，请重新检查";
+            Raise(nameof(CanRunForReal));
+            Raise(nameof(RunHint));
         }
     }
     private string _compatibility = "尚未检查";
@@ -66,8 +75,10 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public IReadOnlyList<CapabilityRow> Capabilities { get; } = EngineCatalog.For(id).Capabilities.Select(ToRow).ToList();
     public EngineReadinessReport? Report { get; private set; }
 
-    /// <summary>What this build lets the user do with the engine for real. Only March7th screen_test can ever run.</summary>
-    public string Execution => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
+    /// <summary>What this build lets the user do with the engine for real.</summary>
+    public string Execution => GenshinDailyWired
+        ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
+        : Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
         ? "可以执行：日常（清体力 + 每日实训 + 领奖），每次由你确认后启动；其他任务未开放。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
         ? "真实任务：仅 screen_test，可在“真实任务测试”页逐次由本人确认启动；其他任务未开放。"

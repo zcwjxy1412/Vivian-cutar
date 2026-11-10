@@ -373,7 +373,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             return View(GenshinView.ConfirmLogout, quit);
 
         var gate = Label(normalized, Region(805, 945, 310, 135), IsGateText);
-        var logoutRegion = Region(1740, 895, 180, 185);
+        var logoutRegion = GateLogoutSearch(frame.Height);
         if (gate is not null)
         {
             if (Find("logout.png", logoutRegion) is { } logout)
@@ -402,6 +402,12 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     }
 
     private static bool IsGateText(string text) => text is "点击进入" or "点击进入游戏";
+
+    internal static ScreenRegion GateLogoutSearch(int frameHeight)
+    {
+        var scale = frameHeight / 1080d;
+        return new(1740 * scale, 850 * scale, 180 * scale, 230 * scale);
+    }
 
     private static ScreenRegion? Label(IEnumerable<RecognizedText> lines, ScreenRegion region, Func<string, bool> label)
     {

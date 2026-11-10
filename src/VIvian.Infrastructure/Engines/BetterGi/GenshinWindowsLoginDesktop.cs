@@ -67,10 +67,8 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
                 var owned = IsVerifiedClientWindow(hwnd, client);
                 var minimized = owned && WindowsNative.IsIconic(hwnd);
                 windowState = ClassifyLaunchWindow(owned, minimized, owned && !minimized && TryFindWindow(hwnd) is not null);
-                if (windowState == GenshinLaunchWindowState.Minimized)
-                    WindowsNative.ShowWindow(hwnd, WindowsNative.SwRestore);
-                else if (windowState == GenshinLaunchWindowState.Background)
-                    WindowsNative.SetForegroundWindow(hwnd);
+                if (windowState is GenshinLaunchWindowState.Minimized or GenshinLaunchWindowState.Background)
+                    StarRailWindow.BringToFront(hwnd);
                 await Task.Delay(450, limit.Token).ConfigureAwait(false);
             }
         }

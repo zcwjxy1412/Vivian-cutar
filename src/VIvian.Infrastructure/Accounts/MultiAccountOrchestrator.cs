@@ -197,6 +197,7 @@ public sealed class MultiAccountOrchestrator
                     cancelled = result.Outcome == RunOutcome.Cancelled;
                     aborted = true;
                     stopReason = "上一账号的任务结果未确认，已阻断下一个账号。";
+                    await StopGameAfterInterruptionAsync();
                     break;
                 }
 
@@ -237,11 +238,7 @@ public sealed class MultiAccountOrchestrator
         catch (OperationCanceledException)
         {
             cancelled = true;
-            if (desktopTouched)
-            {
-                try { gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok; }
-                catch { /* user stop must still finish */ }
-            }
+            if (desktopTouched) await StopGameAfterInterruptionAsync();
         }
         catch (Exception ex)
         {
@@ -258,6 +255,12 @@ public sealed class MultiAccountOrchestrator
             Detail = $"完成 {succeeded}，失败 {failed}。" +
                      (cancelled ? " 用户停止了批次。" : aborted ? " 批次已停止：" + stopReason : "")
         }, completed, succeeded, failed, CancellationToken.None, gameClean);
+
+        async Task StopGameAfterInterruptionAsync()
+        {
+            try { gameClean = (await _driver.StopGameAsync(CancellationToken.None)).Ok; }
+            catch { gameClean = false; }
+        }
     }
 
     private async Task<MultiAccountOutcome> FinishAsync(AccountBatch batch, bool completed, int succeeded, int failed,

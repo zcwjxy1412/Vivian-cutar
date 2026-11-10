@@ -240,7 +240,8 @@ public sealed class MainViewModel : ObservableObject
         {
             Guid? recovered;
             try { recovered = await Task.Run(() => recoverGenshin(_paths.DataDirectory, CancellationToken.None)); }
-            catch (Exception ex) when (ex is IOException or InvalidOperationException or UnauthorizedAccessException or TimeoutException)
+            catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException
+                or UnauthorizedAccessException or TimeoutException or JsonException)
             {
                 Status = "原神桌面交接待确认：" + ex.Message;
                 return;
@@ -916,7 +917,7 @@ public sealed class MainViewModel : ObservableObject
         var success = run?.Outcome == RunOutcome.Success && cleaned && restored;
         var detail = success ? "日常完成。" : RunPresentation.Reason(run?.ReasonCode) ?? "任务完成或清理未确认。";
         if (result.Restore is not null) detail += " " + result.Restore.Detail;
-        return new(run?.RunId, success, cleaned, restored, detail);
+        return new(run?.RunId, success, cleaned, restored, detail, run?.Outcome ?? RunOutcome.Indeterminate);
     }
     public void ReportReconciled(int count)
     {

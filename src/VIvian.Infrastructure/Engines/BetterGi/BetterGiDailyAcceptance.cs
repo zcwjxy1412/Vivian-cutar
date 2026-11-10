@@ -296,15 +296,17 @@ internal static class BetterGiDailyAcceptance
         if (!Path.IsPathFullyQualified(ownerDirectory))
             throw new ArgumentException("原神验收恢复需要桌面锁的绝对档案目录。", nameof(ownerDirectory));
         var owner = Path.TrimEndingDirectorySeparator(Path.GetFullPath(ownerDirectory));
-        if (FindPendingForOwner(owner, ct, requireUnique: false) is not { } found) return null;
+        ct.ThrowIfCancellationRequested();
         using var lease = DesktopOperationLease.TryAcquireRecovery(ownerDirectory);
         if (lease is not { Recovering: true }) return null;
+        var found = FindPendingForOwner(owner, ct)
+            ?? throw new InvalidOperationException("本档案的原神桌面锁仍待恢复，但找不到对应的验收记录。");
         var validated = await ValidateStageAsync(found.Stage, ct).ConfigureAwait(false);
         RecoverWithLease(validated.Stage, validated.Program, found.Journal, lease, ct);
         return found.Journal.RunId;
     }
 
-    private static (string Stage, RecoveryJournal Journal)? FindPendingForOwner(string owner, CancellationToken ct, bool requireUnique)
+    private static (string Stage, RecoveryJournal Journal)? FindPendingForOwner(string owner, CancellationToken ct)
     {
         string[] stages;
         try { stages = Directory.GetDirectories(StageParent); }
@@ -320,7 +322,6 @@ internal static class BetterGiDailyAcceptance
             EnsureProtectedStage(StageParent, stage);
             var journal = ReadJournal(stage);
             if (!string.Equals(journal.LockOwner ?? stage, owner, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!requireUnique) return (stage, journal);
             if (pending is not null)
                 throw new InvalidOperationException("原神验收档案存在多份待恢复记录，无法确认应恢复哪次运行。");
             pending = (stage, journal);
@@ -343,7 +344,7 @@ internal static class BetterGiDailyAcceptance
         if (!lease.Recovering)
             throw new InvalidOperationException("该验收目录没有待恢复的桌面锁标记。");
         if (!string.Equals(stage, owner, StringComparison.OrdinalIgnoreCase)
-            && (FindPendingForOwner(owner, ct, requireUnique: true) is not { } match
+            && (FindPendingForOwner(owner, ct) is not { } match
                 || !string.Equals(match.Stage, stage, StringComparison.OrdinalIgnoreCase) || match.Journal != journal))
             throw new InvalidDataException("原神验收恢复目标在取得桌面锁前发生变化。");
         var recovery = Path.Combine(stage, RecoveryFile);

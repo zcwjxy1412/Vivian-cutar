@@ -198,6 +198,12 @@ public partial class App : Application
                     sp.GetRequiredService<ILoginSwitchDriver>(), sp.GetRequiredService<IInputHostSession>()));
                 services.AddSingleton<IScanWindowShield, MainWindowScanShield>();
                 services.AddSingleton<AccountViewModel>();
+                if (RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall)
+                {
+                    services.AddSingleton<GenshinDailyRecovery>(BetterGiAccountBatch.RecoverSavedDailyAsync);
+                    if (BetterGiContract.LaunchContractVerified && BetterGiContract.CompletionSignalsVerified)
+                        services.AddSingleton<GenshinDailyBatch>(BetterGiAccountBatch.ExecuteSavedDailyAsync);
+                }
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
             }).Build();

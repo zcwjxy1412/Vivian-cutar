@@ -10,6 +10,11 @@ using VIvian.Infrastructure.Processes;
 
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
+internal enum GenshinLaunchWindowState
+{
+    Missing, Minimized, IncompatibleViewport, Background,
+}
+
 internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterGiProgram, GenshinLoginTemplates templates,
     bool stopOwnedClient)
     : IGenshinLoginDesktop
@@ -30,6 +35,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     {
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(timeout);
+        var windowState = GenshinLaunchWindowState.Missing;
         try
         {
             EnsureDesktopAvailable();
@@ -58,17 +64,26 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
                 if (FindForeground() is not null) return;
                 using var game = Process.GetProcessById(client.Pid);
                 var hwnd = game.MainWindowHandle;
-                if (hwnd != IntPtr.Zero && TryFindWindow(hwnd) is not null)
-                {
-                    if (WindowsNative.IsIconic(hwnd)) WindowsNative.ShowWindow(hwnd, WindowsNative.SwRestore);
+                var owned = IsVerifiedClientWindow(hwnd, client);
+                var minimized = owned && WindowsNative.IsIconic(hwnd);
+                windowState = ClassifyLaunchWindow(owned, minimized, owned && !minimized && TryFindWindow(hwnd) is not null);
+                if (windowState == GenshinLaunchWindowState.Minimized)
+                    WindowsNative.ShowWindow(hwnd, WindowsNative.SwRestore);
+                else if (windowState == GenshinLaunchWindowState.Background)
                     WindowsNative.SetForegroundWindow(hwnd);
-                }
                 await Task.Delay(450, limit.Token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new InvalidOperationException("未等到本次原神客户端的 16∶9 前台窗口，已停止登录。");
+            var detail = windowState switch
+            {
+                GenshinLaunchWindowState.Minimized => "本轮原神窗口仍处于最小化。",
+                GenshinLaunchWindowState.IncompatibleViewport => "本轮原神窗口的可用画面不符合 16∶9 要求。",
+                GenshinLaunchWindowState.Background => "本轮原神窗口未取得前台焦点。",
+                _ => "未找到归属本轮原神客户端的窗口。",
+            };
+            throw new InvalidOperationException("等待原神前台窗口超时，已停止登录。" + detail);
         }
         catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
         {
@@ -79,6 +94,11 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             throw new InvalidOperationException("原神客户端无法启动或核对。" + ex.Message, ex);
         }
     }
+
+    internal static GenshinLaunchWindowState ClassifyLaunchWindow(bool owned, bool minimized, bool usableViewport) =>
+        !owned ? GenshinLaunchWindowState.Missing :
+        minimized ? GenshinLaunchWindowState.Minimized :
+        usableViewport ? GenshinLaunchWindowState.Background : GenshinLaunchWindowState.IncompatibleViewport;
 
     private void EnsureDesktopAvailable()
     {
@@ -124,6 +144,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             // Check the retained launch handle while the verified executable is still locked for reading.
             var client = VerifyClient(started, stopOwnedClient ? started.SafeHandle : null);
             if (stopOwnedClient) _ownedClient = started;
+            AllowSetForegroundWindow((uint)client.Pid);
             _launchUnverified = false;
             return client;
         }
@@ -386,21 +407,27 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     private StarRailWindowInfo? TryFindWindow(IntPtr hwnd)
     {
         WindowsNative.EnsureDpiAwareness();
-        if (_client is not { } client || hwnd == IntPtr.Zero ||
+        if (_client is not { } client || !IsVerifiedClientWindow(hwnd, client) ||
             !WindowsNative.GetClientRect(hwnd, out var rect) ||
             rect.Height is < 720 or > 2160 || Math.Abs(rect.Width / (double)rect.Height - 16d / 9d) > .005)
             return null;
         var origin = new WindowsNative.Point(0, 0);
         if (!WindowsNative.ClientToScreen(hwnd, ref origin)) return null;
+        return new(hwnd, client.Pid, "", rect.Width, rect.Height, origin.X, origin.Y, client.Started);
+    }
+
+    private bool IsVerifiedClientWindow(IntPtr hwnd, (int Pid, DateTimeOffset Started) client)
+    {
+        if (hwnd == IntPtr.Zero || WindowsNative.GetAncestor(hwnd, WindowsNative.GaRoot) != hwnd)
+            return false;
         WindowsNative.GetWindowThreadProcessId(hwnd, out var pid);
-        if (pid != client.Pid || !MatchesExecutable(client.Pid)) return null;
+        if (pid != client.Pid || !MatchesExecutable(client.Pid)) return false;
         try
         {
             using var process = Process.GetProcessById((int)pid);
-            var start = StarRailWindow.StartTime(process);
-            return start != client.Started ? null : new(hwnd, client.Pid, "", rect.Width, rect.Height, origin.X, origin.Y, start);
+            return StarRailWindow.StartTime(process) == client.Started;
         }
-        catch (ArgumentException) { return null; }
+        catch (ArgumentException) { return false; }
     }
 
     private bool MatchesExecutable(int pid)
@@ -443,6 +470,10 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     private struct MouseInput { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
     [StructLayout(LayoutKind.Sequential)]
     private struct KeyboardInput { public ushort Key, Scan; public uint Flags, Time; public UIntPtr Extra; }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AllowSetForegroundWindow(uint processId);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, [In] NativeInput[] inputs, int size);

@@ -647,7 +647,11 @@ public partial class App : Application
         if (main.ConnectBetterGiButton.Command != genshin.ConnectSourceCommand ||
             main.OpenBetterGiButton.Command != genshin.Source.OpenCommand ||
             main.ConnectBetterGiButton.IsEnabled || main.OpenBetterGiButton.IsEnabled ||
-            main.GenshinPlanFields.Items.Count != genshin.Parameters.Count)
+            main.GenshinPlanFields.Items.Count != genshin.Parameters.Count - 2 ||
+            main.GenshinDetailedFields.Items.Count != 2 ||
+            genshin.VisiblePlanParameters.Any(p => p.Path is "DailyRewardPartyName" or "PartyName") ||
+            !genshin.DetailedPlanParameters.Select(p => p.Path).ToHashSet()
+                .SetEquals(["DailyRewardPartyName", "PartyName"]))
             throw new InvalidOperationException("Unified Genshin editor failed to bind or enabled BetterGI without a verified installation");
         using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(7)))
         {

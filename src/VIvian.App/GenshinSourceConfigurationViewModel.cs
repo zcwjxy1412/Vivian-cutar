@@ -181,16 +181,16 @@ public sealed class GenshinSourceConfigurationViewModel : ObservableObject
     private Task OpenAsync() => RunAsync(async () =>
     {
         if (!_hostIdle() || _binding is not { } binding || !IsCurrentRoot(binding.InstallRoot)) return;
-        await binding.ReadAsync();
-        if (!_hostIdle() || !ReferenceEquals(binding, _binding) || !IsCurrentRoot(binding.InstallRoot)) return;
-        if (WindowsProcessSupervisor.IsCurrentProcessElevated())
+        if (HasDraft || !_editorIdle())
         {
-            WindowsProcessSupervisor.RevealExecutable(binding.ProgramPath);
-            Status = $"已定位 BetterGI。请打开所选程序，在「一条龙」选择「{binding.ProfileName}」。";
+            Status = "请先保存当前修改，再打开 BetterGI 详细设置。";
             return;
         }
+        await binding.ReadAsync();
+        if (!_hostIdle() || !ReferenceEquals(binding, _binding) || !IsCurrentRoot(binding.InstallRoot)) return;
+        using var desktop = DesktopOperationLease.Acquire(Path.GetDirectoryName(_bindingPath)!);
         WindowsProcessSupervisor.OpenUserInterface(binding.InstallRoot, BetterGiContract.ProgramName);
-        Status = $"请在 BetterGI 的「一条龙」选择「{binding.ProfileName}」。";
+        Status = $"已打开 BetterGI。请在「一条龙」选择「{binding.ProfileName}」调整队伍等详细设置；保存后本页自动读回。";
     });
 
     private async Task PollAsync()

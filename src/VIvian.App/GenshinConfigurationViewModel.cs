@@ -51,7 +51,11 @@ public sealed class GenshinConfigurationViewModel
         _import = new(database);
         Source = new(profileDirectory, desktopIdle, () => IsIdle && !Parameters.Any(row => row.IsChanged), betterGiRoot,
             serializeOperation);
-        Source.FieldsChanged += () => Raise(nameof(VisiblePlanParameters));
+        Source.FieldsChanged += () =>
+        {
+            Raise(nameof(VisiblePlanParameters));
+            Raise(nameof(DetailedPlanParameters));
+        };
         Source.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(Source.IsIdle)) Raise(nameof(CanEdit));
@@ -76,8 +80,12 @@ public sealed class GenshinConfigurationViewModel
         .Where(a => a.Enabled && a.LoginState == "recognized" && a.AutoRun)
         .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
     public ObservableCollection<ParameterRow> Parameters { get; } = [];
-    public IEnumerable<ParameterRow> VisiblePlanParameters => Parameters.Select(row =>
+    private IEnumerable<ParameterRow> EffectivePlanParameters => Parameters.Select(row =>
         Source.ProfileRows.FirstOrDefault(source => source.Path == row.Path) ?? row);
+    public IEnumerable<ParameterRow> VisiblePlanParameters => EffectivePlanParameters
+        .Where(row => row.Path is not ("DailyRewardPartyName" or "PartyName"));
+    public IEnumerable<ParameterRow> DetailedPlanParameters => EffectivePlanParameters
+        .Where(row => row.Path is "DailyRewardPartyName" or "PartyName");
     public AsyncCommand ReloadCommand { get; }
     public AsyncCommand AddAccountCommand { get; }
     public AsyncCommand ImportCommand { get; }
@@ -456,6 +464,7 @@ public sealed class GenshinConfigurationViewModel
         if (snapshot is not null)
             foreach (var value in snapshot.Values) Parameters.Add(new(value));
         Raise(nameof(VisiblePlanParameters));
+        Raise(nameof(DetailedPlanParameters));
         Raise(nameof(CanEdit));
         Raise(nameof(CanConnect));
     }

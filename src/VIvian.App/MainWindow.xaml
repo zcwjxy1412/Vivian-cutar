@@ -253,7 +253,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Button x:Name="SaveGenshinPlanButton" Style="{StaticResource Primary}" Content="立即保存" Command="{Binding SaveCommand}" IsEnabled="{Binding CanEdit}" Margin="0,0,8,0"/>
 <Button x:Name="ConnectBetterGiButton" Style="{StaticResource Primary}" Content="连接 BetterGI" Command="{Binding ConnectSourceCommand}"
         Visibility="{Binding Source.CanConnect, Converter={StaticResource Visible}}" IsEnabled="{Binding CanConnect}" Margin="0,0,8,0"/>
-<Button x:Name="OpenBetterGiButton" Content="打开原项目详细设置" Command="{Binding Source.OpenCommand}" IsEnabled="{Binding Source.CanOpen}" Margin="0,0,8,0"/>
+<Button x:Name="OpenBetterGiButton" Content="详细设置 ↗" ToolTip="打开 BetterGI 调整队伍、战斗策略和脚本" Command="{Binding Source.OpenCommand}" IsEnabled="{Binding Source.CanOpen}" Margin="0,0,8,0"/>
 <Button Content="引擎与环境" Click="OpenEngineSettings" Margin="0"/>
 </WrapPanel></Grid>
 <WrapPanel Margin="0,8,0,0" IsEnabled="{Binding CanEditWorkspace}">
@@ -270,6 +270,8 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TabControl x:Name="GenshinSettingsTabs" Background="Transparent" BorderThickness="0" Padding="0,4,0,0" ItemContainerStyle="{StaticResource PillTab}">
 <TabItem Header="任务设置"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
 <StackPanel IsEnabled="{Binding CanEditWorkspace}">
+<TextBlock Text="基础设置" Style="{StaticResource H2}" Margin="0,8,0,4"/>
+<TextBlock Text="在这里设置任务开关、地区、秘境和树脂次数。队伍及战斗、脚本细节请在 BetterGI 中调整。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
 <ItemsControl x:Name="GenshinPlanFields" ItemTemplate="{StaticResource AccountConfigurationField}" IsEnabled="{Binding CanEdit}">
 <ItemsControl.Resources><CollectionViewSource x:Key="GenshinGrouped" Source="{Binding VisiblePlanParameters}">
 <CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions>
@@ -278,6 +280,17 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <ItemsControl.GroupStyle><GroupStyle HeaderTemplate="{StaticResource AccountConfigurationGroup}"/></ItemsControl.GroupStyle>
 </ItemsControl>
 <TextBlock Text="BetterGI 关闭时，已连接字段在停止编辑约 1 秒后自动写入。资源预算按账号保存。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+<Border Style="{StaticResource Panel}" Margin="0,14,0,0">
+<StackPanel>
+<TextBlock Text="详细设置 · BetterGI" Style="{StaticResource H2}"/>
+<TextBlock Text="打开 BetterGI 后选择当前账号对应的一条龙档案。队伍、战斗策略和脚本参数在源项目中调整；保存后这里自动读回。" Style="{StaticResource Small}" Margin="0,4,0,8"/>
+<ItemsControl x:Name="GenshinDetailedFields" ItemsSource="{Binding DetailedPlanParameters}">
+<ItemsControl.ItemTemplate><DataTemplate><TextBlock Style="{StaticResource Small}" Margin="0,2,0,0"><Run Text="{Binding Title, Mode=OneWay}"/><Run Text="："/><Run Text="{Binding Current, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
+</ItemsControl>
+<Button Content="打开 BetterGI 详细设置" Command="{Binding Source.OpenCommand}" IsEnabled="{Binding Source.CanOpen}" HorizontalAlignment="Left" Margin="0,10,0,0"/>
+<TextBlock Text="尚未连接时，请先保存基础设置并点击「连接 BetterGI」。" Style="{StaticResource Small}" Margin="0,6,0,0"/>
+</StackPanel>
+</Border>
 <Expander Header="BetterGI 安装级共享树脂设置" Visibility="{Binding Source.HasBinding, Converter={StaticResource Visible}}" Margin="0,12,0,0">
 <StackPanel Margin="0,6,0,0">
 <TextBlock Text="同一安装的所有档案共享以下设置。此处只读。" Style="{StaticResource Small}"/>

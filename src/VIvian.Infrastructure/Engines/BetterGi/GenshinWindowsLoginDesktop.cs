@@ -33,7 +33,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         try
         {
             EnsureDesktopAvailable();
-            using var file = ReadOnlyFileAccess.OpenForStableRead(gamePath);
+            using var file = GenshinGameExecutable.OpenForSignatureVerification(gamePath);
             await Task.Run(() => GenshinGameExecutable.Verify(gamePath, file), limit.Token).ConfigureAwait(false);
             (int Pid, DateTimeOffset Started) client;
             lock (_clientGate)

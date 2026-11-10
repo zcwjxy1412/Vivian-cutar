@@ -596,6 +596,20 @@ public sealed class BetterGiLifecycleTests
     }
 
     [Fact]
+    public async Task GateRejectionReleasesLaunchResourcesWithoutStartingBetterGi()
+    {
+        await using var f = new BetterGiFixture();
+        var ex = await Assert.ThrowsAsync<EngineStartException>(() => f.Adapter().LaunchAsync(f.Context, f.Supervisor,
+            default, _ => throw new InvalidOperationException("原神大门已变化。")));
+
+        Assert.True(ex.NothingStarted);
+        Assert.Equal(ReasonCodes.PreflightError, ex.ReasonCode);
+        Assert.Equal("原神大门已变化。", ex.Message);
+        Assert.Equal(0, f.Supervisor.Calls);
+        Assert.False(f.Registry.IsBusy);
+    }
+
+    [Fact]
     public async Task LaunchFailuresBeforeTheSupervisorReportNothingStarted()
     {
         await using var f = new BetterGiFixture();

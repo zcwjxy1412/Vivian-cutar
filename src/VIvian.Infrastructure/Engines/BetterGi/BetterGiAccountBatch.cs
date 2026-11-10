@@ -93,11 +93,12 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
                     async (account, _, taskToken) =>
                     {
                         var profile = profiles[account.Id];
-                        var expectedUid = string.IsNullOrWhiteSpace(account.Uid) ? profile.ObservedUid : account.Uid;
                         var result = await BetterGiNativeDaily.RunAsync(betterGiRoot, account.Id, revisions[account.Id],
                             Path.Combine(profileDirectory, "BetterGi-日常", "reports"), lease,
-                            recheckToken => driver.ConfirmWorldAsync(account.Id, profile.NormalizedPhone, expectedUid, recheckToken),
+                            recheckToken => driver.ConfirmGateAsync(profile.NormalizedPhone, recheckToken),
                             taskToken, parameters[account.Id]).ConfigureAwait(false);
+                        if (result.ScopedCompletionConfirmed)
+                            driver.RestoreGameForeground();
                         return await RecordDailyAsync(database, result, acceptance).ConfigureAwait(false);
                     }, progress, token).ConfigureAwait(false);
             }
@@ -158,6 +159,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             RunOutcome.Cancelled => "已停止原神日常，BetterGI 已清理并恢复。",
             RunOutcome.Failed => "原神日常失败（" + reason + "）。",
             _ when !clean => "BetterGI 清理或配置恢复未确认，已停止批次。",
+            _ when result.StartErrorDetail is { } detailText => "未能启动 BetterGI。" + detailText,
             _ when result.DailyRewardClaimUnconfirmed => "BetterGI 结束了流程，但未识别到「今日奖励已领取」。已停止批次。",
             _ => "原神日常结果未确认（" + reason + "），已停止批次。",
         };

@@ -230,6 +230,39 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         return processes.Length != 0;
     }
 
+    public void VerifyHandoffWindow(StarRailWindowInfo window)
+    {
+        EnsureDesktopAvailable();
+        using var current = Process.GetCurrentProcess();
+        // BetterGI can attach to the international or cloud client as well as the CN client.
+        string[] candidates = [ClientProcessName, "GenshinImpact", "Genshin Impact Cloud Game", "Genshin Impact Cloud"];
+        var clients = candidates.SelectMany(Process.GetProcessesByName).ToArray();
+        try
+        {
+            var session = clients.Where(client => client.SessionId == current.SessionId).ToArray();
+            if (session.Length != 1 || session[0].Id != window.ProcessId || FindForeground() != window)
+                throw new InvalidOperationException("交接 BetterGI 前需要前台只有一个可核对的原神客户端。");
+        }
+        finally
+        {
+            foreach (var client in clients) client.Dispose();
+        }
+    }
+
+    public void RestoreForeground(StarRailWindowInfo window)
+    {
+        var foreground = WindowsNative.GetForegroundWindow();
+        if (foreground == window.Handle || _client is not { } client || !_active ||
+            !IsVerifiedClientWindow(window.Handle, client))
+            return;
+        WindowsNative.GetWindowThreadProcessId(foreground, out var foregroundPid);
+        if (foreground != IntPtr.Zero && foreground != GetShellWindow() && foregroundPid != Environment.ProcessId)
+            return;
+
+        if (WindowsNative.IsIconic(window.Handle)) WindowsNative.ShowWindow(window.Handle, WindowsNative.SwRestore);
+        WindowsNative.SetForegroundWindow(window.Handle);
+    }
+
     public async Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -519,6 +552,9 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AllowSetForegroundWindow(uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetShellWindow();
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, [In] NativeInput[] inputs, int size);

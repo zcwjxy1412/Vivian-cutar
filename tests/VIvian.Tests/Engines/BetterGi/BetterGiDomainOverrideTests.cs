@@ -7,6 +7,27 @@ namespace VIvian.Tests.Engines.BetterGi;
 public sealed class BetterGiDomainOverrideTests
 {
     [Fact]
+    public async Task GateHandoffEnablesNativeEntryAndPreventsLinkedRelaunchUntilRestored()
+    {
+        await using var f = new BetterGiFixture();
+        var path = Path.Combine(f.Root, "User", "config.json");
+        File.WriteAllText(path, """{"genshinStartConfig":{"autoEnterGameEnabled":false,"linkedStartEnabled":true,"installPath":"YuanShen.exe"}}""");
+        var overlay = new BetterGiDomainOverride(f.Root, f.Probe);
+        overlay.Apply(new Dictionary<string, string>(), handoffAtGate: true);
+        var config = JsonNode.Parse(File.ReadAllText(path))!;
+        Assert.True(config["genshinStartConfig"]!["autoEnterGameEnabled"]!.GetValue<bool>());
+        Assert.False(config["genshinStartConfig"]!["linkedStartEnabled"]!.GetValue<bool>());
+        config["genshinStartConfig"]!["installPath"] = "changed by BetterGI";
+        File.WriteAllText(path, config.ToJsonString());
+
+        Assert.Equal(RestoreState.Restored, overlay.Restore().State);
+        var restored = JsonNode.Parse(File.ReadAllText(path))!["genshinStartConfig"]!;
+        Assert.False(restored["autoEnterGameEnabled"]!.GetValue<bool>());
+        Assert.True(restored["linkedStartEnabled"]!.GetValue<bool>());
+        Assert.Equal("changed by BetterGI", restored["installPath"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task SparseAccountBudgetCannotInheritOtherSupportedCountsFromSharedSettings()
     {
         await using var f = new BetterGiFixture();

@@ -21,6 +21,7 @@ internal sealed record BetterGiDailyAcceptanceResult(Guid RunId, RunVerdict? Ver
     bool Restored, bool EvidenceObserved, bool Cancelled, bool TimedOut, string ReportPath, string? StartError)
 {
     public bool DailyRewardClaimUnconfirmed { get; init; }
+    internal string? StartErrorDetail { get; init; }
     public RunOutcome Outcome => Restored && Cleanup == CleanupState.Confirmed && !Cancelled && !TimedOut
         ? Verdict?.Outcome ?? RunOutcome.Indeterminate : RunOutcome.Indeterminate;
     public bool DiagnosticPassed => Restored && Cleanup == CleanupState.Confirmed && EvidenceObserved && !Cancelled && !TimedOut;

@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
-/// <summary>Applies only the current account's configured counts to BetterGI's shared native settings.</summary>
+/// <summary>Temporarily applies per-account resource counts and native gate handoff settings.</summary>
 internal sealed class BetterGiDomainOverride(string root, IBetterGiProcessProbe probe)
 {
     private string Config => Path.Combine(root, "User", "config.json");
@@ -13,34 +13,43 @@ internal sealed class BetterGiDomainOverride(string root, IBetterGiProcessProbe 
     internal bool HasPending => File.Exists(Journal);
     private sealed record Change(bool Existed, JsonNode? Original, JsonNode? Applied);
 
-    internal void Apply(IReadOnlyDictionary<string, string> values)
+    internal void Apply(IReadOnlyDictionary<string, string> values, bool handoffAtGate = false)
     {
         EnsureStopped();
         if (HasPending) throw new InvalidOperationException("上一账号的 BetterGI 资源参数尚未恢复。");
         var fields = new[] { BetterGiAccountPlans.Original20, BetterGiAccountPlans.Original40, BetterGiAccountPlans.Condensed };
-        if (!fields.Any(values.ContainsKey)) return;
+        var hasBudget = fields.Any(values.ContainsKey);
+        if (!handoffAtGate && !hasBudget) return;
         var changes = new Dictionary<string, Change>();
         var bytes = Read(Config);
         var config = Parse(bytes);
-        var domain = config["autoDomainConfig"]?.AsObject() ?? new JsonObject();
-        foreach (var key in fields)
+        if (hasBudget)
         {
-            var raw = values.TryGetValue(key, out var configured) ? configured : "0";
-            if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var count) || count is < 0 or > 99)
-                throw new InvalidDataException("账号树脂次数必须在 0 至 99 之间。");
-            Set(key.Split('.')[1], JsonValue.Create(count));
+            foreach (var key in fields)
+            {
+                var raw = values.TryGetValue(key, out var configured) ? configured : "0";
+                if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var count) || count is < 0 or > 99)
+                    throw new InvalidDataException("账号树脂次数必须在 0 至 99 之间。");
+                Set("autoDomainConfig", key.Split('.')[1], JsonValue.Create(count));
+            }
+            Set("autoDomainConfig", "specifyResinUse", JsonValue.Create(true));
+        }
+        if (handoffAtGate)
+        {
+            Set("genshinStartConfig", "autoEnterGameEnabled", JsonValue.Create(true));
+            Set("genshinStartConfig", "linkedStartEnabled", JsonValue.Create(false));
         }
         if (changes.Count == 0) return;
-        Set("specifyResinUse", JsonValue.Create(true));
-        if (config["autoDomainConfig"] is null) config["autoDomainConfig"] = domain;
         Publish(Journal, JsonSerializer.SerializeToUtf8Bytes(changes));
         Replace(bytes, JsonSerializer.SerializeToUtf8Bytes(config));
 
-        void Set(string key, JsonNode value)
+        void Set(string section, string key, JsonNode value)
         {
-            var existed = domain.TryGetPropertyValue(key, out var original);
+            if (config[section] is null) config[section] = new JsonObject();
+            var settings = config[section]!.AsObject();
+            var existed = settings.TryGetPropertyValue(key, out var original);
             changes[key] = new(existed, original?.DeepClone(), value.DeepClone());
-            domain[key] = value;
+            settings[key] = value;
         }
     }
 
@@ -54,19 +63,22 @@ internal sealed class BetterGiDomainOverride(string root, IBetterGiProcessProbe 
                 ?? throw new InvalidDataException("资源参数恢复记录为空。");
             var bytes = Read(Config);
             var config = Parse(bytes);
-            var domain = config["autoDomainConfig"]?.AsObject() ?? new JsonObject();
             foreach (var (key, change) in changes)
             {
-                if (key is not ("originalResin20UseCount" or "originalResin40UseCount" or "condensedResinUseCount" or "specifyResinUse"))
-                    throw new InvalidDataException("资源参数恢复字段无效。");
-                var exists = domain.TryGetPropertyValue(key, out var current);
+                var section = key switch
+                {
+                    "autoEnterGameEnabled" or "linkedStartEnabled" => "genshinStartConfig",
+                    "originalResin20UseCount" or "originalResin40UseCount" or "condensedResinUseCount" or "specifyResinUse" => "autoDomainConfig",
+                    _ => throw new InvalidDataException("BetterGI 参数恢复字段无效。"),
+                };
+                var settings = config[section]?.AsObject() ?? new JsonObject();
+                var exists = settings.TryGetPropertyValue(key, out var current);
                 if (exists == change.Existed && JsonNode.DeepEquals(current, change.Original)) continue;
                 if (!exists || !JsonNode.DeepEquals(current, change.Applied))
-                    return new(RestoreState.Blocked, "BetterGI 资源参数已有其他修改，保留当前配置和恢复记录。");
-                if (change.Existed) domain[key] = change.Original?.DeepClone();
-                else domain.Remove(key);
+                    return new(RestoreState.Blocked, "BetterGI 临时参数已有其他修改，保留当前配置和恢复记录。");
+                if (change.Existed) settings[key] = change.Original?.DeepClone();
+                else settings.Remove(key);
             }
-            if (config["autoDomainConfig"] is null && domain.Count > 0) config["autoDomainConfig"] = domain;
             Replace(bytes, JsonSerializer.SerializeToUtf8Bytes(config));
             File.Delete(Journal);
             return new(RestoreState.Restored, "本账号资源参数已恢复，其他原生设置更新已保留。");

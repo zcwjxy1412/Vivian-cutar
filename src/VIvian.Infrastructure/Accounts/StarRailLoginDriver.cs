@@ -13,6 +13,7 @@ public enum LoginSwitchStage
     ReturningToLogin,
     Done,
     Failed,
+    ReadyAtGate,
 }
 
 /// <param name="PreviousMasked">Masked phone of the account that ran just before, if any (evidence only).</param>

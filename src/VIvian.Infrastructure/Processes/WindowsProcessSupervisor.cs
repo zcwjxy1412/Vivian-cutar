@@ -18,6 +18,13 @@ namespace VIvian.Infrastructure.Processes;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsProcessSupervisor : IProcessSupervisor
 {
+    private readonly bool _startMinimizedWithoutActivation;
+
+    public WindowsProcessSupervisor() : this(false) { }
+
+    internal WindowsProcessSupervisor(bool startMinimizedWithoutActivation) =>
+        _startMinimizedWithoutActivation = startMinimizedWithoutActivation;
+
     /// <summary>
     /// Opens an engine's own window for the user (e.g. March7th Launcher.exe), exactly as a double-click would:
     /// through the shell, so Windows shows its UAC prompt when the program asks for administrator rights and the user
@@ -206,7 +213,8 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
                 StartupInfo = new STARTUPINFO
                 {
                     cb = Marshal.SizeOf<STARTUPINFOEX>(),
-                    dwFlags = STARTF_USESTDHANDLES,
+                    dwFlags = STARTF_USESTDHANDLES | (_startMinimizedWithoutActivation ? STARTF_USESHOWWINDOW : 0),
+                    wShowWindow = _startMinimizedWithoutActivation ? SW_SHOWMINNOACTIVE : (short)0,
                     hStdInput = stdinRead.DangerousGetHandle(),
                     hStdOutput = stdoutWrite.DangerousGetHandle(),
                     hStdError = stdoutWrite.DangerousGetHandle(),

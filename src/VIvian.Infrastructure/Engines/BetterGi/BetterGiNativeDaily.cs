@@ -61,7 +61,7 @@ internal static class BetterGiNativeDaily
 
     internal static async Task<BetterGiDailyAcceptanceResult> RunAsync(string root, Guid accountId,
         string revision, string reportDirectory, DesktopOperationLease lease,
-        Func<CancellationToken, Task<GenshinVerifiedWorld>> confirmWorld, CancellationToken ct,
+        Func<CancellationToken, Task> confirmGate, CancellationToken ct,
         IReadOnlyDictionary<string, string>? accountParameters = null)
     {
         lease.VerifyCommonOwner();
@@ -69,8 +69,6 @@ internal static class BetterGiNativeDaily
         var profileName = BetterGiAccountPlan.SourceProfileName(accountId);
         var plan = await BetterGiConfiguration.InspectOneDragonAsync(root, profileName, ct).ConfigureAwait(false);
         if (plan.EnabledTasks.Count == 0) throw new InvalidOperationException("该账号的 BetterGI 档案没有启用任务。");
-        var world = await confirmWorld(ct).ConfigureAwait(false);
-        if (world.AccountId != accountId) throw new InvalidOperationException("原神当前账号与待执行账号不一致。");
         var overlay = Profile(root, accountId);
         var domainOverlay = new BetterGiDomainOverride(root, new BetterGiProcessProbe());
         var runId = Guid.NewGuid();
@@ -93,17 +91,19 @@ internal static class BetterGiNativeDaily
         var cleanup = CleanupState.NotRequired;
         var restored = false;
         string? startError = null;
+        string? startErrorDetail = null;
         try
         {
             lease.MarkDirty();
-            if (plan.EnabledTasks.Contains(BetterGiMarkers.DomainTask) && accountParameters is not null)
-                domainOverlay.Apply(accountParameters);
+            domainOverlay.Apply(plan.EnabledTasks.Contains(BetterGiMarkers.DomainTask) && accountParameters is not null
+                ? accountParameters : new Dictionary<string, string>(), handoffAtGate: true);
             // Preserve every upstream setting, including teams, scripts, capture and teleport settings.
             overlay.Apply(revision, "关闭软件");
             var adapter = new BetterGiAdapter(() => root, BetterGiArguments.OneDragon(profileName).Request!) { DelegateNativeTasks = true };
             var context = new RunContext(runId, runId, GameId.Genshin, DateTimeOffset.UtcNow);
             cleanup = CleanupState.Unconfirmed;
-            await using var run = await adapter.LaunchAsync(context, new WindowsProcessSupervisor(), ct).ConfigureAwait(false);
+            await using var run = await adapter.LaunchAsync(context,
+                new WindowsProcessSupervisor(startMinimizedWithoutActivation: true), ct, confirmGate).ConfigureAwait(false);
             // The original engine already persists its logs; consume the event queue during arbitrarily long tasks.
             _ = DrainEventsAsync(run.Events);
             try
@@ -131,6 +131,7 @@ internal static class BetterGiNativeDaily
         catch (EngineStartException ex)
         {
             startError = ex.ReasonCode;
+            startErrorDetail = ex.Message;
             cleanup = ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed;
         }
         finally
@@ -152,12 +153,13 @@ internal static class BetterGiNativeDaily
         {
             runId, root, profileName, observation, verdict, cleanup, restored,
             cancelled = ct.IsCancellationRequested, timedOut = false,
-            completionBasis = "原始 BetterGI 进程日志；合成流程结束不代表独立库存核验", startError,
+            completionBasis = "原始 BetterGI 进程日志；合成流程结束不代表独立库存核验", startError, startErrorDetail,
         }, new JsonSerializerOptions { WriteIndented = true }), CancellationToken.None).ConfigureAwait(false);
         return new(runId, verdict, cleanup, restored, reported, ct.IsCancellationRequested,
             false, report, startError)
         {
             DailyRewardClaimUnconfirmed = observation?.DailyRewardClaimUnconfirmed == true,
+            StartErrorDetail = startErrorDetail,
         };
     }
 

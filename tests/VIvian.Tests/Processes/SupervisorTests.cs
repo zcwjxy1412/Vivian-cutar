@@ -35,6 +35,19 @@ public sealed class SupervisorTests(ITestOutputHelper output) : IAsyncLifetime
     }
 
     [WindowsFact]
+    public async Task MinimizedStartupPassesNoActivationWindowStyleToChild()
+    {
+        var spec = new ProcessLaunchSpec(FakeEngine, ["--scenario", "probe-startup-window"],
+            Path.GetDirectoryName(FakeEngine)!);
+        var supervisor = new WindowsProcessSupervisor(startMinimizedWithoutActivation: true);
+        await using var quiet = await supervisor.StartAsync(spec, Guid.NewGuid(), default);
+        Assert.Contains(await ReadAllAsync(quiet), line => line.EndsWith("|info|use-show-window=True;show-window=7", StringComparison.Ordinal));
+
+        await using var normal = await _supervisor.StartAsync(spec, Guid.NewGuid(), default);
+        Assert.Contains(await ReadAllAsync(normal), line => line.EndsWith("|info|use-show-window=False;show-window=0", StringComparison.Ordinal));
+    }
+
+    [WindowsFact]
     public async Task UnrelatedInheritableHandleIsNotVisibleInChild()
     {
         using var unrelated = new EventWaitHandle(false, EventResetMode.ManualReset);

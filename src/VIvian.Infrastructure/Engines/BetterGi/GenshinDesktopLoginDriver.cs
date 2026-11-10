@@ -29,6 +29,8 @@ internal interface IGenshinLoginDesktop
     Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct);
     bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point);
     LoginSwitchOutcome StopOwnedClient();
+    void VerifyHandoffWindow(StarRailWindowInfo window) { }
+    void RestoreForeground(StarRailWindowInfo window) { }
     Task RestartOwnedClientAsync(TimeSpan timeout, CancellationToken ct) =>
         Task.FromException(new InvalidOperationException("当前桌面会话不支持重启本轮客户端。"));
 }
@@ -40,16 +42,19 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
     private readonly IGenshinLoginDesktop _desktop;
     private readonly TimeSpan _poll;
     private readonly bool _stopOwnedClient;
+    private readonly bool _handoffAtGate;
     private StarRailWindowInfo? _window;
     private ConfirmedLogin? _verifiedLogin;
     private string? _previousWorldUid;
     private bool _closed;
 
-    internal GenshinDesktopLoginDriver(IGenshinLoginDesktop desktop, TimeSpan poll, bool stopOwnedClient = false)
+    internal GenshinDesktopLoginDriver(IGenshinLoginDesktop desktop, TimeSpan poll, bool stopOwnedClient = false,
+        bool handoffAtGate = false)
     {
         _desktop = desktop;
         _poll = poll;
         _stopOwnedClient = stopOwnedClient;
+        _handoffAtGate = handoffAtGate;
     }
 
     /// <summary>Runs a login-only operation on the configured CN client under the shared desktop lease.</summary>
@@ -94,7 +99,7 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
             throw new InvalidOperationException("请退出 BetterGI，再验收原神账号切换。");
         var templates = await GenshinLoginTemplates.LoadAsync(Path.GetDirectoryName(program)!, ct).ConfigureAwait(false);
         var desktop = new GenshinWindowsLoginDesktop(gamePath, program, templates, stopOwnedClient);
-        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromMilliseconds(450), stopOwnedClient);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromMilliseconds(450), stopOwnedClient, handoffAtGate: stopOwnedClient);
         try
         {
             return await operation(driver, ct).ConfigureAwait(false);
@@ -192,6 +197,26 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
                     throw new LoginInterruptedException("登录卡片在进入游戏后变成了其他账号。");
                 return view.View == GenshinView.Gate;
             }, cancellationToken);
+            if (_handoffAtGate)
+            {
+                _verifiedLogin = new(phone, gate.Window!, null, previousUid);
+                const string detail = "已确认目标账号，原神大门已完整显示。";
+                return LoginSwitchOutcome.Success(LoginSwitchStage.ReadyAtGate, detail) with
+                {
+                    Evidence = new()
+                    {
+                        TargetMasked = target.MaskedPhone,
+                        PreviousMasked = target.PreviousMasked,
+                        ConfirmedSelectionMasked = card.Rows.Single().MaskedPhone,
+                        SelectionConfirmedAt = confirmedAt,
+                        EnterPressedAt = enterAt,
+                        Trail = ["目标卡片", "原神大门"],
+                        Verdict = "gate_verified",
+                        VerdictDetail = detail,
+                    },
+                };
+            }
+
             Act(gate, GenshinInput.OpenGate, gate.Main, cancellationToken);
             var gateAt = DateTimeOffset.UtcNow;
 
@@ -230,6 +255,35 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
             return LoginSwitchOutcome.Success(LoginSwitchStage.Done, evidence.VerdictDetail, world.Uid) with { Evidence = evidence };
         }
         catch (LoginInterruptedException ex) { return Failed(stage, ex.Message, ex.NeedsUser); }
+    }
+
+    internal async Task ConfirmGateAsync(string normalizedPhone, CancellationToken ct)
+    {
+        var verified = _verifiedLogin;
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!_handoffAtGate || _closed || verified is null || verified.Phone != normalizedPhone)
+                throw new InvalidOperationException("没有与当前任务账号匹配的原神大门验证，已停止。");
+
+            var frame = await _desktop.ReadAsync(ct).ConfigureAwait(false);
+            ct.ThrowIfCancellationRequested();
+            if (frame.View != GenshinView.Gate || frame.Window is not { } window ||
+                !SameWindow(verified.Window, window) || !ReferenceEquals(_verifiedLogin, verified))
+                throw new InvalidOperationException("原神大门画面或客户端身份已变化，未启动 BetterGI。");
+            _desktop.VerifyHandoffWindow(window);
+        }
+        catch
+        {
+            Interlocked.CompareExchange(ref _verifiedLogin, null, verified);
+            throw;
+        }
+    }
+
+    internal void RestoreGameForeground()
+    {
+        if (!_closed && _verifiedLogin is { } verified)
+            _desktop.RestoreForeground(verified.Window);
     }
 
     /// <summary>Reads a new world frame for the current verified account without sending input.</summary>

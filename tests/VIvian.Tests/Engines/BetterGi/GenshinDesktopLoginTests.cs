@@ -47,6 +47,52 @@ public sealed class GenshinDesktopLoginTests
     }
 
     [Fact]
+    public async Task DailyStopsAtTheFullGateAndRechecksItWithoutOpeningTheDoor()
+    {
+        var desktop = new Desktop(
+            Frame(GenshinView.Card, A.NormalizedPhone), Frame(GenshinView.Dropdown, A.NormalizedPhone),
+            Frame(GenshinView.Card, A.NormalizedPhone), Frame(GenshinView.CheckingUpdates),
+            Frame(GenshinView.Gate), Frame(GenshinView.Gate));
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero, stopOwnedClient: true, handoffAtGate: true);
+
+        var first = await driver.SwitchAsync(A, Policy, default);
+        Assert.True(first.Ok, first.Detail);
+        Assert.Equal(LoginSwitchStage.ReadyAtGate, first.Stage);
+        Assert.Null(first.Evidence!.InGameAt);
+        Assert.Equal([GenshinInput.OpenDropdown, GenshinInput.ChooseAccount, GenshinInput.EnterAccount], desktop.Actions);
+        await driver.ConfirmGateAsync(A.NormalizedPhone, default);
+        driver.RestoreGameForeground();
+        Assert.Equal(Window, desktop.RestoredWindow);
+        Assert.DoesNotContain(GenshinInput.OpenGate, desktop.Actions);
+        Assert.Equal(0, desktop.RestartCalls);
+        Assert.Equal(0, desktop.StopCalls);
+    }
+
+    [Theory]
+    [InlineData("world")]
+    [InlineData("different-process")]
+    [InlineData("different-account")]
+    public async Task DailyRejectsAndRevokesStaleGateProof(string change)
+    {
+        var gate = Frame(GenshinView.Gate);
+        var changed = change switch
+        {
+            "world" => gate with { View = GenshinView.World },
+            "different-process" => gate with { Window = Window with { ProcessId = Window.ProcessId + 1 } },
+            _ => gate,
+        };
+        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Dropdown, A.NormalizedPhone), Frame(GenshinView.Card, A.NormalizedPhone), gate, changed);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero, handoffAtGate: true);
+        Assert.True((await driver.SwitchAsync(A, Policy, default)).Ok);
+
+        var phone = change == "different-account" ? B.NormalizedPhone : A.NormalizedPhone;
+        await Assert.ThrowsAsync<InvalidOperationException>(() => driver.ConfirmGateAsync(phone, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => driver.ConfirmGateAsync(A.NormalizedPhone, default));
+        Assert.DoesNotContain(GenshinInput.OpenGate, desktop.Actions);
+    }
+
+    [Fact]
     public async Task AuthenticodeReceivesASynchronousReadOnlyFileHandle()
     {
         await using var fixture = new BetterGiFixture();
@@ -403,6 +449,8 @@ public sealed class GenshinDesktopLoginTests
         public int ReadCalls { get; private set; }
         public int StopCalls { get; private set; }
         public int RestartCalls { get; private set; }
+        public StarRailWindowInfo? RestoredWindow { get; private set; }
+        public void RestoreForeground(StarRailWindowInfo window) => RestoredWindow = window;
         public Task RestartOwnedClientAsync(TimeSpan timeout, CancellationToken ct)
         {
             RestartCalls++;

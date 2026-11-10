@@ -178,7 +178,8 @@ public sealed class BetterGiAdapter : IGameAdapter
     /// log baseline, then starts BetterGI through the run's supervisor. Every failure before the supervisor call is
     /// reported as "nothing started"; a supervisor failure keeps its own certainty.
     /// </summary>
-    internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+    internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct,
+        Func<CancellationToken, Task>? confirmHandoff = null)
     {
         ArgumentNullException.ThrowIfNull(supervisor);
         var root = _installRoot();
@@ -225,6 +226,23 @@ public sealed class BetterGiAdapter : IGameAdapter
         {
             if (_probe.IsBusy(program))
                 throw new EngineStartException(ReasonCodes.ForeignProcess, nothingStarted: true, "BetterGI 在启动前出现已有实例，拒绝转发任务。");
+            if (confirmHandoff is not null)
+            {
+                try
+                {
+                    await confirmHandoff(ct).ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested();
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw new EngineStartException(ReasonCodes.UserStop, nothingStarted: true, "已停止原神交接。");
+                }
+                catch (Exception ex)
+                {
+                    var detail = ex is InvalidOperationException ? ex.Message : "未能重新核对原神大门。";
+                    throw new EngineStartException(ReasonCodes.PreflightError, nothingStarted: true, detail);
+                }
+            }
             group = await supervisor.StartAsync(spec, context.RunId, ct).ConfigureAwait(false);
         }
         catch (EngineStartException ex)

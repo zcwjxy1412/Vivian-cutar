@@ -114,7 +114,8 @@ public sealed class MultiAccountOrchestrator
 
                 batch = await StageAsync(batch, account, BatchRunState.RecognizingLogin,
                     $"{index + 1}/{accounts.Count}：确认账号选择界面", progress, cancellationToken);
-                batch = await StageAsync(batch, account, BatchRunState.SelectingAccount, "正在选择账号、等待进入世界并核对身份",
+                batch = await StageAsync(batch, account, BatchRunState.SelectingAccount,
+                    game == GameId.Genshin ? "正在选择并核对原神账号" : "正在选择账号、等待进入世界并核对身份",
                     progress, cancellationToken);
                 var target = new LoginTarget(profile.NormalizedPhone, profile.MaskedPhone, profile.RowOrder,
                     profile.ObservedUid, previousMasked, previousUid);
@@ -141,13 +142,15 @@ public sealed class MultiAccountOrchestrator
 
                 if (!string.IsNullOrWhiteSpace(switched.Uid))
                     await _database.SaveObservedUidAsync(account.Id, switched.Uid, cancellationToken);
-                await _database.RecordAccountSwitchAsync(previous?.Id, account.Id, "logged_in",
+                var loginState = switched.Stage == LoginSwitchStage.ReadyAtGate ? "recognized" : "logged_in";
+                await _database.RecordAccountSwitchAsync(previous?.Id, account.Id, loginState,
                     Combine(switched.Detail, evidenceJson), cancellationToken);
 
                 batch = await StageAsync(batch, account, BatchRunState.LoadingConfiguration,
                     switched.Detail + " 加载配置", progress, cancellationToken);
                 batch = await StageAsync(batch, account, BatchRunState.RunningTasks,
-                    game == GameId.Genshin ? "正在执行原神日常" : "正在执行星铁日常", progress, cancellationToken);
+                    switched.Stage == LoginSwitchStage.ReadyAtGate ? "已确认大门，正在交接 BetterGI"
+                        : game == GameId.Genshin ? "正在执行原神日常" : "正在执行星铁日常", progress, cancellationToken);
                 BatchTaskResult result;
                 try
                 {

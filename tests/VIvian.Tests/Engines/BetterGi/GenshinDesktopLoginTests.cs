@@ -34,6 +34,20 @@ public sealed class GenshinDesktopLoginTests
     }
 
     [Theory]
+    [InlineData(1080)]
+    [InlineData(1440)]
+    [InlineData(2160)]
+    public void GateLogoutSearchIncludesTheWholeClientIcon(int height)
+    {
+        var scale = height / 1080d;
+        var search = GenshinWindowsLoginDesktop.GateLogoutSearch(height);
+
+        // Bounds of the pinned 36×39 visual template centered on the current client's logout icon.
+        Assert.True(search.Contains(1806 * scale, 873 * scale));
+        Assert.True(search.Contains(1842 * scale, 912 * scale));
+    }
+
+    [Theory]
     [InlineData(LoginScanFailure.WindowOccluded, null, "画面被遮挡")]
     [InlineData(LoginScanFailure.CaptureFailed, null, "未获得可核对的游戏画面")]
     [InlineData(null, null, "画面尚未识别")]

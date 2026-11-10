@@ -29,6 +29,8 @@ internal interface IGenshinLoginDesktop
     Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct);
     bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point);
     LoginSwitchOutcome StopOwnedClient();
+    Task RestartOwnedClientAsync(TimeSpan timeout, CancellationToken ct) =>
+        Task.FromException(new InvalidOperationException("当前桌面会话不支持重启本轮客户端。"));
 }
 
 public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
@@ -123,12 +125,22 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
             null, cancellationToken).ConfigureAwait(false);
     }
 
-    public Task<LoginSwitchOutcome> RestartToLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
+    public async Task<LoginSwitchOutcome> RestartToLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
     {
         var verified = Interlocked.Exchange(ref _verifiedLogin, null);
-        return verified is null
-            ? Task.FromResult(Failed(LoginSwitchStage.ReturningToLogin, "没有可核对的上一账号世界，已停止切换。"))
-            : ReachCardAsync(policy.LoginScreen, verified, cancellationToken);
+        if (verified is null)
+            return Failed(LoginSwitchStage.ReturningToLogin, "没有可核对的上一账号世界，已停止切换。");
+        if (!_stopOwnedClient)
+            return await ReachCardAsync(policy.LoginScreen, verified, cancellationToken).ConfigureAwait(false);
+        try
+        {
+            _previousWorldUid = verified.Uid;
+            _window = null;
+            await _desktop.RestartOwnedClientAsync(policy.GameStart, cancellationToken).ConfigureAwait(false);
+            return await ReachCardAsync(policy.LoginScreenTimeout is null ? ColdLoginScreenTimeout : policy.LoginScreen,
+                null, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex) { return Failed(LoginSwitchStage.ReturningToLogin, ex.Message); }
     }
 
     public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken)
@@ -198,8 +210,6 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
                 previous = view;
                 return stable;
             }, cancellationToken);
-            if (target.ObservedUid is not null && world.Uid is null)
-                return Failed(stage, "此档案已有入场 UID 记录，当前画面未能读回核对。");
 
             var evidence = AccountSwitchVerifier.Judge(new AccountSwitchEvidence
             {
@@ -240,10 +250,10 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
                 throw new InvalidOperationException("原神前台窗口或客户端身份已变化，已停止日常。");
             if (frame.View != GenshinView.World)
                 throw new InvalidOperationException("日常前无法确认原神已进入游戏世界，已停止。");
-            if (!MatchesUid(verified, frame.Uid) || (expectedUid is not null && expectedUid != frame.Uid))
+            if (!MatchesUid(verified, frame.Uid) || (frame.Uid is not null && expectedUid is not null && expectedUid != frame.Uid))
                 throw new InvalidOperationException("日常前无法核对当前原神世界 UID，已停止。");
 
-            var confirmed = verified with { AccountId = accountId, Uid = frame.Uid };
+            var confirmed = verified with { AccountId = accountId, Uid = frame.Uid ?? verified.Uid };
             if (!ReferenceEquals(Interlocked.CompareExchange(ref _verifiedLogin, confirmed, verified), verified))
                 throw new InvalidOperationException("原神登录验证已变化，已停止日常。");
             return new(accountId, window.Handle, window.ProcessId, started, frame.Uid);
@@ -350,7 +360,7 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         expected.ProcessStartedAt == actual.ProcessStartedAt;
 
     private static bool MatchesUid(ConfirmedLogin verified, string? uid) =>
-        (verified.Uid is null || verified.Uid == uid) &&
+        (uid is null || verified.Uid is null || verified.Uid == uid) &&
         (uid is null || verified.PreviousUid != uid);
 
     private sealed record ConfirmedLogin(string Phone, StarRailWindowInfo Window, string? Uid, string? PreviousUid,

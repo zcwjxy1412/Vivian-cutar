@@ -43,7 +43,6 @@ internal sealed class GenshinRewardAcceptance
     private const string DailyOption = "--genshin-daily-acceptance";
     private const string ReviewOption = "--genshin-reward-review";
     internal const string Marker = "VIvian-GenshinRewardAcceptance.marker";
-    internal static readonly TimeSpan RunLimit = TimeSpan.FromMinutes(10);
     internal static bool IsCandidateBuild =>
 #if VIVIAN_GENSHIN_REWARD_ACCEPTANCE
         true;

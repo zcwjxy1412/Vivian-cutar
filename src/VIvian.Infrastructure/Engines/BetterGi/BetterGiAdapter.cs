@@ -93,6 +93,7 @@ public sealed class BetterGiProcessProbe : IBetterGiProcessProbe
 /// </summary>
 public sealed class BetterGiAdapter : IGameAdapter
 {
+    internal bool DelegateNativeTasks { get; init; }
     public const string RuleVersionValue = "bgi-v0.66.0-m6-r1";
 
     private readonly Func<string?> _installRoot;
@@ -249,7 +250,7 @@ public sealed class BetterGiAdapter : IGameAdapter
     private async Task<BetterGiTaskRequest> CheckLaunchPlanAsync(string directory, CancellationToken ct)
     {
         var resolved = await BetterGiConfiguration.ResolveAsync(directory, _request, ct).ConfigureAwait(false);
-        if (resolved.OneDragonPlan?.EnabledTasks.Contains("自动秘境") == true)
+        if (!DelegateNativeTasks && resolved.OneDragonPlan?.EnabledTasks.Contains("自动秘境") == true)
         {
             var domain = await BetterGiConfiguration.InspectDomainResinAsync(directory, ct).ConfigureAwait(false);
             if (domain.AutoArtifactSalvage)

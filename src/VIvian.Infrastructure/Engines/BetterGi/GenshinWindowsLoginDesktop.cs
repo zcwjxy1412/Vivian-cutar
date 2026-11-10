@@ -183,6 +183,23 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         }
     }
 
+    public async Task RestartOwnedClientAsync(TimeSpan timeout, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var stopped = StopOwnedClient();
+        if (!stopped.Ok) throw new InvalidOperationException(stopped.Detail);
+        lock (_clientGate)
+        {
+            if (_closed) throw new InvalidOperationException("原神桌面会话已经关闭。");
+            _ownedClient?.Dispose();
+            _ownedClient = null;
+            _client = null;
+            _launchUnverified = false;
+            _active = true;
+        }
+        await PrepareAsync(timeout, ct).ConfigureAwait(false);
+    }
+
     public void Close()
     {
         lock (_clientGate)

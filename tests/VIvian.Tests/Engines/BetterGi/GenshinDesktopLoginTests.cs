@@ -8,6 +8,45 @@ namespace VIvian.Tests.Engines.BetterGi;
 public sealed class GenshinDesktopLoginTests
 {
     [Fact]
+    public async Task SavedUidIsOptionalWhenVerifiedCardAndLoginContinuityArePresent()
+    {
+        var world = Frame(GenshinView.World);
+        var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Dropdown, B.NormalizedPhone), Frame(GenshinView.Card, B.NormalizedPhone),
+            Frame(GenshinView.Gate), world, world, world);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        var result = await driver.SwitchAsync(B, Policy, default);
+        Assert.True(result.Ok, result.Detail);
+        Assert.Null((await driver.ConfirmWorldAsync(Guid.NewGuid(), B.NormalizedPhone, B.ObservedUid, default)).Uid);
+    }
+
+    [Fact]
+    public async Task OwnedBatchRestartsClientInsteadOfOpeningTheInGameMenu()
+    {
+        var nextWindow = Window with { ProcessId = 999, Handle = (IntPtr)999, ProcessStartedAt = Window.ProcessStartedAt!.Value.AddMinutes(1) };
+        GenshinDesktopFrame Next(GenshinView view, string? mask = null, string? second = null, string? uid = null) =>
+            Frame(view, mask, second, uid) with { Window = nextWindow };
+        var desktop = new Desktop(Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Dropdown, A.NormalizedPhone), Frame(GenshinView.Card, A.NormalizedPhone),
+            Frame(GenshinView.Gate), Frame(GenshinView.World), Frame(GenshinView.World),
+            Next(GenshinView.Card, A.NormalizedPhone),
+            Next(GenshinView.Card, A.NormalizedPhone), Next(GenshinView.Dropdown, A.NormalizedPhone, B.NormalizedPhone),
+            Next(GenshinView.Card, B.NormalizedPhone), Next(GenshinView.Gate),
+            Next(GenshinView.World, uid: B.ObservedUid), Next(GenshinView.World, uid: B.ObservedUid),
+            Next(GenshinView.World, uid: B.ObservedUid));
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero, stopOwnedClient: true);
+        Assert.True((await driver.SwitchAsync(A, Policy, default)).Ok);
+        var returned = await driver.RestartToLoginAsync(Policy, default);
+        Assert.True(returned.Ok, returned.Detail);
+        Assert.Equal(1, desktop.RestartCalls);
+        Assert.DoesNotContain(GenshinInput.OpenMenu, desktop.Actions);
+        Assert.True((await driver.SwitchAsync(B, Policy, default)).Ok);
+        var world = await driver.ConfirmWorldAsync(Guid.NewGuid(), B.NormalizedPhone, B.ObservedUid, default);
+        Assert.Equal(nextWindow.ProcessId, world.ProcessId);
+        Assert.Equal(B.ObservedUid, world.Uid);
+    }
+
+    [Fact]
     public async Task AuthenticodeReceivesASynchronousReadOnlyFileHandle()
     {
         await using var fixture = new BetterGiFixture();
@@ -143,7 +182,6 @@ public sealed class GenshinDesktopLoginTests
     [InlineData("foreground")]
     [InlineData("gate")]
     [InlineData("uid")]
-    [InlineData("missing-uid")]
     public async Task DailyHandoffStopsImmediatelyAndRevokesProofWhenTheWorldChanges(string change)
     {
         var frame = Frame(GenshinView.World, uid: B.ObservedUid);
@@ -155,7 +193,6 @@ public sealed class GenshinDesktopLoginTests
             "foreground" => frame with { Window = null },
             "gate" => frame with { View = GenshinView.Gate },
             "uid" => frame with { Uid = "234567899" },
-            "missing-uid" => frame with { Uid = null },
             _ => throw new InvalidOperationException(),
         };
         var desktop = new Desktop(Frame(GenshinView.Card, B.NormalizedPhone),
@@ -365,6 +402,12 @@ public sealed class GenshinDesktopLoginTests
         public int PrepareCalls { get; private set; }
         public int ReadCalls { get; private set; }
         public int StopCalls { get; private set; }
+        public int RestartCalls { get; private set; }
+        public Task RestartOwnedClientAsync(TimeSpan timeout, CancellationToken ct)
+        {
+            RestartCalls++;
+            return Task.CompletedTask;
+        }
         public string? PrepareError { get; init; }
         public LoginSwitchOutcome? StopResult { get; init; }
         public Task PrepareAsync(TimeSpan timeout, CancellationToken ct)

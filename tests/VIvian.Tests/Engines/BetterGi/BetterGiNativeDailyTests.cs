@@ -11,7 +11,7 @@ public sealed class BetterGiNativeDailyTests
     [Fact]
     public void DelegatedCompletionDoesNotClaimInventoryVerification()
     {
-        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete, craft: true));
+        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete));
         Assert.False(Complete.PlannedTasksVerified);
         Assert.Null(Complete.CraftedCount);
     }
@@ -19,14 +19,14 @@ public sealed class BetterGiNativeDailyTests
     [Fact]
     public void IncompleteConflictingOrForeignResultsCannotAdvanceAccounts()
     {
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { FlowEnded = false }, true));
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { DailyRewardVerified = false }, true));
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { ForeignActivitySeen = true }, true));
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { AdverseSignal = true }, true));
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { ExitCode = 1 }, true));
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.Conflict }, true));
-        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.None }, true));
-        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.Skipped }, true));
-        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.None }, false));
+        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { FlowEnded = false }));
+        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { DailyRewardVerified = false }));
+        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { ForeignActivitySeen = true }));
+        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { AdverseSignal = true }));
+        Assert.False(BetterGiNativeDaily.ReportedComplete(Complete with { ExitCode = 1 }));
+        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.Conflict }));
+        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.None }));
+        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.Skipped }));
+        Assert.True(BetterGiNativeDaily.ReportedComplete(Complete with { CraftAction = BetterGiCraftAction.None }));
     }
 }

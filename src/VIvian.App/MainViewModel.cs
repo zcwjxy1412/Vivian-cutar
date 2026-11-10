@@ -847,10 +847,7 @@ public sealed class MainViewModel : ObservableObject
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return null; }
 
-        using var deadline = acceptance is null || homeReward is not null ? null : new CancellationTokenSource(acceptance.RewardOnly
-            ? GenshinRewardAcceptance.RunLimit : TimeSpan.FromMinutes(30));
-        using var cancellation = deadline is null ? new CancellationTokenSource()
-            : CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+        using var cancellation = new CancellationTokenSource();
         var token = cancellation.Token;
         _batchCts = cancellation;
         GameId? activeGame = null;
@@ -942,7 +939,7 @@ public sealed class MainViewModel : ObservableObject
                 }, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
-        { BatchStatus = string.Join("  ", results.Append(deadline?.IsCancellationRequested == true ? "领奖验收已达时限，执行已停止。" : "批次已由用户停止。")); }
+        { BatchStatus = string.Join("  ", results.Append("批次已由用户停止。")); }
         catch (Exception ex)
         {
             // Method names and error codes locate failures without logging account data or file contents.

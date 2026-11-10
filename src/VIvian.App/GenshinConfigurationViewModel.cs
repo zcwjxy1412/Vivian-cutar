@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using Microsoft.Data.Sqlite;
 using Microsoft.Win32;
 using VIvian.Core;
@@ -35,6 +37,7 @@ public sealed class GenshinConfigurationViewModel
     private bool _gameExecutableAuto;
     private GameAccount? _secondLoginAccount;
     private bool _busy;
+    private readonly DispatcherTimer _localSaveTimer = new(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(900) };
 
     public GenshinConfigurationViewModel(LocalDatabase database, IAccountConfigurationProvider provider, Func<bool> hostIdle,
         string profileDirectory, Func<bool> desktopIdle, Func<string> betterGiRoot, Func<Func<Task>, Task> serializeOperation,
@@ -49,6 +52,13 @@ public sealed class GenshinConfigurationViewModel
         _canOperateWorkspace = canOperateWorkspace;
         _profileDirectory = profileDirectory;
         _import = new(database);
+        _localSaveTimer.Tick += async (_, _) =>
+        {
+            if (_close.IsCancellationRequested) { _localSaveTimer.Stop(); return; }
+            if (!CanEdit || !_hostIdle()) return;
+            _localSaveTimer.Stop();
+            await SaveAsync();
+        };
         Source = new(profileDirectory, desktopIdle, () => IsIdle && !Parameters.Any(row => row.IsChanged), betterGiRoot,
             serializeOperation);
         Source.FieldsChanged += () =>
@@ -134,6 +144,8 @@ public sealed class GenshinConfigurationViewModel
 
     internal void Close()
     {
+        _localSaveTimer.Stop();
+        foreach (var row in Parameters) row.PropertyChanged -= LocalParameterChanged;
         Source.SetVisible(false);
         _close.Cancel();
     }
@@ -459,14 +471,28 @@ public sealed class GenshinConfigurationViewModel
 
     private void Show(AccountConfigurationView? snapshot)
     {
+        _localSaveTimer.Stop();
+        foreach (var row in Parameters) row.PropertyChanged -= LocalParameterChanged;
         _snapshot = snapshot;
         Parameters.Clear();
         if (snapshot is not null)
-            foreach (var value in snapshot.Values) Parameters.Add(new(value));
+            foreach (var value in snapshot.Values)
+            {
+                var row = new ParameterRow(value);
+                row.PropertyChanged += LocalParameterChanged;
+                Parameters.Add(row);
+            }
         Raise(nameof(VisiblePlanParameters));
         Raise(nameof(DetailedPlanParameters));
         Raise(nameof(CanEdit));
         Raise(nameof(CanConnect));
+    }
+
+    private void LocalParameterChanged(object? sender, PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName != nameof(ParameterRow.Current) || sender is not ParameterRow row || Source.Manages(row.Path)) return;
+        _localSaveTimer.Stop();
+        if (row.IsChanged && !_close.IsCancellationRequested) _localSaveTimer.Start();
     }
 
     private async Task RunAsync(Func<Task> action)

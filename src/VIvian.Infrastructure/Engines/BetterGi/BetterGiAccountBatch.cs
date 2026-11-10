@@ -63,6 +63,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
         using var lease = DesktopOperationLease.Acquire(RecoveryOwner(profileDirectory));
         BetterGiDailyAcceptance.RemoveInactiveRecoveryJournals(lease, ct);
         var revisions = new Dictionary<Guid, string>();
+        var parameters = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
         foreach (var account in selected)
         {
             if (account.Uid is { Length: > 0 } savedUid && profiles[account.Id].ObservedUid is { Length: > 0 } observedUid &&
@@ -71,9 +72,12 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             var source = BetterGiNativeDaily.Profile(betterGiRoot, account.Id);
             if (source.HasPending && source.Restore().State == RestoreState.Blocked)
                 throw new InvalidOperationException($"「{account.Name}」的 BetterGI 结束后动作尚未恢复，请核对源档案。");
-            await BetterGiConfiguration.InspectSavedDailyAsync(betterGiRoot,
-                BetterGiAccountPlan.SourceProfileName(account.Id), ct, allowStockCraft: true).ConfigureAwait(false);
+            var sourcePlan = await BetterGiConfiguration.InspectOneDragonAsync(betterGiRoot,
+                BetterGiAccountPlan.SourceProfileName(account.Id), ct).ConfigureAwait(false);
+            if (sourcePlan.EnabledTasks.Count == 0)
+                throw new InvalidOperationException($"「{account.Name}」的 BetterGI 档案没有启用任务。");
             revisions.Add(account.Id, source.Read().Revision);
+            parameters.Add(account.Id, (await database.LoadAccountSettingsAsync(account.Id, ct).ConfigureAwait(false)).Values);
         }
 
         ct.ThrowIfCancellationRequested();
@@ -93,7 +97,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
                         var result = await BetterGiNativeDaily.RunAsync(betterGiRoot, account.Id, revisions[account.Id],
                             Path.Combine(profileDirectory, "BetterGi-日常", "reports"), lease,
                             recheckToken => driver.ConfirmWorldAsync(account.Id, profile.NormalizedPhone, expectedUid, recheckToken),
-                            taskToken).ConfigureAwait(false);
+                            taskToken, parameters[account.Id]).ConfigureAwait(false);
                         return await RecordDailyAsync(database, result, acceptance).ConfigureAwait(false);
                     }, progress, token).ConfigureAwait(false);
             }
@@ -149,7 +153,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             : result.StartError ?? result.Verdict?.ReasonCode ?? ReasonCodes.NoCompletionEvidence;
         var detail = outcome switch
         {
-            RunOutcome.Success when scopedSuccess => "原版 BetterGI 已报告任务流程结束并确认每日奖励已领取；合成数量未独立核验。引擎已退出，结束后动作已恢复。",
+            RunOutcome.Success when scopedSuccess => "原版 BetterGI 已报告本账号任务流程结束。具体任务结果以上游日志为准；引擎已退出，临时设置已恢复。",
             RunOutcome.Success => "原神日常已完成，BetterGI 已清理并恢复。",
             RunOutcome.Cancelled => "已停止原神日常，BetterGI 已清理并恢复。",
             RunOutcome.Failed => "原神日常失败（" + reason + "）。",

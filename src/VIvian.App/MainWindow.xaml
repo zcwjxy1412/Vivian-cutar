@@ -279,7 +279,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <ItemsControl.ItemsSource><Binding Source="{StaticResource GenshinGrouped}"/></ItemsControl.ItemsSource>
 <ItemsControl.GroupStyle><GroupStyle HeaderTemplate="{StaticResource AccountConfigurationGroup}"/></ItemsControl.GroupStyle>
 </ItemsControl>
-<TextBlock Text="BetterGI 关闭时，已连接字段在停止编辑约 1 秒后自动写入。秘境预算暂存于账号档案，当前日常仅执行合成与领奖；秘境设置请在 BetterGI 中核对。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+<TextBlock Text="BetterGI 关闭时，已连接字段在停止编辑约 1 秒后自动写入。资源次数按账号保存，轮到该账号执行时同步到 BetterGI，结束后恢复。任务执行由 BetterGI 负责，详细配置在原软件调整。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 <Border Style="{StaticResource Panel}" Margin="0,14,0,0">
 <StackPanel>
 <TextBlock Text="详细设置 · BetterGI" Style="{StaticResource H2}"/>

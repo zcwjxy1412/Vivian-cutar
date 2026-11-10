@@ -57,8 +57,10 @@ public sealed class BetterGiAccountBatchTests
         Assert.Equal(0, driver.Ensures);
     }
 
-    [Fact]
-    public async Task UnconfirmedOutcomeStopsBeforeTheNextAccountEvenAfterCleanup()
+    [Theory]
+    [InlineData(RunOutcome.Indeterminate, "结果未确认")]
+    [InlineData(RunOutcome.Failed, "任务失败")]
+    public async Task AnUnsuccessfulOutcomeStopsBeforeTheNextAccountEvenAfterCleanup(RunOutcome result, string expectedDetail)
     {
         await using var fixture = new BetterGiFixture();
         var path = Path.Combine(fixture.Root, "test.db");
@@ -72,13 +74,13 @@ public sealed class BetterGiAccountBatchTests
         var outcome = await new BetterGiAccountBatch(database, driver).ExecuteAsync([first, second], (account, _, _) =>
         {
             accountsRun.Add(account.Id);
-            return Task.FromResult(new BatchTaskResult(null, false, true, true, "缺少完成信号", RunOutcome.Indeterminate));
+            return Task.FromResult(new BatchTaskResult(null, false, true, true, "没有任务成功证据", result));
         }, null, default);
 
         Assert.Equal([first.Id], accountsRun);
         Assert.Equal(0, driver.Returns);
         Assert.False(outcome.Completed);
-        Assert.Contains("结果未确认", outcome.Detail);
+        Assert.Contains(expectedDetail, outcome.Detail);
     }
 
     [Fact]
@@ -97,6 +99,13 @@ public sealed class BetterGiAccountBatchTests
         File.WriteAllText(profilePath, $$"""{"Name":"{{name}}","TaskEnabledList":{"领取每日奖励":true,"合成树脂":true},"CompletionAction":"关闭软件","AdventurersGuildCountry":"蒙德"}""");
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default));
         Assert.Contains("未通过实机准入", error.Message);
+
+        File.WriteAllText(profilePath, $$"""{"Name":"{{name}}","TaskEnabledList":{"合成树脂":true,"领取每日奖励":true},"CompletionAction":"关闭软件","AdventurersGuildCountry":"蒙德","CraftingBenchCountry":"枫丹","MinResinToKeep":0}""");
+        var craft = await BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default, allowStockCraft: true);
+        Assert.True(craft.RequiresStockCraft);
+        Assert.Contains("genshin.craft_condensed_resin", craft.ProfileJson);
+        File.WriteAllText(profilePath, File.ReadAllText(profilePath).Replace("\"MinResinToKeep\":0", "\"MinResinToKeep\":60", StringComparison.Ordinal));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default, allowStockCraft: true));
 
         File.WriteAllText(profilePath, $$"""{"Name":"{{name}}","TaskEnabledList":{"custom-group":true},"TaskDefinitions":{"custom-group":"领取每日奖励"},"CompletionAction":"关闭软件"}""");
         await Assert.ThrowsAsync<InvalidOperationException>(() => BetterGiAccountBatch.ReadSavedDailyAsync(fixture.Root, account, game, default));

@@ -89,6 +89,10 @@ public enum BetterGiMarkerKind
     Completed,
     DailyRewardVerified,
     DailyRewardUnverified,
+    CraftStarted,
+    CraftAttempt,
+    CraftSkipped,
+    CraftEnded,
     /// <summary>"任务被取消，退出执行", "一条龙在启动阶段被取消" or a TaskRunner interruption by cancellation.</summary>
     Cancelled,
     /// <summary>"没有配置,退出执行!" or "没有配置组任务,退出执行!" — nothing (more) was run.</summary>
@@ -160,6 +164,10 @@ public static partial class BetterGiMarkers
             if (record.Level == "INF")
             {
                 if (message == "检查每日奖励结果：\"今日奖励已领取\"") return new(BetterGiMarkerKind.DailyRewardVerified);
+                if (message == "→ \"前往合成台\" 开始") return new(BetterGiMarkerKind.CraftStarted);
+                if (message == "合成\"浓缩树脂\"") return new(BetterGiMarkerKind.CraftAttempt);
+                if (message == "无需合成浓缩树脂") return new(BetterGiMarkerKind.CraftSkipped);
+                if (message == "→ \"前往合成台\" 结束") return new(BetterGiMarkerKind.CraftEnded);
                 if (message == "自动秘境任务：执行") return new(BetterGiMarkerKind.DomainStarted);
                 if (message.StartsWith(DomainTargetPrefix, StringComparison.Ordinal) && message.Length > DomainTargetPrefix.Length
                     && message.EndsWith('"'))

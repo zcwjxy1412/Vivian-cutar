@@ -5,7 +5,12 @@ namespace VIvian.Infrastructure.Engines.BetterGi;
 
 internal sealed record BetterGiRunObservation(int ProcessId, DateTimeOffset ProcessStartedAt, bool OwnedPrimary,
     bool FlowEnded, bool DailyRewardVerified, bool ForeignActivitySeen, bool AdverseSignal, int? ExitCode,
-    bool DomainRewardsVerified, bool PlannedTasksVerified);
+    bool DomainRewardsVerified, bool PlannedTasksVerified)
+{
+    public BetterGiCraftAction CraftAction { get; init; }
+    public long CraftActionTimestamp { get; init; }
+    public int? CraftedCount { get; init; }
+}
 
 /// <summary>
 /// Collects the attributable BetterGI markers of one run and turns them into a verdict through the shared
@@ -22,8 +27,14 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
     private int _completions;
     private bool _completionBeforeActivation;
     private bool _configMismatch;
-    private bool _progressSeen;
     private BetterGiMarkerKind _dailyRewardCheck;
+    private int _builtInFlowSteps;
+    private bool _builtInSequenceInvalid;
+    private string? _builtInSlot;
+    private bool _craftStarted;
+    private bool _craftEnded;
+    private BetterGiCraftAction _craftAction;
+    private long _craftActionTimestamp;
     private readonly bool _requiresDailyReward = request.OneDragonPlan?.EnabledTasks.Contains(BetterGiMarkers.DailyRewardTask) == true;
     private readonly bool _requiresCraft = request.OneDragonPlan?.EnabledTasks.Contains(BetterGiMarkers.CraftResinTask) == true;
     private readonly int _requiredDomains = request.OneDragonPlan?.EnabledTasks.Count(task => task == BetterGiMarkers.DomainTask) ?? 0;
@@ -33,7 +44,8 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
     private DomainEvidence? _activeDomain;
 
     private bool FlowEnded => _completions == 1 && _activations.Count == 1 && !_completionBeforeActivation && !_configMismatch;
-    private bool DailyRewardVerified => _dailyRewardCheck == BetterGiMarkerKind.DailyRewardVerified;
+    private bool TracksBuiltInFlow => _requiresDailyReward || _requiresCraft || _requiredDomains > 0;
+    private bool DailyRewardVerified => FlowEnded && !_builtInSequenceInvalid && _dailyRewardCheck == BetterGiMarkerKind.DailyRewardVerified;
     private bool DomainRewardsVerified => _requiredDomains > 0 && _verifiedDomains == _requiredDomains
         && _taskIndex == request.OneDragonPlan!.EnabledTasks.Count;
     private bool PlannedTasksVerified => request.HasKnownCompletionContract && !_requiresCraft
@@ -48,7 +60,12 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
     {
         lock (_gate)
             return new(attribution.RootProcessId, attribution.RootStartTime, OwnedPrimarySeen, FlowEnded, DailyRewardVerified,
-                ForeignActivitySeen, _signals.Count != 0, exitCode, DomainRewardsVerified, PlannedTasksVerified);
+                ForeignActivitySeen, _signals.Count != 0, exitCode, DomainRewardsVerified, PlannedTasksVerified)
+            {
+                CraftAction = _requiresCraft && (_builtInSequenceInvalid || !_craftEnded ||
+                    _builtInFlowSteps != request.OneDragonPlan!.EnabledTasks.Count) ? BetterGiCraftAction.Conflict : _craftAction,
+                CraftActionTimestamp = _craftActionTimestamp,
+            };
     }
 
     public int IgnoredRecords { get; private set; }
@@ -77,8 +94,7 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
             OwnedPrimarySeen = true;
             switch (marker.Kind)
             {
-                case BetterGiMarkerKind.Activated when _requiredDomains == 0
-                    || (record.SourceContext == BetterGiMarkers.FlowSource && record.Level == "INF"):
+                case BetterGiMarkerKind.Activated when !TracksBuiltInFlow || IsFlowRecord(record):
                     _activations.Add(marker.Value ?? "");
                     if (request.Kind == BetterGiTaskKind.OneDragonNamed && !string.Equals(marker.Value, request.ConfigName, StringComparison.Ordinal))
                     {
@@ -86,16 +102,29 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
                         _configMismatch = true;
                     }
                     break;
-                case BetterGiMarkerKind.Progress:
-                    _progressSeen = _activations.Count == 1;
-                    if (_requiredDomains > 0 && _progressSeen && _completions == 0 && record.SourceContext == BetterGiMarkers.FlowSource)
-                        StartTask(marker, record.Message.StartsWith(BetterGiMarkers.BuiltInProgressPrefix, StringComparison.Ordinal));
+                case BetterGiMarkerKind.Progress when TracksBuiltInFlow && IsFlowRecord(record) &&
+                    _activations.Count == 1 && _completions == 0:
+                    var builtIn = record.Message.StartsWith(BetterGiMarkers.BuiltInProgressPrefix, StringComparison.Ordinal);
+                    if (_requiresDailyReward || _requiresCraft) RecordBuiltInStep(marker, builtIn);
+                    if (_requiredDomains > 0) StartTask(marker, builtIn);
                     break;
                 case BetterGiMarkerKind.DailyRewardVerified:
                 case BetterGiMarkerKind.DailyRewardUnverified:
-                    if (_progressSeen && _completions == 0) _dailyRewardCheck = marker.Kind;
+                    if (_requiresDailyReward && _completions == 0)
+                    {
+                        if (_activations.Count != 1 || _dailyRewardCheck != default ||
+                            _builtInFlowSteps != request.OneDragonPlan!.EnabledTasks.Count)
+                            _builtInSequenceInvalid = true;
+                        _dailyRewardCheck = marker.Kind;
+                    }
                     break;
-                case BetterGiMarkerKind.Completed when _requiredDomains == 0 || record.SourceContext == BetterGiMarkers.FlowSource:
+                case BetterGiMarkerKind.CraftStarted:
+                case BetterGiMarkerKind.CraftAttempt:
+                case BetterGiMarkerKind.CraftSkipped:
+                case BetterGiMarkerKind.CraftEnded:
+                    if (_requiresCraft) RecordCraftAction(marker.Kind);
+                    break;
+                case BetterGiMarkerKind.Completed when !TracksBuiltInFlow || IsFlowRecord(record):
                     FinishActiveDomain();
                     _completions++;
                     if (_activations.Count == 0) _completionBeforeActivation = true;
@@ -126,6 +155,47 @@ public sealed class BetterGiRunEvidence(Guid runId, BetterGiTaskRequest request,
                     break;
             }
             return new(Disposition.Owned, marker);
+        }
+    }
+
+    private static bool IsFlowRecord(BetterGiLogRecord record) => record.SourceContext == BetterGiMarkers.FlowSource && record.Level == "INF";
+
+    private void RecordBuiltInStep(BetterGiMarker marker, bool builtIn)
+    {
+        var tasks = request.OneDragonPlan!.EnabledTasks;
+        _builtInFlowSteps++;
+        if (!builtIn || _dailyRewardCheck != default || marker.Done != _builtInFlowSteps || marker.Total != tasks.Count ||
+            _builtInFlowSteps > tasks.Count || (_craftStarted && !_craftEnded))
+        {
+            _builtInSequenceInvalid = true;
+            _builtInSlot = null;
+            return;
+        }
+        _builtInSlot = tasks[_builtInFlowSteps - 1];
+    }
+
+    private void RecordCraftAction(BetterGiMarkerKind kind)
+    {
+        if (_completions != 0 || _builtInSlot != BetterGiMarkers.CraftResinTask || _craftEnded)
+        {
+            _craftAction = BetterGiCraftAction.Conflict;
+            return;
+        }
+        switch (kind)
+        {
+            case BetterGiMarkerKind.CraftStarted when !_craftStarted:
+                _craftStarted = true;
+                break;
+            case BetterGiMarkerKind.CraftAttempt or BetterGiMarkerKind.CraftSkipped when _craftStarted && _craftAction == BetterGiCraftAction.None:
+                _craftAction = kind == BetterGiMarkerKind.CraftAttempt ? BetterGiCraftAction.Attempt : BetterGiCraftAction.Skipped;
+                _craftActionTimestamp = TimeProvider.System.GetTimestamp();
+                break;
+            case BetterGiMarkerKind.CraftEnded when _craftAction is BetterGiCraftAction.Attempt or BetterGiCraftAction.Skipped:
+                _craftEnded = true;
+                break;
+            default:
+                _craftAction = BetterGiCraftAction.Conflict;
+                break;
         }
     }
 

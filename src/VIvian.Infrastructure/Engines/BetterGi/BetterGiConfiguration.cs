@@ -82,18 +82,19 @@ public static class BetterGiConfiguration
     internal static Task<BetterGiTaskRequest> ResolveAsync(string installRoot, BetterGiTaskRequest request, CancellationToken ct) =>
         ReadOnlyFileAccess.BoundedAsync(() => Resolve(installRoot, request, ct), ReadOnlyFileAccess.QueryTimeout, ct);
 
-    internal static Task<BetterGiOneDragonPlan> InspectSavedDailyAsync(string installRoot, string name, CancellationToken ct)
+    internal static Task<BetterGiOneDragonPlan> InspectSavedDailyAsync(string installRoot, string name, CancellationToken ct,
+        bool allowStockCraft = false)
     {
         if (!Path.IsPathFullyQualified(installRoot))
             throw new ArgumentException("BetterGI 安装目录必须是绝对路径。", nameof(installRoot));
         var request = BetterGiArguments.OneDragon(name);
         if (request.Request is not { } daily) throw new InvalidDataException(request.Error);
-        return ReadOnlyFileAccess.BoundedAsync(() => Resolve(Path.GetFullPath(installRoot), daily, ct, requireDailyOnly: true)
+        return ReadOnlyFileAccess.BoundedAsync(() => Resolve(Path.GetFullPath(installRoot), daily, ct, requireSavedDaily: true, allowStockCraft)
             .OneDragonPlan!, ReadOnlyFileAccess.QueryTimeout, ct);
     }
 
     private static BetterGiTaskRequest Resolve(string installRoot, BetterGiTaskRequest request, CancellationToken ct,
-        bool requireDailyOnly = false)
+        bool requireSavedDaily = false, bool allowStockCraft = false)
     {
         var user = Path.Combine(installRoot, "User");
         if (request.Kind == BetterGiTaskKind.StartGroups)
@@ -131,7 +132,7 @@ public static class BetterGiConfiguration
                 continue;
             if (plan is not null)
                 throw new InvalidDataException("BetterGI 存在同名的一条龙配置，无法确认目标唯一。");
-            if (requireDailyOnly) VerifySavedDailyScope(json.RootElement);
+            if (requireSavedDaily) VerifySavedDailyScope(json.RootElement, allowStockCraft);
             plan = ReadOneDragonPlan(requestedName!, json.RootElement);
         }
         if (plan is null)
@@ -145,13 +146,19 @@ public static class BetterGiConfiguration
         return BetterGiArguments.OneDragon(requestedName).Request! with { OneDragonPlan = plan };
     }
 
-    private static void VerifySavedDailyScope(JsonElement source)
+    private static void VerifySavedDailyScope(JsonElement source, bool allowStockCraft)
     {
         var entries = ReadProperty(source, "TaskEnabledList")?.Deserialize<Dictionary<string, bool>>() ?? [];
-        if (entries.Any(pair => pair.Value && pair.Key is not ("genshin.daily_rewards" or BetterGiMarkers.DailyRewardTask)))
-            throw new InvalidOperationException("还有未通过实机准入的原神任务，批次未启动。当前只允许领取每日奖励。");
-        if (entries.Count(pair => pair.Value) != 1)
-            throw new InvalidOperationException("当前 BetterGI 源档案须启用唯一的领取每日奖励任务。");
+        var active = entries.Where(pair => pair.Value).Select(pair => pair.Key).ToArray();
+        var daily = active.Count(key => key is "genshin.daily_rewards" or BetterGiMarkers.DailyRewardTask);
+        var craft = active.Count(key => key is "genshin.craft_condensed_resin" or BetterGiMarkers.CraftResinTask);
+        if (active.Length != daily + craft || (craft != 0 && !allowStockCraft))
+            throw new InvalidOperationException("还有未通过实机准入的原神任务，批次未启动。");
+        if (daily != 1 || craft > 1)
+            throw new InvalidOperationException("当前 BetterGI 源档案须启用唯一的领取每日奖励任务，合成不可重复。");
+        string[] expected = craft == 1 ? [BetterGiMarkers.CraftResinTask, BetterGiMarkers.DailyRewardTask] : [BetterGiMarkers.DailyRewardTask];
+        if (!string.IsNullOrEmpty(ReadString(source, "NextTaskId")) || !ReadEnabledTasks(source).SequenceEqual(expected))
+            throw new InvalidOperationException("BetterGI 源档案包含续跑标记或任务顺序与已启用任务不一致。");
     }
 
     private static readonly HashSet<string> BuiltInTasks = new(StringComparer.Ordinal)

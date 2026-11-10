@@ -27,21 +27,24 @@ internal interface IGenshinLoginDesktop
     Task PrepareAsync(TimeSpan timeout, CancellationToken ct);
     Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct);
     bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point);
+    LoginSwitchOutcome StopOwnedClient();
 }
 
 public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
 {
     private readonly IGenshinLoginDesktop _desktop;
     private readonly TimeSpan _poll;
+    private readonly bool _stopOwnedClient;
     private StarRailWindowInfo? _window;
     private ConfirmedLogin? _verifiedLogin;
     private string? _previousWorldUid;
     private bool _closed;
 
-    internal GenshinDesktopLoginDriver(IGenshinLoginDesktop desktop, TimeSpan poll)
+    internal GenshinDesktopLoginDriver(IGenshinLoginDesktop desktop, TimeSpan poll, bool stopOwnedClient = false)
     {
         _desktop = desktop;
         _poll = poll;
+        _stopOwnedClient = stopOwnedClient;
     }
 
     /// <summary>Runs a login-only operation on the configured CN client under the shared desktop lease.</summary>
@@ -50,20 +53,21 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
     {
         ArgumentNullException.ThrowIfNull(profileDirectory);
         ArgumentNullException.ThrowIfNull(operation);
-        return WithClientCoreAsync(betterGiRoot, gameExecutable, profileDirectory, null, operation, ct);
+        return WithClientCoreAsync(betterGiRoot, gameExecutable, profileDirectory, null, false, operation, ct);
     }
 
     /// <summary>The caller holds the same desktop lease until login, task execution and cleanup have all ended.</summary>
     internal static Task<T> WithClientAsync<T>(string betterGiRoot, string gameExecutable,
-        DesktopOperationLease lease, Func<GenshinDesktopLoginDriver, CancellationToken, Task<T>> operation, CancellationToken ct)
+        DesktopOperationLease lease, bool stopOwnedClient,
+        Func<GenshinDesktopLoginDriver, CancellationToken, Task<T>> operation, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(lease);
         ArgumentNullException.ThrowIfNull(operation);
-        return WithClientCoreAsync(betterGiRoot, gameExecutable, null, lease, operation, ct);
+        return WithClientCoreAsync(betterGiRoot, gameExecutable, null, lease, stopOwnedClient, operation, ct);
     }
 
     private static async Task<T> WithClientCoreAsync<T>(string betterGiRoot, string gameExecutable,
-        string? profileDirectory, DesktopOperationLease? externalLease,
+        string? profileDirectory, DesktopOperationLease? externalLease, bool stopOwnedClient,
         Func<GenshinDesktopLoginDriver, CancellationToken, Task<T>> operation, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -84,8 +88,8 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
         if (new BetterGiProcessProbe().IsBusy(program))
             throw new InvalidOperationException("请退出 BetterGI，再验收原神账号切换。");
         var templates = await GenshinLoginTemplates.LoadAsync(Path.GetDirectoryName(program)!, ct).ConfigureAwait(false);
-        var desktop = new GenshinWindowsLoginDesktop(gamePath, program, templates);
-        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromMilliseconds(450));
+        var desktop = new GenshinWindowsLoginDesktop(gamePath, program, templates, stopOwnedClient);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromMilliseconds(450), stopOwnedClient);
         try
         {
             return await operation(driver, ct).ConfigureAwait(false);
@@ -123,11 +127,23 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
             : ReachCardAsync(policy.LoginScreen, verified, cancellationToken);
     }
 
+    internal Task<(int Original, int Condensed)> ReadResinInventoryAsync(GenshinVerifiedWorld world,
+        GenshinResinInventoryReader reader, CancellationToken ct) => _desktop is GenshinWindowsLoginDesktop native
+        ? native.ReadResinInventoryAsync(world, reader, ct)
+        : throw new InvalidOperationException("当前原神桌面会话不能核对树脂库存。");
+
     public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken)
     {
         _window = null;
         Interlocked.Exchange(ref _verifiedLogin, null);
         _previousWorldUid = null;
+        if (_stopOwnedClient)
+        {
+            if (_closed)
+                return Task.FromResult(Failed(LoginSwitchStage.Failed, "原神桌面会话已结束，无法确认客户端退出。"));
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(_desktop.StopOwnedClient());
+        }
         return Task.FromResult(LoginSwitchOutcome.Success(LoginSwitchStage.Done, "原神输入已结束，客户端保持打开。"));
     }
 

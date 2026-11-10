@@ -229,6 +229,29 @@ public sealed class GenshinDesktopLoginTests
         Assert.Empty(desktop.Actions);
     }
 
+    [Theory]
+    [InlineData(true, true, true, 1)]
+    [InlineData(true, false, false, 1)]
+    [InlineData(false, false, true, 0)]
+    public async Task OnlyTaskBatchesRequireConfirmedDesktopCleanup(bool stopOwnedClient, bool exited,
+        bool expectedOk, int expectedStopCalls)
+    {
+        var desktop = new Desktop
+        {
+            StopResult = exited
+                ? LoginSwitchOutcome.Success(LoginSwitchStage.Done, "已确认原神退出。")
+                : LoginSwitchOutcome.Fail(LoginSwitchStage.Failed, "原神退出未确认。") with { Fatal = true },
+        };
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero, stopOwnedClient);
+
+        var stopped = await driver.StopGameAsync(default);
+
+        Assert.Equal(expectedOk, stopped.Ok);
+        Assert.Equal(expectedStopCalls, desktop.StopCalls);
+        if (stopOwnedClient)
+            Assert.Equal(desktop.StopResult, stopped);
+    }
+
     [Fact]
     public void TemplateMatcherRequiresUniqueVisualEvidence()
     {
@@ -265,7 +288,9 @@ public sealed class GenshinDesktopLoginTests
         public List<GenshinInput> Actions { get; } = [];
         public int PrepareCalls { get; private set; }
         public int ReadCalls { get; private set; }
+        public int StopCalls { get; private set; }
         public string? PrepareError { get; init; }
+        public LoginSwitchOutcome? StopResult { get; init; }
         public Task PrepareAsync(TimeSpan timeout, CancellationToken ct)
         {
             PrepareCalls++;
@@ -280,6 +305,11 @@ public sealed class GenshinDesktopLoginTests
         {
             Actions.Add(input);
             return true;
+        }
+        public LoginSwitchOutcome StopOwnedClient()
+        {
+            StopCalls++;
+            return StopResult ?? throw new InvalidOperationException("本测试不应请求清理原神客户端。");
         }
     }
 }

@@ -10,16 +10,21 @@ using VIvian.Infrastructure.Processes;
 
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
-internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterGiProgram, GenshinLoginTemplates templates)
+internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterGiProgram, GenshinLoginTemplates templates,
+    bool stopOwnedClient)
     : IGenshinLoginDesktop
 {
     private const string ClientProcessName = "YuanShen";
     private readonly BetterGiProcessProbe _instances = new();
+    private readonly object _clientGate = new();
     private GenshinDesktopFrame? _current;
     private CapturedFrame? _pixels;
     private long _readAt;
-    private bool _active = true;
+    private volatile bool _active = true;
     private (int Pid, DateTimeOffset Started)? _client;
+    private Process? _ownedClient;
+    private bool _launchUnverified;
+    private bool _closed;
 
     public async Task PrepareAsync(TimeSpan timeout, CancellationToken ct)
     {
@@ -30,24 +35,26 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             EnsureDesktopAvailable();
             using var file = ReadOnlyFileAccess.OpenForStableRead(gamePath);
             await Task.Run(() => GenshinGameExecutable.Verify(gamePath, file), limit.Token).ConfigureAwait(false);
-            limit.Token.ThrowIfCancellationRequested();
-            EnsureDesktopAvailable();
-            _client = FindExistingClient();
-            if (_client is null)
+            (int Pid, DateTimeOffset Started) client;
+            lock (_clientGate)
             {
-                using var started = WindowsProcessSupervisor.StartUserProcess(gamePath, Path.GetDirectoryName(gamePath)!)
-                    ?? throw new InvalidOperationException("Windows 没有返回本次启动的原神进程。");
-                _client = VerifyClient(started);
+                limit.Token.ThrowIfCancellationRequested();
+                if (!_active) throw new InvalidOperationException("原神桌面会话已结束。");
+                EnsureDesktopAvailable();
+                var existing = FindExistingClient();
+                if (stopOwnedClient && (_launchUnverified || _client is not null && _client != existing))
+                    throw new InvalidOperationException("原神启动进程已退出或发生变化，已停止登录。");
+                _client = client = existing ?? StartClient();
             }
 
             while (true)
             {
                 limit.Token.ThrowIfCancellationRequested();
                 EnsureDesktopAvailable();
-                if (_client != FindExistingClient())
+                if (!_active || client != FindExistingClient())
                     throw new InvalidOperationException("原神启动进程已退出或发生变化，已停止登录。");
                 if (FindForeground() is not null) return;
-                using var game = Process.GetProcessById(_client.Value.Pid);
+                using var game = Process.GetProcessById(client.Pid);
                 var hwnd = game.MainWindowHandle;
                 if (hwnd != IntPtr.Zero && TryFindWindow(hwnd) is not null)
                 {
@@ -95,19 +102,92 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         }
     }
 
-    private (int Pid, DateTimeOffset Started) VerifyClient(Process game)
+    private (int Pid, DateTimeOffset Started) VerifyClient(Process game, SafeProcessHandle? launchHandle = null)
     {
         using var current = Process.GetCurrentProcess();
-        if (game.SessionId != current.SessionId || StarRailWindow.StartTime(game) is not { } start || !MatchesExecutable(game.Id))
+        if (game.SessionId != current.SessionId || StarRailWindow.StartTime(game) is not { } start ||
+            !(launchHandle is null ? MatchesExecutable(game.Id) : MatchesExecutable(launchHandle)))
             throw new InvalidOperationException("原神进程的路径、会话或启动时间无法核对。");
         return (game.Id, start);
     }
 
+    private (int Pid, DateTimeOffset Started) StartClient()
+    {
+        _launchUnverified = stopOwnedClient;
+        Process? started = null;
+        try
+        {
+            started = WindowsProcessSupervisor.StartUserProcess(gamePath, Path.GetDirectoryName(gamePath)!)
+                ?? throw new InvalidOperationException("Windows 没有返回本次启动的原神进程。");
+            // Check the retained launch handle while the verified executable is still locked for reading.
+            var client = VerifyClient(started, stopOwnedClient ? started.SafeHandle : null);
+            if (stopOwnedClient) _ownedClient = started;
+            _launchUnverified = false;
+            return client;
+        }
+        catch (Win32Exception ex) when (started is null && ex.NativeErrorCode == 1223)
+        {
+            _launchUnverified = false;
+            throw;
+        }
+        finally
+        {
+            if (!ReferenceEquals(_ownedClient, started)) started?.Dispose();
+        }
+    }
+
+    public LoginSwitchOutcome StopOwnedClient()
+    {
+        lock (_clientGate)
+        {
+            if (_closed || !stopOwnedClient) return CleanupFailed("原神桌面会话无法确认客户端退出。");
+            DisableInput();
+            if (_launchUnverified)
+                return CleanupFailed("未能核对本次启动的原神进程，客户端清理未确认。");
+
+            try
+            {
+                if (HasRunningProcess(Path.GetFileNameWithoutExtension(betterGiProgram)) || _instances.IsBusy(betterGiProgram))
+                    return CleanupFailed("BetterGI 可能仍在运行，原神客户端清理未确认。");
+                if (_ownedClient is { } owned && !WindowsProcessSupervisor.TerminateOwnedProcess(owned))
+                    return CleanupFailed("未能确认本次启动的原神客户端已退出。");
+                if (HasRunningProcess(ClientProcessName))
+                    return CleanupFailed("仍有不属于本次批次的原神客户端运行，已保留该客户端。");
+                return LoginSwitchOutcome.Success(LoginSwitchStage.Done, "已确认没有运行中的原神客户端。");
+            }
+            catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or UnauthorizedAccessException)
+            {
+                return CleanupFailed("无法核对原神或 BetterGI 的运行状态，客户端清理未确认。");
+            }
+        }
+    }
+
     public void Close()
+    {
+        lock (_clientGate)
+        {
+            _closed = true;
+            DisableInput();
+            _ownedClient?.Dispose();
+            _ownedClient = null;
+        }
+    }
+
+    private void DisableInput()
     {
         _active = false;
         _current = null;
         _pixels = null;
+    }
+
+    private static LoginSwitchOutcome CleanupFailed(string detail) =>
+        LoginSwitchOutcome.Fail(LoginSwitchStage.Failed, detail) with { Fatal = true };
+
+    private static bool HasRunningProcess(string processName)
+    {
+        var processes = Process.GetProcessesByName(processName);
+        foreach (var process in processes) process.Dispose();
+        return processes.Length != 0;
     }
 
     public async Task<GenshinDesktopFrame> ReadAsync(CancellationToken ct)
@@ -153,6 +233,57 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             actual.X != target.X || actual.Y != target.Y || !Owns(window.Handle, target) || FindForeground() != window)
             return false;
         return SendPair(Mouse(WindowsNative.MouseEventLeftDown), Mouse(WindowsNative.MouseEventLeftUp));
+    }
+
+    internal async Task<(int Original, int Condensed)> ReadResinInventoryAsync(GenshinVerifiedWorld world,
+        GenshinResinInventoryReader reader, CancellationToken ct)
+    {
+        const ushort mapKey = 0x4D;
+        ct.ThrowIfCancellationRequested();
+        var current = Interlocked.Exchange(ref _current, null);
+        if (current is not { View: GenshinView.World, Window: { } window, Main: { } anchor } ||
+            window.ClientHeight < 1080 ||
+            window.Handle != world.WindowHandle || window.ProcessId != world.ProcessId || window.ProcessStartedAt != world.ProcessStartedAt ||
+            Stopwatch.GetElapsedTime(_readAt) > TimeSpan.FromSeconds(3) || !StillMatches(window, anchor) || !CanRead(window) ||
+            !SendPair(Key(0, mapKey), Key(2, mapKey)))
+            throw new InvalidOperationException("无法从已核对的原神世界安全打开地图读取树脂。");
+
+        (int Original, int Condensed)? previous = null;
+        (int Original, int Condensed)? inventory = null;
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            await Task.Delay(350, ct).ConfigureAwait(false);
+            if (!CanRead(window)) break;
+            var (frame, check) = ScreenCapture.CaptureChecked(window, ClientProcessName);
+            var counts = frame is not null && CaptureVerdict.Evaluate(check).Accept
+                ? await reader.ReadAsync(frame, ct).ConfigureAwait(false) : null;
+            if (counts is not null && counts == previous)
+            {
+                inventory = counts;
+                break;
+            }
+            previous = counts;
+        }
+
+        ct.ThrowIfCancellationRequested();
+        if (!CanRead(window)) throw new InvalidOperationException("树脂核对期间原神窗口或桌面归属发生变化。");
+        var (map, finalCheck) = ScreenCapture.CaptureChecked(window, ClientProcessName);
+        if (map is null || !CaptureVerdict.Evaluate(finalCheck).Accept || !reader.IsMap(map, ct) || !CanRead(window) ||
+            !SendPair(Key(0), Key(2)))
+            throw new InvalidOperationException("无法确认当前原神地图并安全退出，树脂库存未确认。");
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await Task.Delay(350, ct).ConfigureAwait(false);
+            var returned = await ReadAsync(ct).ConfigureAwait(false);
+            if (returned.Window != window) break;
+            if (returned.View == GenshinView.World)
+                return inventory ?? throw new InvalidOperationException("没有从两个连续地图画面读到一致的树脂库存。");
+        }
+        throw new InvalidOperationException("地图关闭后未能确认回到同一原神世界。");
+
+        bool CanRead(StarRailWindowInfo expected) => _active && FindForeground() == expected &&
+            !_instances.IsBusy(betterGiProgram) && !StarRailWindow.IsProcessRunning();
     }
 
     private bool StillMatches(StarRailWindowInfo window, ScreenRegion point)
@@ -271,6 +402,11 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
     private bool MatchesExecutable(int pid)
     {
         using var handle = NativeMethods.OpenProcess(0x1000, false, pid);
+        return MatchesExecutable(handle);
+    }
+
+    private bool MatchesExecutable(SafeProcessHandle handle)
+    {
         var path = new StringBuilder(32768);
         var length = (uint)path.Capacity;
         return !handle.IsInvalid && QueryFullProcessImageName(handle, 0, path, ref length) &&
@@ -288,7 +424,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         return sent == 2;
     }
 
-    private static NativeInput Key(uint flags) => new() { Type = 1, Value = new() { Keyboard = new() { Key = 0x1B, Flags = flags } } };
+    private static NativeInput Key(uint flags, ushort key = 0x1B) => new() { Type = 1, Value = new() { Keyboard = new() { Key = key, Flags = flags } } };
     private static NativeInput Mouse(uint flags) => new() { Value = new() { Mouse = new() { Flags = flags } } };
 
     [StructLayout(LayoutKind.Sequential)]

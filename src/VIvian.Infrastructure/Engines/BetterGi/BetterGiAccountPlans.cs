@@ -64,6 +64,37 @@ public static class BetterGiAccountPlans
     }
 
     public static BetterGiPlanFiles RenderDailyAcceptance(Guid accountId, BetterGiOneDragonPlan source, string gameExecutable)
+        => RenderDaily(accountId, source, gameExecutable, craft: false);
+
+    internal static BetterGiPlanFiles RenderSavedRun(Guid accountId, BetterGiOneDragonPlan source, string gameExecutable)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (source.EnabledTasks.SequenceEqual([BetterGiMarkers.DailyRewardTask]))
+            return RenderDaily(accountId, source, gameExecutable, craft: false);
+        if (!source.EnabledTasks.SequenceEqual([BetterGiMarkers.CraftResinTask, BetterGiMarkers.DailyRewardTask]))
+            throw new InvalidOperationException("源档案仅支持领取每日奖励，或按顺序执行合成浓缩树脂后领取每日奖励。");
+        if (source.MinResinToKeep != 0 || !ParameterRules.IsValid(ByPath["CraftingBenchCountry"], source.CraftingBenchCountry))
+            throw new InvalidOperationException("当前合成核验只支持保留原粹树脂为 0 且有已知合成地区的档案。");
+        return RenderDaily(accountId, source, gameExecutable, craft: true);
+    }
+
+    internal static BetterGiPlanFiles RebuildSavedRun(Guid accountId, string gameExecutable, JsonElement profile)
+    {
+        if (profile.ValueKind != JsonValueKind.Object || !profile.TryGetProperty("TaskEnabledList", out var enabled) ||
+            enabled.ValueKind != JsonValueKind.Object || !profile.TryGetProperty("MinResinToKeep", out var reserve) ||
+            !reserve.TryGetInt32(out var minimum))
+            throw new InvalidDataException("隔离任务设置缺少任务列表或树脂保留值。");
+        var craft = enabled.TryGetProperty("genshin.craft_condensed_resin", out var crafting) && crafting.GetBoolean();
+        var source = new BetterGiOneDragonPlan(BetterGiAccountPlan.SourceProfileName(accountId), craft
+            ? [BetterGiMarkers.CraftResinTask, BetterGiMarkers.DailyRewardTask] : [BetterGiMarkers.DailyRewardTask],
+            "关闭软件", BetterGiConfiguration.ReadString(profile, "CraftingBenchCountry") ?? "",
+            minimum, "", "", false,
+            BetterGiConfiguration.ReadString(profile, "AdventurersGuildCountry") ?? "",
+            BetterGiConfiguration.ReadString(profile, "DailyRewardPartyName") ?? "");
+        return RenderSavedRun(accountId, source, gameExecutable);
+    }
+
+    private static BetterGiPlanFiles RenderDaily(Guid accountId, BetterGiOneDragonPlan source, string gameExecutable, bool craft)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (source.Name != BetterGiAccountPlan.SourceProfileName(accountId))
@@ -75,13 +106,18 @@ public static class BetterGiAccountPlans
                 && !ParameterRules.IsValid(ByPath["DailyRewardPartyName"], source.DailyRewardPartyName)))
             throw new InvalidOperationException("当前 BetterGI 源档案的领奖地区或队伍设置无效。");
 
-        var dailyOnly = Compile(new Dictionary<string, string>
+        var values = new Dictionary<string, string>
         {
             [Daily] = "true",
             ["AdventurersGuildCountry"] = source.AdventurersGuildCountry,
-        });
+        };
+        if (craft)
+        {
+            values[Craft] = "true";
+            values["CraftingBenchCountry"] = source.CraftingBenchCountry;
+        }
         // The parsed file's party name is literal. Only a saved VIvian setting interprets “当前队伍” as empty.
-        return dailyOnly.Render(accountId, gameExecutable, source.DailyRewardPartyName);
+        return Compile(values).Render(accountId, gameExecutable, source.DailyRewardPartyName);
     }
 
     internal static int Count(IReadOnlyDictionary<string, string> values, string key) =>
@@ -153,7 +189,10 @@ public sealed class BetterGiAccountPlan
                 autoArtifactSalvage = false, rewardRecognitionEnabled = domain,
             },
         };
-        return new(name, RenderProfile(name, includeDisabled: false, dailyRewardPartyName), JsonSerializer.Serialize(settings, Json));
+        return new(name, RenderProfile(name, includeDisabled: false, dailyRewardPartyName), JsonSerializer.Serialize(settings, Json))
+        {
+            RequiresStockCraft = Enabled(BetterGiAccountPlans.Craft),
+        };
 
         int CountWhenDomain(string key) => domain ? BetterGiAccountPlans.Count(Values, key) : 0;
     }
@@ -193,4 +232,7 @@ public sealed class BetterGiAccountPlan
     private bool Enabled(string setting) => Values[setting] == "true";
 }
 
-public sealed record BetterGiPlanFiles(string ProfileName, string ProfileJson, string SettingsJson);
+public sealed record BetterGiPlanFiles(string ProfileName, string ProfileJson, string SettingsJson)
+{
+    internal bool RequiresStockCraft { get; init; }
+}

@@ -36,9 +36,20 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
     }
 
     /// <summary>Runs the saved daily reward plan under one desktop lease and one verified game session at a time.</summary>
-    public static async Task<MultiAccountOutcome> ExecuteSavedDailyAsync(LocalDatabase database,
+    public static Task<MultiAccountOutcome> ExecuteSavedDailyAsync(LocalDatabase database,
         IReadOnlyList<GameAccount> accounts, string betterGiRoot, string archivePath, string profileDirectory,
-        Action<BatchAccountProgress>? progress, CancellationToken ct)
+        Action<BatchAccountProgress>? progress, CancellationToken ct) =>
+        ExecuteSavedAsync(database, accounts, betterGiRoot, archivePath, profileDirectory, progress, ct, acceptance: false, rewardOnly: false);
+
+    /// <summary>Uses the same account pipeline with separately labelled, per-run acceptance evidence.</summary>
+    public static Task<MultiAccountOutcome> VerifySavedDailyAsync(LocalDatabase database,
+        IReadOnlyList<GameAccount> accounts, string betterGiRoot, string archivePath, string profileDirectory,
+        bool rewardOnly, Action<BatchAccountProgress>? progress, CancellationToken ct) =>
+        ExecuteSavedAsync(database, accounts, betterGiRoot, archivePath, profileDirectory, progress, ct, acceptance: true, rewardOnly);
+
+    private static async Task<MultiAccountOutcome> ExecuteSavedAsync(LocalDatabase database,
+        IReadOnlyList<GameAccount> accounts, string betterGiRoot, string archivePath, string profileDirectory,
+        Action<BatchAccountProgress>? progress, CancellationToken ct, bool acceptance, bool rewardOnly)
     {
         if (!RealExecutionPolicy.IsM5DailyTest || !WindowsProcessSupervisor.IsCurrentProcessElevated())
             throw new InvalidOperationException("此版本或当前 Windows 授权无法运行原神日常。");
@@ -52,8 +63,12 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             if (account.Uid is { Length: > 0 } savedUid && profiles[account.Id].ObservedUid is { Length: > 0 } observedUid &&
                 savedUid != observedUid)
                 throw new InvalidOperationException($"「{account.Name}」的档案 UID 和上次入场 UID 不一致，批次未启动。");
-            plans.Add(account.Id, await ReadSavedDailyAsync(betterGiRoot, account, game, ct).ConfigureAwait(false));
+            plans.Add(account.Id, await ReadSavedDailyAsync(betterGiRoot, account, game, ct, allowStockCraft: true, rewardOnly).ConfigureAwait(false));
         }
+
+        var resinReader = plans.Values.Any(plan => plan.RequiresStockCraft)
+            ? await GenshinResinInventoryReader.LoadAsync(betterGiRoot, ct).ConfigureAwait(false)
+            : null;
 
         using var lease = DesktopOperationLease.Acquire(RecoveryOwner(profileDirectory));
         var stages = new Dictionary<Guid, string>();
@@ -64,23 +79,39 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             stages.Add(account.Id, stage.StagePath);
         }
 
-        return await GenshinDesktopLoginDriver.WithClientAsync(betterGiRoot, game, lease, (driver, token) =>
+        return await GenshinDesktopLoginDriver.WithClientAsync(betterGiRoot, game, lease, stopOwnedClient: true, async (driver, token) =>
         {
             var orchestrator = new MultiAccountOrchestrator(database, driver);
-            return orchestrator.ExecuteAsync(GameId.Genshin, selected, AccountConfigurationMode.Independent,
-                (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>()),
-                async (account, _, taskToken) =>
-                {
-                    var plan = plans[account.Id];
-                    if (await ReadSavedDailyAsync(betterGiRoot, account, game, taskToken).ConfigureAwait(false) != plan)
-                        throw new InvalidOperationException("BetterGI 源档案在批次准备后发生变化，任务未启动。");
-                    var profile = profiles[account.Id];
-                    var expectedUid = string.IsNullOrWhiteSpace(account.Uid) ? profile.ObservedUid : account.Uid;
-                    var result = await BetterGiDailyAcceptance.RunAsync(stages[account.Id], account.Id, plan, lease,
-                        recheckToken => driver.ConfirmWorldAsync(account.Id, profile.NormalizedPhone, expectedUid, recheckToken),
-                        taskToken).ConfigureAwait(false);
-                    return await RecordDailyAsync(database, result).ConfigureAwait(false);
-                }, progress, token);
+            MultiAccountOutcome outcome;
+            try
+            {
+                outcome = await orchestrator.ExecuteAsync(GameId.Genshin, selected, AccountConfigurationMode.Independent,
+                    (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>()),
+                    async (account, _, taskToken) =>
+                    {
+                        var plan = plans[account.Id];
+                        if (await ReadSavedDailyAsync(betterGiRoot, account, game, taskToken, allowStockCraft: true, rewardOnly)
+                            .ConfigureAwait(false) != plan)
+                            throw new InvalidOperationException("BetterGI 源档案在批次准备后发生变化，任务未启动。");
+                        var profile = profiles[account.Id];
+                        var expectedUid = string.IsNullOrWhiteSpace(account.Uid) ? profile.ObservedUid : account.Uid;
+                        var result = await BetterGiDailyAcceptance.RunAsync(stages[account.Id], account.Id, plan, lease,
+                            recheckToken => driver.ConfirmWorldAsync(account.Id, profile.NormalizedPhone, expectedUid, recheckToken),
+                            taskToken, plan.RequiresStockCraft && resinReader is not null
+                                ? (world, captureToken) => driver.ReadResinInventoryAsync(world, resinReader, captureToken)
+                                : null).ConfigureAwait(false);
+                        return await RecordDailyAsync(database, result, acceptance).ConfigureAwait(false);
+                    }, progress, token).ConfigureAwait(false);
+            }
+            catch
+            {
+                await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false);
+                throw;
+            }
+            if (outcome.Completed) return outcome;
+
+            var cleanup = await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false);
+            return cleanup.Ok ? outcome : outcome with { Detail = outcome.Detail + " " + cleanup.Detail };
         }, ct).ConfigureAwait(false);
     }
 
@@ -90,15 +121,14 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
     private static string RecoveryOwner(string profileDirectory) => Path.Combine(profileDirectory, "BetterGi-日常");
 
     internal static async Task<BetterGiPlanFiles> ReadSavedDailyAsync(string betterGiRoot, GameAccount account,
-        string game, CancellationToken ct)
+        string game, CancellationToken ct, bool allowStockCraft = false, bool rewardOnly = false)
     {
         try
         {
             var source = await BetterGiConfiguration.InspectSavedDailyAsync(betterGiRoot,
-                BetterGiAccountPlan.SourceProfileName(account.Id), ct).ConfigureAwait(false);
-            if (!source.EnabledTasks.SequenceEqual([BetterGiMarkers.DailyRewardTask]))
-                throw new InvalidOperationException("源档案的执行顺序或任务标识不包含有效的领取每日奖励。");
-            return BetterGiAccountPlans.RenderDailyAcceptance(account.Id, source, game);
+                BetterGiAccountPlan.SourceProfileName(account.Id), ct, allowStockCraft).ConfigureAwait(false);
+            return rewardOnly ? BetterGiAccountPlans.RenderDailyAcceptance(account.Id, source, game)
+                : BetterGiAccountPlans.RenderSavedRun(account.Id, source, game);
         }
         catch (InvalidOperationException ex)
         {
@@ -106,17 +136,20 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
         }
     }
 
-    private static async Task<BatchTaskResult> RecordDailyAsync(LocalDatabase database, BetterGiDailyAcceptanceResult result)
+    private static async Task<BatchTaskResult> RecordDailyAsync(LocalDatabase database, BetterGiDailyAcceptanceResult result, bool acceptance)
     {
         var cleanup = result.Restored ? result.Cleanup : CleanupState.Unconfirmed;
         var clean = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
-        var outcome = clean && result.Cancelled ? RunOutcome.Cancelled : result.Outcome;
+        var scopedSuccess = acceptance && result.ScopedCompletionConfirmed;
+        var outcome = scopedSuccess ? RunOutcome.Success : clean && result.Cancelled ? RunOutcome.Cancelled : result.Outcome;
         var reason = !clean ? ReasonCodes.CleanupUnconfirmed
             : result.Cancelled ? ReasonCodes.UserStop
             : result.TimedOut ? ReasonCodes.TaskTimeout
+            : scopedSuccess ? ReasonCodes.Completed
             : result.StartError ?? result.Verdict?.ReasonCode ?? ReasonCodes.NoCompletionEvidence;
         var detail = outcome switch
         {
+            RunOutcome.Success when scopedSuccess => "原神受控验收已确认本次计划完成，BetterGI 已清理并恢复。",
             RunOutcome.Success => "原神日常已完成，BetterGI 已清理并恢复。",
             RunOutcome.Cancelled => "已停止原神日常，BetterGI 已清理并恢复。",
             RunOutcome.Failed => "原神日常失败（" + reason + "）。",
@@ -126,7 +159,8 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
         if (outcome == RunOutcome.Indeterminate && result.EvidenceObserved)
             detail += " 已保留与本次引擎进程匹配的日志证据。";
         var at = DateTimeOffset.UtcNow;
-        await database.PublishAsync(new(result.RunId, result.RunId, GameId.Genshin, BetterGiContract.PinnedTag,
+        var rule = acceptance ? BetterGiContract.PinnedTag + "/acceptance" : BetterGiContract.PinnedTag;
+        await database.PublishAsync(new(result.RunId, result.RunId, GameId.Genshin, rule,
             IsSimulation: false, RunPhase.Finished, outcome, cleanup, reason, at), CancellationToken.None).ConfigureAwait(false);
         await database.AppendEventsAsync([new(result.RunId, at, RunEventKind.Progress, detail + " 验收报告 " + result.ReportPath)],
             CancellationToken.None)

@@ -350,6 +350,31 @@ public sealed class BetterGiLifecycleTests
         Assert.Equal(expected, verdict.Outcome);
     }
 
+    [Theory]
+    [InlineData("一条龙任务执行: 2/2", BetterGiMarkers.FlowSource, BetterGiMarkers.FlowSource)]
+    [InlineData("配置组任务执行: 1/1", BetterGiMarkers.FlowSource, BetterGiMarkers.FlowSource)]
+    [InlineData("一条龙任务执行: 1/1", "UnrelatedTask", BetterGiMarkers.FlowSource)]
+    [InlineData("一条龙任务执行: 1/1", BetterGiMarkers.FlowSource, "UnrelatedTask")]
+    public async Task DailyRewardCheckMustFollowTheNamedFlowsExactBuiltInTask(string progress, string progressSource, string finishSource)
+    {
+        await using var f = new BetterGiFixture();
+        var path = Path.Combine(f.Root, "User", "OneDragon", "日常.json");
+        File.WriteAllText(path, """{ "Name": "日常", "TaskEnabledList": { "领取每日奖励": true }, "CompletionAction": "关闭软件" }""");
+        var request = BetterGiArguments.OneDragon("日常").Request;
+        var (run, group) = await f.LaunchAsync(f.Adapter(request, contractVerified: true));
+        await using var owned = run;
+
+        var lines = BgiLog.Record(group.RootProcessId, Own(group), "启用一条龙配置：日常")
+            .Concat(BgiLog.Record(group.RootProcessId, Own(group), progress, source: progressSource))
+            .Concat(BgiLog.Record(group.RootProcessId, Own(group), "检查每日奖励结果：\"今日奖励已领取\"",
+                source: "BetterGenshinImpact.GameTask.Common.TaskControl"))
+            .Concat(BgiLog.Record(group.RootProcessId, Own(group), "一条龙和配置组任务结束", source: finishSource));
+
+        var verdict = await FinishAsync(f, run, group, lines, 0);
+        Assert.Equal(RunOutcome.Indeterminate, verdict.Outcome);
+        Assert.False(run.Observe().PlannedTasksVerified);
+    }
+
     [Fact]
     public async Task MissingCompletionMarkerIsIndeterminate()
     {

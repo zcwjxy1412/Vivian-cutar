@@ -536,8 +536,13 @@ internal static class BetterGiDailyAcceptance
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         security.AddAccessRule(new(admins, FileSystemRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new(system, FileSystemRights.FullControl, AccessControlType.Allow));
-        using var file = new FileInfo(path).Create(FileMode.CreateNew, FileSystemRights.Write, FileShare.None,
+        // This stream writes synchronously and verifies the ACL on the same exclusive handle before storing evidence.
+        const FileSystemRights access = FileSystemRights.Read | FileSystemRights.Write | FileSystemRights.Synchronize;
+        using var file = new FileInfo(path).Create(FileMode.CreateNew, access, FileShare.None,
             4096, FileOptions.None, security);
+        if (!IsAdministratorOnly(file.GetAccessControl()) || !ReadOnlyFileAccess.HandlePathMatches(file.SafeFileHandle, path) ||
+            ReadOnlyFileAccess.LinkCount(file.SafeFileHandle) != 1)
+            throw new InvalidDataException("无法核对新建验收证据的权限、路径或链接数。");
         JsonSerializer.Serialize(file, evidence, EvidenceJson);
         file.Flush(flushToDisk: true);
     }

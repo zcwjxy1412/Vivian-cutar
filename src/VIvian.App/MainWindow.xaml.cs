@@ -138,8 +138,53 @@ public partial class MainWindow : Window
             vm.GenshinConfiguration.Source.SetVisible(vm.CanOperateWorkspace && e.NewValue is true);
     }
 
-    private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem =
-        Navigation.Items.OfType<System.Windows.Controls.TabItem>().First(item => Equals(item.Header, "引擎与环境"));
+    private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem = EngineEnvironmentTab;
+
+    private void OpenStatusAction(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsIdle: true } vm) return;
+        FrameworkElement target;
+        switch (vm.StatusAction)
+        {
+            case HomeStatusAction.RecoverDesktop:
+                Navigation.SelectedItem = HomeTab;
+                target = RecoverDesktopButton;
+                break;
+            case HomeStatusAction.RestoreConfiguration:
+                Navigation.SelectedItem = HomeTab;
+                target = RestoreTemporaryConfigurationButton;
+                break;
+            case HomeStatusAction.ReviewRuns:
+                Navigation.SelectedItem = RunLogTab;
+                target = vm.Queue.HasUnresolved && vm.Queue.CanAcknowledge ? ConfirmRunCleanupButton : RunHistoryList;
+                break;
+            case HomeStatusAction.SelectAccounts:
+            case HomeStatusAction.SelectGenshinAccounts:
+            case HomeStatusAction.SelectStarRailAccounts:
+                Navigation.SelectedItem = AccountManagementTab;
+                if (vm.StatusAction == HomeStatusAction.SelectGenshinAccounts) AccountTabs.SelectedIndex = 1;
+                if (vm.StatusAction == HomeStatusAction.SelectStarRailAccounts) AccountTabs.SelectedIndex = 0;
+                target = AccountTabs.SelectedIndex switch
+                {
+                    0 => vm.Accounts.Rows.Count > 0 ? StarRailAccountList : ScanStarRailAccountsButton,
+                    1 => vm.GenshinConfiguration.Accounts.Count > 0 ? GenshinAccountList : ImportGenshinButton,
+                    _ => AccountTabs,
+                };
+                break;
+            case HomeStatusAction.ConfigureBetterGi:
+                Navigation.SelectedItem = EngineEnvironmentTab;
+                UpdateLayout();
+                var engine = vm.Engines.Single(card => card.Id == VIvian.Core.GameId.Genshin);
+                var card = EngineSettingsList.ItemContainerGenerator.ContainerFromItem(engine) as System.Windows.Controls.ContentPresenter;
+                target = card?.ContentTemplate?.FindName("BrowseEngineFolderButton", card) as FrameworkElement ?? EngineSettingsList;
+                break;
+            default:
+                return;
+        }
+        UpdateLayout();
+        target.BringIntoView();
+        target.Focus();
+    }
 
     private async void GenshinLoginVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {

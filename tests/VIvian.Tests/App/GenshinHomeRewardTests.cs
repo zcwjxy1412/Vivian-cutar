@@ -54,6 +54,7 @@ public sealed class GenshinHomeRewardTests
             };
             await vm.PlayGameCardAsync(GameId.Genshin);
             Assert.Contains("账号管理", vm.Status);
+            Assert.Equal(HomeStatusAction.SelectGenshinAccounts, vm.StatusAction);
             Assert.Equal(0, stopScopes);
 
             GameAccount Row(Guid id) => vm.GenshinConfiguration.Accounts.Single(a => a.Id == id);
@@ -71,6 +72,7 @@ public sealed class GenshinHomeRewardTests
             }
             finally { release.SetResult(); }
             await running;
+            Assert.False(vm.HasStatusAction);
 
             if (RealExecutionPolicy.IsM5DailyTest)
             {

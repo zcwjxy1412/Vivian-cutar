@@ -3,6 +3,12 @@ using VIvian.Infrastructure.Engines;
 
 namespace VIvian.Infrastructure.Processes;
 
+public sealed class DesktopRecoveryRequiredException : InvalidOperationException
+{
+    internal DesktopRecoveryRequiredException()
+        : base("上一次桌面操作的清理或配置恢复待确认。请在原档案核对并完成恢复后再运行。") { }
+}
+
 /// <summary>Serializes real desktop work across VIvian profiles and leaves a durable recovery marker.</summary>
 public sealed class DesktopOperationLease : IDisposable
 {
@@ -88,7 +94,7 @@ public sealed class DesktopOperationLease : IDisposable
 
             DesktopOperationLease? ForeignOwner()
             {
-                if (!skipForeignOwner) throw PendingCleanup();
+                if (!skipForeignOwner) throw new DesktopRecoveryRequiredException();
                 file.Dispose();
                 return null;
             }
@@ -127,7 +133,4 @@ public sealed class DesktopOperationLease : IDisposable
             || (OperatingSystem.IsWindows() && ReadOnlyFileAccess.LinkCount(file.SafeFileHandle) != 1))
             throw new InvalidOperationException("桌面互斥文件的实际路径或链接数不安全，拒绝写入。");
     }
-
-    private static InvalidOperationException PendingCleanup() =>
-        new("上一次桌面操作的清理或配置恢复待确认。请在原档案核对并完成恢复后再运行。");
 }

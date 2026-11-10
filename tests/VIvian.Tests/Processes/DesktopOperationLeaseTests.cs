@@ -31,8 +31,8 @@ public sealed class DesktopOperationLeaseTests : IDisposable
     public void UnconfirmedCleanupBlocksAllNewRunsAndOnlyOwningProfileCanRecover()
     {
         using (var first = Acquire("zzz")) first.MarkDirty();
-        Assert.Throws<InvalidOperationException>(() => Acquire("zzz"));
-        Assert.Throws<InvalidOperationException>(() => Acquire("genshin", true));
+        Assert.Throws<DesktopRecoveryRequiredException>(() => Acquire("zzz"));
+        Assert.Throws<DesktopRecoveryRequiredException>(() => Acquire("genshin", true));
         using (var recovery = Acquire("zzz", true))
         {
             Assert.True(recovery.Recovering);

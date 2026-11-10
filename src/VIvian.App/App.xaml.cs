@@ -587,12 +587,48 @@ public partial class App : Application
                 throw new InvalidOperationException("Home start did not require selected accounts");
         }
 
+        if (window is not MainWindow main) throw new InvalidOperationException("Missing main window");
+        if (RealExecutionPolicy.IsM5DailyTest)
+        {
+            if (!main.StatusActionButton.IsVisible || !Equals(main.StatusActionButton.Content, "前往账号管理"))
+                throw new InvalidOperationException("Missing account-selection shortcut next to the batch error");
+            main.StatusActionButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            if (!ReferenceEquals(tabs.SelectedItem, main.AccountManagementTab))
+                throw new InvalidOperationException("The account shortcut did not navigate to account management");
+        }
+        tabs.SelectedIndex = 0;
+        vm.ShowStatus("上一次桌面操作待恢复。", HomeStatusAction.RecoverDesktop);
+        window.UpdateLayout();
+        if (!main.StatusActionButton.IsVisible || !Equals(main.StatusActionButton.Content, "前往核对桌面交接"))
+            throw new InvalidOperationException("Missing desktop recovery shortcut next to the error");
+        var broughtIntoView = false;
+        void OnRecoveryTarget(object sender, RequestBringIntoViewEventArgs args) => broughtIntoView = true;
+        main.RecoverDesktopButton.RequestBringIntoView += OnRecoveryTarget;
+        main.StatusActionButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        main.RecoverDesktopButton.RequestBringIntoView -= OnRecoveryTarget;
+        if (!broughtIntoView)
+            throw new InvalidOperationException("The shortcut did not reveal the desktop recovery button");
+        vm.ShowStatus("请先核对 BetterGI 安装目录。", HomeStatusAction.ConfigureBetterGi);
+        object? browseTarget = null;
+        void OnBrowseTarget(object sender, RequestBringIntoViewEventArgs args) => browseTarget = args.TargetObject;
+        main.EngineSettingsList.RequestBringIntoView += OnBrowseTarget;
+        main.StatusActionButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        main.EngineSettingsList.RequestBringIntoView -= OnBrowseTarget;
+        if (!ReferenceEquals(tabs.SelectedItem, main.EngineEnvironmentTab) ||
+            browseTarget is not System.Windows.Controls.Button
+            { Name: "BrowseEngineFolderButton", DataContext: EngineCard { Id: GameId.Genshin } })
+            throw new InvalidOperationException("The engine shortcut did not reveal BetterGI's browse button");
+        tabs.SelectedIndex = 0;
+        vm.ShowStatus("已就绪。");
+        window.UpdateLayout();
+        if (main.StatusActionButton.IsVisible)
+            throw new InvalidOperationException("The recovery shortcut was not cleared with the error");
+
         var row = vm.Accounts.ConfigurationRow ?? throw new InvalidOperationException("Missing Star Rail configuration account");
         row.DailyEnabled = false;
         await vm.Accounts.SaveDailyPlanAsync();
         if ((await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
             throw new InvalidOperationException("Game task setting was not saved");
-        if (window is not MainWindow main) throw new InvalidOperationException("Missing main window");
         var zenless = await database.AddAccountAsync(GameId.ZenlessZoneZero, "绝区零冒烟档案", "", null);
         await vm.Accounts.ReloadZenlessAsync();
         tabs.SelectedIndex = Array.IndexOf(headers, "账号管理");

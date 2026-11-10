@@ -262,7 +262,7 @@ public sealed class BetterGiSourceSettingsTests
         using (var lease = DesktopOperationLease.AcquireAt(LockPath(fixture), fixture.Root, requireExisting: true))
             lease.MarkDirty();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => settings.UpdateProfileAsync(before.ProfileRevision, changes));
+        await Assert.ThrowsAsync<DesktopRecoveryRequiredException>(() => settings.UpdateProfileAsync(before.ProfileRevision, changes));
 
         Assert.Equal(before.ProfileRevision, (await settings.ReadAsync()).ProfileRevision);
     }

@@ -67,7 +67,27 @@ public sealed class MainViewModel : ObservableObject
         : RealExecutionPolicy.BuildPermitsRealExecution
         ? "单次星铁 screen_test 测试包：请先核对官方包与安装路径，再逐项确认本次执行。"
         : "就绪。此开发版只做只读检查和模拟运行，不启动任何真实引擎或游戏。";
-    public string Status { get => _status; private set => Set(ref _status, value); }
+    public string Status { get => _status; private set => ShowStatus(value); }
+    internal HomeStatusAction StatusAction { get; private set; }
+    public bool HasStatusAction => StatusAction != HomeStatusAction.None;
+    public string StatusActionText => StatusAction switch
+    {
+        HomeStatusAction.RecoverDesktop => "前往核对桌面交接",
+        HomeStatusAction.RestoreConfiguration => "前往恢复临时配置",
+        HomeStatusAction.ReviewRuns => "前往运行日志",
+        HomeStatusAction.SelectAccounts or HomeStatusAction.SelectGenshinAccounts or HomeStatusAction.SelectStarRailAccounts => "前往账号管理",
+        HomeStatusAction.ConfigureBetterGi => "前往设置 BetterGI 路径",
+        _ => "",
+    };
+
+    internal void ShowStatus(string message, HomeStatusAction action = HomeStatusAction.None)
+    {
+        Set(ref _status, message, nameof(Status));
+        if (StatusAction == action) return;
+        StatusAction = action;
+        Raise(nameof(StatusActionText));
+        Raise(nameof(HasStatusAction));
+    }
     private string _stopKeyText = "运行中可按 F10 立即停止（游戏全屏时也有效）。";
     public string StopKeyText { get => _stopKeyText; set => Set(ref _stopKeyText, value); }
     private bool _busy;
@@ -126,7 +146,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncCommand ExportDiagnosticsCommand { get; }
     public AsyncCommand SaveFeedbackCommand { get; }
     public AsyncCommand StartMarch7thCommand { get; }
-    
+
     private bool _batchRunning;
     public bool BatchRunning
     {
@@ -154,7 +174,30 @@ public sealed class MainViewModel : ObservableObject
         if (Queue.IsRunning) Queue.EmergencyStop();
     }
     private string _batchStatus = "尚未运行多账号批次。";
-    public string BatchStatus { get => _batchStatus; private set => Set(ref _batchStatus, value); }
+    private HomeStatusAction _batchStatusAction;
+    public string BatchStatus { get => _batchStatus; private set => SetBatchStatus(value); }
+
+    private void SetBatchStatus(string message, HomeStatusAction action = HomeStatusAction.None)
+    {
+        _batchStatusAction = action;
+        Set(ref _batchStatus, message, nameof(BatchStatus));
+    }
+
+    private HomeStatusAction PendingRunAction => Queue.Unresolved.Any(run => run.Game == GameId.Genshin && !run.IsSimulation)
+        ? HomeStatusAction.RecoverDesktop : HomeStatusAction.ReviewRuns;
+
+    private bool ShowPendingBatchRecovery()
+    {
+        if (Queue.HasUnresolved)
+        {
+            SetBatchStatus("上次运行的清理待确认。", PendingRunAction);
+            return true;
+        }
+        if (!_control.HasPendingConfigurationRestore) return false;
+        if (PendingRestoreText.Length == 0) PendingRestoreText = "上次运行的临时配置待恢复。";
+        SetBatchStatus(PendingRestoreText, HomeStatusAction.RestoreConfiguration);
+        return true;
+    }
     public IReadOnlyList<EngineTaskDefinition> March7thTasks { get; } = RealExecutionPolicy.BuildPermitsRealExecution
         ? EngineCatalog.March7th.Tasks.Where(t => RealExecutionPolicy.AllowsTask(t.Id)).ToList()
         : EngineCatalog.March7th.Tasks;
@@ -298,7 +341,7 @@ public sealed class MainViewModel : ObservableObject
         }
         if (Queue.HasUnresolved)
         {
-            Status = "请先停止任务，并在运行记录确认所有待清理进程。";
+            ShowStatus("请在运行日志中核对待清理的进程。", HomeStatusAction.ReviewRuns);
             return;
         }
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory, recovery: true);
@@ -619,12 +662,14 @@ public sealed class MainViewModel : ObservableObject
             return OneClickAsync(game);
         return RunAsync(async () =>
         {
-            if (!CanOperateWorkspace || CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
-            { Status = "请先结束任务并核对桌面交接。"; return; }
+            if (!CanOperateWorkspace || CanStopAll)
+            { Status = "请先结束当前操作。"; return; }
+            if (ShowPendingBatchRecovery())
+            { ShowStatus(BatchStatus, _batchStatusAction); return; }
             if (!Engines.Single(card => card.Id == GameId.Genshin).CanPlayFromHome)
-            { Status = "请先保存并核对固定版本的 BetterGI 安装目录。"; return; }
+            { ShowStatus("请先保存并核对固定版本的 BetterGI 安装目录。", HomeStatusAction.ConfigureBetterGi); return; }
             if (GenshinConfiguration.SelectedForDaily.FirstOrDefault() is not { } selected)
-            { Status = "请在「账号管理 → 原神」勾选并排序已识别的账号。"; return; }
+            { ShowStatus("请在账号管理勾选并排序已绑定登录标识的原神账号。", HomeStatusAction.SelectGenshinAccounts); return; }
             if (RunWithHomeRewardStopKey is not { } withStopKey)
             { Status = "主窗口的停止功能尚未就绪，原神日常未启动。"; return; }
 
@@ -633,7 +678,7 @@ public sealed class MainViewModel : ObservableObject
             await withStopKey(async () =>
             {
                 await RunAccountBatchAsync(GameId.Genshin, acceptance: request, homeReward: home);
-                Status = BatchStatus;
+                ShowStatus(BatchStatus, _batchStatusAction);
                 return null;
             });
         });
@@ -663,7 +708,7 @@ public sealed class MainViewModel : ObservableObject
             }
             else
                 exitCode = await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
-            Status = BatchStatus;
+            ShowStatus(BatchStatus, _batchStatusAction);
         });
         return exitCode;
     }
@@ -833,8 +878,9 @@ public sealed class MainViewModel : ObservableObject
     {
         if (!CanOperateWorkspace && acceptance is null)
         { BatchStatus = "隔离验收只执行本次启动指定的原神任务。"; return null; }
-        if (CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
-        { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return null; }
+        if (CanStopAll)
+        { BatchStatus = "请先结束当前任务。"; return null; }
+        if (ShowPendingBatchRecovery()) return null;
         if (approved is not null && (!RealExecutionPolicy.IsM5DailyTest || !Assistant.EnableScheduleProposals
             || approved.Target.Game != GameId.StarRail || approved.Expires <= DateTimeOffset.UtcNow
             || Accounts.SelectedStarRail?.Id != approved.Target.AccountId))
@@ -843,7 +889,15 @@ public sealed class MainViewModel : ObservableObject
             .Where(row => approved is null || row.Id == approved.Target.AccountId).Select(row => row.Account).ToArray();
         var genshin = scope == GameId.StarRail || acceptance is not null ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
         if (starRail.Length == 0 && genshin.Length == 0 && acceptance is null)
-        { BatchStatus = "请先在账号管理勾选要执行的账号。"; return null; }
+        {
+            SetBatchStatus("请先在账号管理勾选要执行的账号。", scope switch
+            {
+                GameId.Genshin => HomeStatusAction.SelectGenshinAccounts,
+                GameId.StarRail => HomeStatusAction.SelectStarRailAccounts,
+                _ => HomeStatusAction.SelectAccounts,
+            });
+            return null;
+        }
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return null; }
 
@@ -889,7 +943,10 @@ public sealed class MainViewModel : ObservableObject
                 var ready = acceptance is null ? card.CanRunForReal
                     : card.InstallPath == root && card.Report?.Compatibility == CompatibilityClass.PendingValidation;
                 if (string.IsNullOrWhiteSpace(root) || !ready)
-                    throw new InvalidOperationException("请先在「引擎与环境」保存并核对 BetterGI 安装目录。");
+                {
+                    SetBatchStatus("请先保存并核对 BetterGI 安装目录。", HomeStatusAction.ConfigureBetterGi);
+                    return null;
+                }
                 if (acceptance is not null)
                 {
                     BatchRunning = true;
@@ -935,7 +992,8 @@ public sealed class MainViewModel : ObservableObject
                             acceptance.Attempt, outcome.BatchId, acceptancePassed, outcome.GameCleanupConfirmed, outcome.HostCleanupConfirmed);
                     }
                     results.Add($"{RunPresentation.GameName(game)} · {label} · {outcome.Detail}");
-                    BatchStatus = string.Join("  ", results);
+                    SetBatchStatus(string.Join("  ", results),
+                        !finished && Queue.HasUnresolved ? PendingRunAction : HomeStatusAction.None);
                 }, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
@@ -951,7 +1009,8 @@ public sealed class MainViewModel : ObservableObject
                 ex.GetType().Name, ex.HResult, string.Join(" > ", failureFrames), ex.Data["Operation"]);
             var detail = ex is InvalidOperationException or InvalidDataException or FileNotFoundException or TimeoutException
                 ? ex.Message : UserFacingError.Describe(ex);
-            BatchStatus = string.Join("  ", results.Append("批次失败：" + detail));
+            SetBatchStatus(string.Join("  ", results.Append("批次失败：" + detail)),
+                ex is DesktopRecoveryRequiredException ? HomeStatusAction.RecoverDesktop : HomeStatusAction.None);
         }
         finally
         {
@@ -986,7 +1045,8 @@ public sealed class MainViewModel : ObservableObject
                 return false;
             }
         }));
-        if (exitCode is null) BatchStatus += " 请先核对本轮清理与桌面交接。";
+        if (exitCode is null)
+            SetBatchStatus(BatchStatus + " 请先核对本轮清理与桌面交接。", HomeStatusAction.RecoverDesktop);
         return exitCode;
     }
 
@@ -1079,7 +1139,8 @@ public sealed class MainViewModel : ObservableObject
     }
     public void ReportReconciled(int count)
     {
-        if (count > 0) Status = $"上次 VIvian 意外退出，{count} 条运行已标记为结果未知，请在“调度与监控”中查看并确认。";
+        if (count > 0)
+            ShowStatus($"上次 VIvian 意外退出，{count} 条运行已标记为结果未知。", HomeStatusAction.ReviewRuns);
     }
 
     internal void ReportGenshinRewardActivation(string message) => Status = BatchStatus = message;
@@ -1330,9 +1391,15 @@ public sealed class MainViewModel : ObservableObject
 
     private void HandleError(Exception ex)
     {
-        Status = UserFacingError.Describe(ex);
+        ShowStatus(ex is DesktopRecoveryRequiredException ? ex.Message : UserFacingError.Describe(ex),
+            ex is DesktopRecoveryRequiredException ? HomeStatusAction.RecoverDesktop : HomeStatusAction.None);
         Log.Warning("Operation failed: {ErrorType}", ex.GetType().Name);
     }
+}
+
+internal enum HomeStatusAction
+{
+    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, ConfigureBetterGi,
 }
 
 /// <summary>Turns exceptions into actionable Chinese messages. Never shows stack traces or file contents.</summary>

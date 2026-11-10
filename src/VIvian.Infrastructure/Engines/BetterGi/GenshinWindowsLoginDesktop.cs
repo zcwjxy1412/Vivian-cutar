@@ -376,9 +376,14 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         if (confirmLogout is not null && Find("quit.png", dialog) is { } quit)
             return View(GenshinView.ConfirmLogout, quit);
 
-        var gate = Label(normalized, Region(805, 945, 310, 135), t => t is "点击进入" or "点击进入游戏");
-        if (gate is not null && Find("logout.png", Region(1740, 895, 180, 185)) is { } logout)
-            return View(GenshinView.Gate, gate, logout);
+        var gate = Label(normalized, Region(805, 945, 310, 135), IsGateText);
+        var logoutRegion = Region(1740, 895, 180, 185);
+        if (gate is not null)
+        {
+            if (Find("logout.png", logoutRegion) is { } logout)
+                return View(GenshinView.Gate, gate, logout);
+            return View(GenshinView.Unknown) with { VisualDiagnostic = "已识别大门文字，退出账号图标尚未核对。" };
+        }
         if (normalized.Any(line => line.Text is "确定" or "确认" or "取消" ||
             line.Text.Contains("退出", StringComparison.Ordinal) || line.Text.Contains("网络", StringComparison.Ordinal)))
             return View(GenshinView.Unknown);
@@ -387,12 +392,20 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             Label(normalized, Region(0, 190, 650, 790), t => t is "背包" or "图鉴" or "好友") is not null)
             return View(GenshinView.Menu, Region(38, 1012, 24, 24));
         if (Find("paimon_menu.png", Region(0, 0, 150, 150)) is not { } paimon)
-            return View(GenshinView.Unknown);
+        {
+            var titleSeen = normalized.Any(line => IsGateText(line.Text));
+            var detail = titleSeen ? "检测到大门文字，但位置或唯一性无法核对。"
+                : Find("logout.png", logoutRegion) is not null ? "已核对退出账号图标，大门文字未识别。"
+                : null;
+            return View(GenshinView.Unknown) with { VisualDiagnostic = detail };
+        }
 
         var hud = Region(1500, 1000, 420, 80);
         var uid = GameUidParser.Find(normalized.Where(line => hud.Contains(line.CenterX, line.CenterY)));
         return View(GenshinView.World, paimon, uid: uid);
     }
+
+    private static bool IsGateText(string text) => text is "点击进入" or "点击进入游戏";
 
     private static ScreenRegion? Label(IEnumerable<RecognizedText> lines, ScreenRegion region, Func<string, bool> label)
     {

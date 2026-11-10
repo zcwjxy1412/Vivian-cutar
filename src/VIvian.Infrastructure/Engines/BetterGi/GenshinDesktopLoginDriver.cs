@@ -18,7 +18,7 @@ internal enum GenshinInput
 
 internal sealed record GenshinDesktopFrame(StarRailWindowInfo? Window, GenshinView View,
     IReadOnlyList<LoginAccountObservation> Rows, ScreenRegion? Main, ScreenRegion? Secondary = null, string? Uid = null,
-    string? UserActionMarker = null, LoginScanFailure? CaptureFailure = null);
+    string? UserActionMarker = null, LoginScanFailure? CaptureFailure = null, string? VisualDiagnostic = null);
 
 internal sealed record GenshinVerifiedWorld(Guid AccountId, IntPtr WindowHandle, int ProcessId,
     DateTimeOffset ProcessStartedAt, string? Uid);
@@ -328,7 +328,7 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
             {
                 LoginScanFailure.WindowOccluded => "最近一次采集时画面被遮挡。",
                 not null => "最近一次采集未获得可核对的游戏画面。",
-                _ when last?.View == GenshinView.Unknown => "已取得游戏画面，画面尚未识别。",
+                _ when last?.View == GenshinView.Unknown => "已取得游戏画面，画面尚未识别。" + last.VisualDiagnostic,
                 _ => "",
             };
             throw new LoginInterruptedException("等待原神下一步画面超时，已停止。" + reason);

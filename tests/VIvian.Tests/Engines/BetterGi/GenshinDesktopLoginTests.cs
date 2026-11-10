@@ -34,20 +34,21 @@ public sealed class GenshinDesktopLoginTests
     }
 
     [Theory]
-    [InlineData(LoginScanFailure.WindowOccluded, "画面被遮挡")]
-    [InlineData(LoginScanFailure.CaptureFailed, "未获得可核对的游戏画面")]
-    [InlineData(null, "画面尚未识别")]
+    [InlineData(LoginScanFailure.WindowOccluded, null, "画面被遮挡")]
+    [InlineData(LoginScanFailure.CaptureFailed, null, "未获得可核对的游戏画面")]
+    [InlineData(null, null, "画面尚未识别")]
+    [InlineData(null, "已识别大门文字，退出账号图标尚未核对。", "退出账号图标尚未核对")]
     public async Task LoginTimeoutDistinguishesRejectedCaptureFromAnUnrecognizedFrame(LoginScanFailure? captureFailure,
-        string diagnostic)
+        string? visualDiagnostic, string expectedDetail)
     {
-        var frame = Frame(GenshinView.Unknown) with { CaptureFailure = captureFailure };
+        var frame = Frame(GenshinView.Unknown) with { CaptureFailure = captureFailure, VisualDiagnostic = visualDiagnostic };
         var desktop = new Desktop(frame);
         var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromSeconds(30));
 
         var result = await driver.EnsureLoginAsync(new SwitchPolicy(LoginScreenTimeout: TimeSpan.FromMilliseconds(500)), default);
 
         Assert.False(result.Ok);
-        Assert.Contains(diagnostic, result.Detail);
+        Assert.Contains(expectedDetail, result.Detail);
         Assert.Empty(desktop.Actions);
     }
 

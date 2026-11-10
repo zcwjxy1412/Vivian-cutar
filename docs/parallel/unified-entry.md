@@ -52,3 +52,11 @@ Task<BetterGiSourceSettings> ConnectAccountProfileAsync(
 - 星铁沿用既有准入和临时配置流程。任一阶段的结果未知、停止或清理未确认时，中止后续阶段。原神账号勾选和顺序沿用 `GameAccount.AutoRun` 和 `Order`，直接保存到合流库。
 - 原神执行接口只接受源档案唯一启用「领取每日奖励」。固定包从程序目录的父级 `M4D-downloads/BetterGI_v0.66.0.7z` 读取。正式按钮需等启动、完成信号及清理验收。当前原神驱动会保留客户端，需补进程退出证据，并复验取消或超时后的恢复。
 - 「核对桌面交接」先核对物理锁是否属于本档案的原神日常。命中时按本次原神记录恢复，失败时保留锁；无本档案原神待恢复标记时沿用星铁流程。恢复成功显示对应 RunId。
+
+## 单账号原神领奖验收候选
+
+使用 `scripts/Build-M5_2Test.ps1 -UnifiedInstall -GenshinRewardAcceptance -SkipSmoke -Target <新目录>` 构建独立候选。候选须带合流及领奖验收两个构建标记。BetterGI 固定发行包仍从候选目录的父级 `M4D-downloads/BetterGI_v0.66.0.7z` 读取，由后端核对摘要。
+
+首轮参数为 `--genshin-reward-acceptance <验收GUID> <原神A账号GUID> <账号revision>`。两个 GUID 使用连字符格式，revision 为数据库中的非负整数。正式合流程序和原神客户端须先退出，从交互式 Windows 管理员会话启动候选。候选从正式合流库生成一致性快照并核对物理路径、版本和完整性，记录写入 `%LOCALAPPDATA%\VIvian-M6-GenshinAcceptance\<32位验收GUID>`。同一编号的目录已存在时拒绝再次运行。可用 `--genshin-reward-review <验收GUID>` 打开该档案核对恢复。
+
+窗口就绪且 F10 注册成功后，调用与首页「一键日常」共用的入口，只执行该原神账号，固定 `rewardOnly: true`。原神账号的正式勾选、顺序和任务计划都不参与写入。执行时限 10 分钟，F10 和停止按钮发出同一取消信号。关窗最多等待 90 秒，清理仍未返回时保留窗口。只有后端确认领奖任务、BetterGI 清理和协议恢复，且本轮启动的原神客户端退出后，界面才显示「领奖验收通过」。以隔离档案内 `/acceptance` 规则的运行记录和同一验收编号的日志为证。若需证明本轮首次到账，应先核对 A 的奖励尚未领取。

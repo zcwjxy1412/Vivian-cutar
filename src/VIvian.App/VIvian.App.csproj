@@ -10,6 +10,9 @@
     <ApplicationManifest Condition="'$(M5DailyTestBuild)' == 'true'">app.admin.manifest</ApplicationManifest>
 <AssemblyName>VIvian</AssemblyName><Version>0.4.0</Version><InformationalVersion>0.4.0-dev</InformationalVersion>
 </PropertyGroup>
+<PropertyGroup Condition="'$(GenshinRewardAcceptanceBuild)' == 'true'">
+<DefineConstants>$(DefineConstants);VIVIAN_GENSHIN_REWARD_ACCEPTANCE</DefineConstants>
+</PropertyGroup>
 <ItemGroup>
 <InternalsVisibleTo Include="VIvian.Tests" />
 <ProjectReference Include="../VIvian.Infrastructure/VIvian.Infrastructure.csproj" />

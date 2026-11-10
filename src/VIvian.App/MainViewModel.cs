@@ -248,12 +248,16 @@ public sealed class MainViewModel : ObservableObject
             }
             if (recovered is { } runId)
             {
-                await Queue.RefreshAsync();
                 Status = $"已核对并恢复原神日常的桌面交接（RunId {runId:D}）。";
-                if (Queue.Unresolved.Any(row => row.Game == GameId.Genshin && row.RunId == runId))
-                    Status += " 请在运行日志确认该条记录的清理。";
+                if (!await Queue.AcknowledgeGenshinRecoveryAsync(runId))
+                    Status += " 运行日志的清理确认尚未写入，请核对该条记录。";
                 return;
             }
+        }
+        if (GenshinRewardAcceptance.IsCandidateBuild)
+        {
+            Status = "本验收档案没有可核对的原神恢复记录。";
+            return;
         }
         if (Queue.HasUnresolved)
         {
@@ -418,7 +422,7 @@ public sealed class MainViewModel : ObservableObject
         Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Raise(nameof(CanStopAll)); };
         RestoreConfigurationCommand = new(() => RunAsync(RestoreConfigurationAsync), HandleError);
         RecoverDesktopCommand = new(() => RunAsync(RecoverDesktopAsync), HandleError);
-        OneClickCommand = new(scope => RunAsync(() => OneClickAsync(scope is GameId game ? game : null)), HandleError);
+        OneClickCommand = new(scope => OneClickAsync(scope is GameId game ? game : null), HandleError);
         foreach (var card in Engines)
         {
             card.GenshinDailyWired = card.Id == GameId.Genshin && _genshinDailyBatch is not null;
@@ -557,15 +561,19 @@ public sealed class MainViewModel : ObservableObject
     }
     public AsyncCommand OneClickCommand { get; }
 
-    internal async Task OneClickAsync(GameId? scope = null)
+    internal Task OneClickAsync(GameId? scope = null, GenshinRewardAcceptance? acceptance = null,
+        GenshinDailyVerification? verify = null) => RunAsync(async () =>
     {
         if (!RealExecutionPolicy.IsM5DailyTest)
         { Status = "此版本未启用真实日常批次。"; return; }
+        if (GenshinRewardAcceptance.IsCandidateBuild != (acceptance is not null) ||
+            (acceptance is not null && (scope != GameId.Genshin || acceptance.ReviewOnly || verify is null)))
+        { Status = "原神领奖验收仅接受本次启动指定的单账号请求。"; return; }
         if (scope is not (null or GameId.StarRail or GameId.Genshin))
         { Status = "所选游戏的真实日常入口尚未开放。"; return; }
-        await RunAccountBatchAsync(scope);
+        await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
         Status = BatchStatus;
-    }
+    });
     /// <summary>The fixed Chinese labels for a real run's outcome. Never "成功" without completion evidence.</summary>
     public static string RealResultLabel(RunRecord r) =>
         r.Cleanup == CleanupState.Unconfirmed ? "清理未确认（结果未知，队列已阻断）"
@@ -726,7 +734,8 @@ public sealed class MainViewModel : ObservableObject
         return outcome;
     }
 
-    private async Task RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null)
+    private async Task RunAccountBatchAsync(GameId? scope, AssistantRunPlan? approved = null,
+        GenshinRewardAcceptance? acceptance = null, GenshinDailyVerification? verify = null)
     {
         if (CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
         { BatchStatus = "有任务正在运行，或上次任务的清理与配置恢复待确认。请查看运行日志。"; return; }
@@ -736,13 +745,15 @@ public sealed class MainViewModel : ObservableObject
         { BatchStatus = "运行计划已失效，或当前选中账号和计划不一致。"; return; }
         var starRail = scope == GameId.Genshin ? [] : Accounts.SelectedRows
             .Where(row => approved is null || row.Id == approved.Target.AccountId).Select(row => row.Account).ToArray();
-        var genshin = scope == GameId.StarRail ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
-        if (starRail.Length == 0 && genshin.Length == 0)
+        var genshin = scope == GameId.StarRail || acceptance is not null ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
+        if (starRail.Length == 0 && genshin.Length == 0 && acceptance is null)
         { BatchStatus = "请先在账号管理勾选要执行的账号。"; return; }
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return; }
 
-        using var cancellation = new CancellationTokenSource();
+        using var deadline = acceptance is null ? null : new CancellationTokenSource(GenshinRewardAcceptance.RunLimit);
+        using var cancellation = deadline is null ? new CancellationTokenSource()
+            : CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
         var token = cancellation.Token;
         _batchCts = cancellation;
         GameId? activeGame = null;
@@ -772,24 +783,37 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             Func<CancellationToken, Task<MultiAccountOutcome>>? runGenshin = null;
-            if (genshin.Length > 0)
+            if (genshin.Length > 0 || acceptance is not null)
             {
-                var batch = _genshinDailyBatch ?? throw new InvalidOperationException("当前构建尚未接入原神日常执行与恢复。");
+                var batch = _genshinDailyBatch;
+                if (acceptance is null && batch is null)
+                    throw new InvalidOperationException("当前构建尚未接入原神日常执行与恢复。");
                 var card = Engines.Single(e => e.Id == GameId.Genshin);
                 var root = card.SavedInstallPath;
-                if (string.IsNullOrWhiteSpace(root) || !card.CanRunForReal)
+                var ready = acceptance is null ? card.CanRunForReal
+                    : card.InstallPath == root && card.Report?.Compatibility == CompatibilityClass.PendingValidation;
+                if (string.IsNullOrWhiteSpace(root) || !ready)
                     throw new InvalidOperationException("请先在「引擎与环境」保存并核对 BetterGI 安装目录。");
+                if (acceptance is not null)
+                {
+                    BatchRunning = true;
+                    BatchStatus = "原神 · 正在核对本次领奖验收";
+                    Log.Information("Genshin reward acceptance {Attempt} starting", acceptance.Attempt);
+                }
                 var archive = await ReadOnlyFileAccess.BoundedAsync(() => DailyBatchSequence.FindGenshinArchive(AppContext.BaseDirectory),
                     ReadOnlyFileAccess.QueryTimeout, token);
                 runGenshin = async ct =>
                 {
-                    var progress = Track(GameId.Genshin, genshin.Length);
+                    var total = acceptance is null ? genshin.Length : 1;
+                    var progress = Track(GameId.Genshin, total);
                     BatchRunning = true;
-                    BatchStatus = $"原神 · 已完成 0/{genshin.Length} · 正在核对账号和固定发行包";
+                    BatchStatus = $"原神 · 已完成 0/{total} · 正在核对账号和固定发行包";
                     MultiAccountOutcome outcome;
                     try
                     {
-                        outcome = await Task.Run(() => batch(Accounts.Database, genshin, root, archive, _paths.DataDirectory, progress, ct), ct);
+                        outcome = await Task.Run(() => acceptance is null
+                            ? batch!(Accounts.Database, genshin, root, archive, _paths.DataDirectory, progress, ct)
+                            : acceptance.RunAsync(Accounts.Database, root, archive, _paths.DataDirectory, verify!, progress, ct), ct);
                     }
                     finally { await Queue.RefreshAsync(); }
                     return outcome;
@@ -802,12 +826,20 @@ public sealed class MainViewModel : ObservableObject
                 {
                     activeGame = null;
                     var finished = outcome.Completed && outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed;
-                    results.Add($"{RunPresentation.GameName(game)} · {(finished ? "批次结束" : "批次已停止")} · {outcome.Detail}");
+                    var label = finished ? "批次结束" : "批次已停止";
+                    if (acceptance is not null)
+                    {
+                        var passed = finished && outcome.Succeeded == 1 && outcome.Failed == 0 && !token.IsCancellationRequested;
+                        label = passed ? "领奖验收通过" : "领奖验收未通过";
+                        Log.Information("Genshin reward acceptance {Attempt} batch {Batch} passed {Passed}; game cleanup {GameCleanup}; host cleanup {HostCleanup}",
+                            acceptance.Attempt, outcome.BatchId, passed, outcome.GameCleanupConfirmed, outcome.HostCleanupConfirmed);
+                    }
+                    results.Add($"{RunPresentation.GameName(game)} · {label} · {outcome.Detail}");
                     BatchStatus = string.Join("  ", results);
                 }, token);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
-        { BatchStatus = string.Join("  ", results.Append("批次已由用户停止。")); }
+        { BatchStatus = string.Join("  ", results.Append(deadline?.IsCancellationRequested == true ? "领奖验收已达时限，执行已停止。" : "批次已由用户停止。")); }
         catch (Exception ex)
         {
             Log.Warning("Daily batch failed: {ErrorType}", ex.GetType().Name);

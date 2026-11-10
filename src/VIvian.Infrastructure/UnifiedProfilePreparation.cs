@@ -39,7 +39,47 @@ public static class UnifiedProfilePreparation
             .ConfigureAwait(false);
     }
 
-    public static async Task PrepareAsync(string officialDatabase, string genshinDatabase, string destination, CancellationToken ct)
+    public static async Task CreateGenshinRewardAcceptanceSnapshotAsync(string destination, CancellationToken ct)
+    {
+        var installed = InstalledDirectory;
+        var parent = Path.Combine(Path.GetDirectoryName(installed)!, "VIvian-M6-GenshinAcceptance");
+        var output = Path.GetFullPath(destination);
+        if (!string.Equals(Path.GetDirectoryName(output), parent, StringComparison.OrdinalIgnoreCase) ||
+            !Guid.TryParseExact(Path.GetFileName(output), "N", out var attempt) || attempt == Guid.Empty)
+            throw new ArgumentException("原神领奖验收需要独立的单次数据目录。", nameof(destination));
+        if (ReadOnlyFileAccess.FindReparsePoint(parent) is not null)
+            throw new IOException("原神验收目录含链接，拒绝创建快照。");
+        using var instance = SingleInstanceGuard.Acquire(installed);
+        if (!instance.IsOwner)
+            throw new InvalidOperationException("请先关闭正式合流程序，再准备原神验收快照。");
+        using var desktop = DesktopOperationLease.Acquire(installed);
+        if (File.Exists(Path.Combine(installed, "configuration-recovery", "temporary-config-recovery.json")))
+            throw new InvalidOperationException("正式档案的临时配置待恢复，无法开始原神验收。");
+        Directory.CreateDirectory(parent);
+        await CopyPreparedProfileAsync(installed, output, ct).ConfigureAwait(false);
+    }
+
+    internal static Task CopyPreparedProfileAsync(string sourceDirectory, string destination, CancellationToken ct) =>
+        PublishAsync(destination, (target, _) =>
+        {
+            CopySnapshot(Path.Combine(sourceDirectory, DatabaseName), target, LocalDatabase.CurrentSchemaVersion,
+                requirePrepared: true);
+            return Task.CompletedTask;
+        }, ct);
+
+    public static Task PrepareAsync(string officialDatabase, string genshinDatabase, string destination, CancellationToken ct) =>
+        PublishAsync(destination, async (target, source) =>
+        {
+            CopySnapshot(officialDatabase, target, 6);
+            ct.ThrowIfCancellationRequested();
+            CopySnapshot(genshinDatabase, source, LocalDatabase.CurrentSchemaVersion);
+            await new LocalDatabase(target, requirePreparedProfile: false, requirePhysicalPath: true)
+                .InitializeAsync(ct).ConfigureAwait(false);
+            MergeGenshin(target, source, ct);
+            foreach (var suffix in new[] { "", "-wal", "-shm" }) File.Delete(source + suffix);
+        }, ct);
+
+    private static async Task PublishAsync(string destination, Func<string, string, Task> populate, CancellationToken ct)
     {
         var output = Path.TrimEndingDirectorySeparator(Path.GetFullPath(destination));
         if (Directory.Exists(output) || File.Exists(output))
@@ -63,13 +103,8 @@ public static class UnifiedProfilePreparation
             RequirePhysicalDirectory(stagedHandle, staging);
             if (stagedIdentity is null) throw new IOException("无法核对合流暂存目录的身份。");
             RequirePhysicalWrites(staging);
-            CopySnapshot(officialDatabase, target, 6);
             ct.ThrowIfCancellationRequested();
-            CopySnapshot(genshinDatabase, source, LocalDatabase.CurrentSchemaVersion);
-            await new LocalDatabase(target, requirePreparedProfile: false, requirePhysicalPath: true)
-                .InitializeAsync(ct).ConfigureAwait(false);
-            MergeGenshin(target, source, ct);
-            foreach (var suffix in new[] { "", "-wal", "-shm" }) File.Delete(source + suffix);
+            await populate(target, source).ConfigureAwait(false);
             VerifyPrepared(staging);
             ct.ThrowIfCancellationRequested();
             RequirePhysicalDirectory(stagedHandle, staging);
@@ -128,9 +163,10 @@ public static class UnifiedProfilePreparation
             throw new InvalidDataException("需要已验证的 VIvian 合流库。请先完成数据准备。");
     }
 
-    private static void CopySnapshot(string originalPath, string snapshotPath, int expectedVersion)
+    private static void CopySnapshot(string originalPath, string snapshotPath, int expectedVersion, bool requirePrepared = false)
     {
         using var original = OpenExisting(originalPath, SqliteOpenMode.ReadOnly);
+        if (requirePrepared) RequirePreparedDatabase(original);
         if (Number(original, "PRAGMA user_version;") != expectedVersion)
             throw new InvalidDataException("来源数据库版本与合流方案不符。");
         using var snapshot = Connect(snapshotPath, SqliteOpenMode.ReadWriteCreate);

@@ -126,8 +126,7 @@ internal static class BetterGiDailyAcceptance
         if (plan.EnabledTasks.Contains(BetterGiMarkers.DomainTask) && !BetterGiContract.DomainSpendLimitVerified)
             throw new InvalidDataException("当前 BetterGI 版本无法保证秘境树脂上限，验收任务未启动。");
         if (IsBetterGiBusy(program)) throw new InvalidOperationException("已有 BetterGI 实例或 IPC 根，验收未开始。");
-        if (FakeEngineAdapter.ForeignProcessIds(@"E:\auto agent game\VIvian\VIvian.exe").Any(pid => pid != Environment.ProcessId))
-            throw new InvalidOperationException("请先退出其他 furina 实例，旧版不参与共同桌面锁。");
+        RequireLegacyLauncherClosed();
 
         using var registry = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
         using var scheme = registry.OpenSubKey(ProtocolRoot);
@@ -483,6 +482,12 @@ internal static class BetterGiDailyAcceptance
             File.Delete(update);
         }
         return true;
+    }
+
+    internal static void RequireLegacyLauncherClosed()
+    {
+        if (FakeEngineAdapter.ForeignProcessIds(@"E:\auto agent game\VIvian\VIvian.exe").Any(pid => pid != Environment.ProcessId))
+            throw new InvalidOperationException("请先退出其他 furina 实例，旧版不参与共同桌面锁。");
     }
 
     private static bool IsBetterGiBusy(string program)

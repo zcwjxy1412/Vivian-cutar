@@ -79,6 +79,8 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             stages.Add(account.Id, stage.StagePath);
         }
 
+        ct.ThrowIfCancellationRequested();
+        BetterGiDailyAcceptance.RequireLegacyLauncherClosed();
         return await GenshinDesktopLoginDriver.WithClientAsync(betterGiRoot, game, lease, stopOwnedClient: true, async (driver, token) =>
         {
             var orchestrator = new MultiAccountOrchestrator(database, driver);

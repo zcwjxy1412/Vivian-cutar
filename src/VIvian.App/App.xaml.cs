@@ -27,11 +27,13 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} OnStartup args={string.Join('|', e.Args)}\n"); } catch { }
+        var rewardCommand = GenshinRewardAcceptance.HasCommand(e.Args);
+        var rewardCandidate = GenshinRewardAcceptance.IsCandidateBuild;
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} OnStartup args={(rewardCommand ? "Genshin reward acceptance" : string.Join('|', e.Args))}\n"); } catch { }
         // The elevated input host is a hidden second instance of this same executable. It must be handled before
         // single-instance, database, logging or any window exists, and it owns no user data.
         var hostIndex = Array.IndexOf(e.Args, InputHostProtocol.Argument);
-        if (hostIndex >= 0)
+        if (hostIndex >= 0 && !rewardCommand && !rewardCandidate)
         {
             var pipeName = hostIndex + 1 < e.Args.Length ? e.Args[hostIndex + 1] : string.Empty;
             try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "vivian-host-boot.log"), $"{DateTimeOffset.Now:O} entering host pipe={pipeName}\n"); } catch { }
@@ -59,6 +61,9 @@ public partial class App : Application
             var manualTest = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-F1-ManualTest.marker"));
             var m5Daily = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M5-DailyTest.marker"));
             var unified = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-UnifiedInstall.marker"));
+            var reward = GenshinRewardAcceptance.Parse(e.Args, rewardCandidate,
+                File.Exists(Path.Combine(AppContext.BaseDirectory, GenshinRewardAcceptance.Marker)),
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
             if (unified != RealExecutionPolicy.IsUnifiedInstall)
                 throw new InvalidOperationException("程序与合流安装标记不匹配，拒绝启动。");
             // Each real-execution build must carry its own marker (and only its own): its data stays isolated.
@@ -73,6 +78,19 @@ public partial class App : Application
             var threeEnginePreview = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-ThreeEngine-Preview.marker"));
             if (threeEnginePreview && RealExecutionPolicy.BuildPermitsRealExecution)
                 throw new InvalidOperationException("三引擎预览包不允许真实执行许可。");
+            if (reward is not null)
+            {
+                _stage = "核对原神领奖验收权限";
+                if (!unified || !RealExecutionPolicy.IsM5DailyTest || !Environment.UserInteractive ||
+                    !WindowsProcessSupervisor.IsCurrentProcessElevated())
+                    throw new InvalidOperationException("原神领奖验收要求交互式 Windows 会话中的管理员合流候选程序。");
+                if (!reward.ReviewOnly)
+                {
+                    _stage = "准备原神领奖验收隔离快照";
+                    await Task.Run(() => UnifiedProfilePreparation.CreateGenshinRewardAcceptanceSnapshotAsync(
+                        reward.ProfileDirectory, CancellationToken.None));
+                }
+            }
             if (preparingProfile)
             {
                 _stage = "准备正式合流库";
@@ -93,7 +111,7 @@ public partial class App : Application
             }
             var preview = e.Args.Contains("--m4-preview")
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
-            var root = _smoke
+            var root = reward is not null ? reward.ProfileDirectory : _smoke
                 ? SmokeDataDirectory(e.Args)
                 : unified ? UnifiedProfilePreparation.InstalledDirectory
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -114,7 +132,7 @@ public partial class App : Application
                 // A second launch brings the open window to the front instead of only saying it is open. If the lock
                 // holder never shows a window (hung, windowless, or left over from a test), say so instead of
                 // exiting silently, which looks exactly like "VIvian does not open".
-                var signal = _smoke || _instance.Result == InstanceLockResult.AccessDenied
+                var signal = reward is not null || _smoke || _instance.Result == InstanceLockResult.AccessDenied
                     ? WindowActivation.SignalResult.NoListener
                     : WindowActivation.SignalAndWait(root, TimeSpan.FromSeconds(4));
                 if (signal == WindowActivation.SignalResult.Shown)
@@ -122,7 +140,7 @@ public partial class App : Application
                     Shutdown(2);
                     return;
                 }
-                if (!_smoke)
+                if (!_smoke && reward is null)
                     MessageBox.Show(_instance.Result == InstanceLockResult.AccessDenied
                         ? "另一个 VIvian 进程正在使用同一数据目录，而且它以管理员或其他用户身份运行（例如之前测试遗留的进程）。\n" +
                           "为避免冲突，本窗口不会启动，也不会替你结束那个进程。\n\n" +
@@ -168,7 +186,8 @@ public partial class App : Application
                     { EmergencyStopTimeout = TimeSpan.FromSeconds(45), ReconcileTimeout = TimeSpan.FromSeconds(95) }
                     : SchedulerOptions.Default,
                     admitReal: adapter =>
-                        RealExecutionPolicy.BuildPermitsRealExecution && adapter is VIvian.Infrastructure.Engines.March7thAdapter));
+                        reward is null && RealExecutionPolicy.BuildPermitsRealExecution &&
+                        adapter is VIvian.Infrastructure.Engines.March7thAdapter));
                 services.AddSingleton<QueueViewModel>();
                 services.AddSingleton<LoginScreenReader>();
                 services.AddSingleton<AccountRecognitionService>();
@@ -201,7 +220,7 @@ public partial class App : Application
                 if (RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall)
                 {
                     services.AddSingleton<GenshinDailyRecovery>(BetterGiAccountBatch.RecoverSavedDailyAsync);
-                    if (BetterGiContract.LaunchContractVerified && BetterGiContract.CompletionSignalsVerified)
+                    if (reward is null && BetterGiContract.LaunchContractVerified && BetterGiContract.CompletionSignalsVerified)
                         services.AddSingleton<GenshinDailyBatch>(BetterGiAccountBatch.ExecuteSavedDailyAsync);
                 }
                 services.AddSingleton<MainViewModel>();
@@ -228,9 +247,9 @@ public partial class App : Application
             var vm = _host.Services.GetRequiredService<MainViewModel>();
             try
             {
-                await vm.InitializeAsync(autoPrepare: !_smoke);
+                await vm.InitializeAsync(autoPrepare: !_smoke && reward is null);
             }
-            catch (Exception ex) when (!_smoke && !DatabaseVersionTooNew.TryRead(ex, out _, out _))
+            catch (Exception ex) when (!_smoke && reward is null && !DatabaseVersionTooNew.TryRead(ex, out _, out _))
             {
                 // Engine discovery or a damaged upstream config must not keep VIvian from opening.
                 Log.Error("Initial preparation failed; continuing: {ErrorType}; {Stack}", ex.GetType().Name,
@@ -248,6 +267,20 @@ public partial class App : Application
             _stage = "创建主窗口";
             var window = _host.Services.GetRequiredService<MainWindow>();
             MainWindow = window;
+            if (reward is not null)
+            {
+                window.ShowGenshinRewardAcceptance(reward.Attempt, reward.ReviewOnly);
+                if (!reward.ReviewOnly)
+                {
+                    async void RunRewardAcceptance(object? sender, EventArgs args)
+                    {
+                        window.ContentRendered -= RunRewardAcceptance;
+                        await window.RunWithRewardAcceptanceStopKeyAsync(
+                            () => vm.OneClickAsync(GameId.Genshin, reward, BetterGiAccountBatch.VerifySavedDailyAsync));
+                    }
+                    window.ContentRendered += RunRewardAcceptance;
+                }
+            }
             if (_smoke)
             {
                 window.ContentRendered += async (_, _) =>
@@ -282,10 +315,12 @@ public partial class App : Application
             _stage = "显示主窗口";
             window.Show();
             _stage = "运行中";
-            if (!_smoke) _activation = WindowActivation.Listen(root, window);
+            if (!_smoke && reward is null) _activation = WindowActivation.Listen(root, window);
             // M4-F1 defect B: say what this build actually allows instead of a fixed "not enabled" line.
             Log.Information("VIvian {Version} ({Commit}) started. {Mode}", AppPaths.Version, AppPaths.Commit,
-                RealExecutionPolicy.IsUnifiedInstall
+                reward is not null
+                    ? "Genshin single-account reward acceptance profile."
+                    : RealExecutionPolicy.IsUnifiedInstall
                     ? "Unified install with prepared profile. Genshin and Zenless real execution remain gated."
                     : RealExecutionPolicy.IsM5DailyTest
                     ? "M5 daily manual-test build: per-run consent, pinned identity and cleanup admission."
@@ -300,7 +335,7 @@ public partial class App : Application
             Log.Error("Startup failed at {Stage}: {ErrorType}; {Stack}", _stage, ex.GetType().Name,
                 Redactor.ForCurrentUser().Redact(ex.ToString()));
             var report = StartupDiagnostics.Write(ex, _dataRoot, _stage);
-            if (!_smoke && !_startupCheck && !preparingProfile)
+            if (!_smoke && !_startupCheck && !preparingProfile && !rewardCommand && !rewardCandidate)
                 MessageBox.Show($"VIvian 启动失败（阶段：{_stage}）。\n\n{StartupDiagnostics.Explain(ex)}\n\n" +
                     (report is null ? "无法写入诊断报告。" : $"诊断报告：{report}") + "\n原数据不会被删除或修改。", "VIvian");
             Shutdown(1);

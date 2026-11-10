@@ -247,6 +247,20 @@ public sealed class QueueViewModel : ObservableObject
         Raise(nameof(HasUnresolved));
     }
 
+    internal async Task<bool> AcknowledgeGenshinRecoveryAsync(Guid runId)
+    {
+        await RefreshAsync();
+        if (!Unresolved.Any(row => row.Game == GameId.Genshin && row.RunId == runId)) return true;
+        try
+        {
+            await Task.Run(() => _scheduler.AcknowledgeAsync(runId,
+                "VIvian 核对了本次原神运行的桌面交接和 BetterGI 协议恢复。", _history, DateTimeOffset.UtcNow));
+        }
+        catch (InvalidOperationException) { return false; }
+        await RefreshAsync();
+        return !Unresolved.Any(row => row.Game == GameId.Genshin && row.RunId == runId);
+    }
+
     private async Task RefreshSafeAsync()
     {
         if (IsRunning) return; // refreshed when the queue ends

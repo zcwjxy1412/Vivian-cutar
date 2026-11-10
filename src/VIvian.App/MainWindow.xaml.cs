@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
 namespace VIvian.App;
 public partial class MainWindow : Window
 {
@@ -69,6 +71,61 @@ public partial class MainWindow : Window
     }
 
     private StopHotkey? _hotkey;
+
+    internal async Task RunWithRewardAcceptanceStopKeyAsync(Func<Task> run)
+    {
+        if (DataContext is not MainViewModel viewModel) return;
+        if (_hotkey?.Register() != true)
+        {
+            viewModel.StopKeyText = "无法注册 F10 停止键，本次验收未启动。";
+            Serilog.Log.Warning("Genshin reward acceptance did not start because F10 could not be registered");
+            return;
+        }
+        viewModel.StopKeyText = "游戏全屏时也可以按 F10 立即停止。";
+        try { await run(); }
+        finally { _hotkey.Unregister(); }
+    }
+
+    internal void ShowGenshinRewardAcceptance(Guid attempt, bool reviewOnly)
+    {
+        Title = "VIvian · 原神领奖验收";
+        var panel = new StackPanel { Margin = new Thickness(24) };
+        panel.Children.Add(new TextBlock
+        {
+            Text = reviewOnly ? "原神领奖验收 · 查阅与恢复" : "首页一键日常 · 原神单账号领奖验收",
+            FontSize = 24,
+            Margin = new Thickness(0, 0, 0, 12),
+        });
+        panel.Children.Add(new TextBlock { Text = $"验收编号 {attempt:D} · 仅领取每日奖励 · 0 树脂" });
+        var progress = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) };
+        if (!reviewOnly)
+        {
+            progress.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.BatchStatus)));
+            panel.Children.Add(progress);
+        }
+        var status = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        status.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.Status)));
+        panel.Children.Add(status);
+        if (!reviewOnly)
+        {
+            var stopKey = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            stopKey.SetBinding(TextBlock.TextProperty, new Binding(nameof(MainViewModel.StopKeyText)));
+            panel.Children.Add(stopKey);
+        }
+        var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 0) };
+        AddAction("停止", nameof(MainViewModel.StopAllCommand), nameof(MainViewModel.CanStopAll));
+        AddAction("核对桌面交接", nameof(MainViewModel.RecoverDesktopCommand), nameof(MainViewModel.IsIdle));
+        panel.Children.Add(actions);
+        Content = panel;
+
+        void AddAction(string text, string command, string enabled)
+        {
+            var button = new Button { Content = text, Padding = new Thickness(12, 8, 12, 8), Margin = new Thickness(0, 0, 8, 0) };
+            button.SetBinding(Button.CommandProperty, new Binding(command));
+            button.SetBinding(IsEnabledProperty, new Binding(enabled));
+            actions.Children.Add(button);
+        }
+    }
 
     private void BrowseReleaseArchive(object sender, RoutedEventArgs e)
     {

@@ -2,14 +2,19 @@ param(
   # CI keeps the default. A local run passes a fresh directory; existing output is never overwritten.
   [string]$Target = 'artifacts/m5-2-test-ci',
   [switch]$SkipSmoke,
-  [switch]$UnifiedInstall
+  [switch]$UnifiedInstall,
+  [switch]$GenshinRewardAcceptance
 )
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
-$name = if ($UnifiedInstall) { 'VIvian-M6-Unified-win-x64' } else { 'VIvian-M5.2-AutoSwitch-win-x64' }
+if ($GenshinRewardAcceptance -and (-not $UnifiedInstall -or -not $SkipSmoke)) {
+  throw '原神领奖验收候选需同时指定 -UnifiedInstall 和 -SkipSmoke。'
+}
+$name = if ($GenshinRewardAcceptance) { 'VIvian-M6-GenshinRewardAcceptance-win-x64' }
+  elseif ($UnifiedInstall) { 'VIvian-M6-Unified-win-x64' } else { 'VIvian-M5.2-AutoSwitch-win-x64' }
 if (Test-Path $Target) { throw "M5.2 输出目录已存在：$Target。请先检查，不自动覆盖。" }
 $commit = if ($env:VIVIAN_SOURCE_COMMIT) { $env:VIVIAN_SOURCE_COMMIT.Trim() } else { (git rev-parse HEAD).Trim() }
-dotnet publish src/VIvian.App/VIvian.App.csproj -c Release -r win-x64 --self-contained true -p:RestoreLockedMode=true -p:M5DailyTestBuild=true "-p:UnifiedInstallBuild=$($UnifiedInstall.IsPresent)" "-p:InformationalVersion=0.5.2-dev+$commit" -o $Target
+dotnet publish src/VIvian.App/VIvian.App.csproj -c Release -r win-x64 --self-contained true -p:RestoreLockedMode=true -p:M5DailyTestBuild=true "-p:UnifiedInstallBuild=$($UnifiedInstall.IsPresent)" "-p:GenshinRewardAcceptanceBuild=$($GenshinRewardAcceptance.IsPresent)" "-p:InformationalVersion=0.5.2-dev+$commit" -o $Target
 if ($LASTEXITCODE -ne 0) { throw 'M5.2 实测版编译失败' }
 if (-not (Test-Path "$Target/VIvian.exe") -or -not (Test-Path "$Target/coreclr.dll")) { throw '自包含产物不完整' }
 # The compiled flavor and marker must agree. A normal launch of the unified flavor needs a prepared DB.
@@ -18,6 +23,9 @@ if ($UnifiedInstall) {
   Copy-Item 'docs/parallel/unified-entry.md' "$Target/M6-单入口说明.md"
 } else {
   'VIvian M5 daily test; isolated data; elevation before batch' | Set-Content "$Target/VIvian-M5-DailyTest.marker" -Encoding ascii
+}
+if ($GenshinRewardAcceptance) {
+  'VIvian Genshin single-account reward-only acceptance' | Set-Content "$Target/VIvian-GenshinRewardAcceptance.marker" -Encoding ascii
 }
 Copy-Item 'docs/M5_2_DELIVERY.md' "$Target/使用说明-M5.2.md"
 Copy-Item 'docs/M5_2_ACCEPTANCE.md' "$Target/验收状态-M5.2.md"
@@ -29,11 +37,13 @@ Copy-Item 'docs/M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md' "$Target/账号切换截图�
   "版本: 0.5.2-dev+$commit"
   "源码提交: $commit"
   "构建时间(UTC): $((Get-Date).ToUniversalTime().ToString('o'))"
-  "构建标志: M5DailyTestBuild=true UnifiedInstallBuild=$($UnifiedInstall.IsPresent)"
+  "构建标志: M5DailyTestBuild=true UnifiedInstallBuild=$($UnifiedInstall.IsPresent) GenshinRewardAcceptanceBuild=$($GenshinRewardAcceptance.IsPresent)"
   "SDK: $(dotnet --version)"
-  "真实任务: March7thAssistant v2026.10.31 日常（预先配置，一键批次无逐项确认）"
-  "多账号: 已保存账号切换；打开程序时由本人完成 UAC；批次内不提权；身份不明即停止"
-  $(if ($UnifiedInstall) { "数据目录: %LOCALAPPDATA%\VIvian-UserData（需要已验证的合流库，SQLite schema v7）" }
+  $(if ($GenshinRewardAcceptance) { "真实任务: 原神单账号领取每日奖励（一次、零树脂）" }
+    else { "真实任务: March7thAssistant v2026.10.31 日常（预先配置，一键批次无逐项确认）" })
+  $(if (-not $GenshinRewardAcceptance) { "多账号: 已保存账号切换；打开程序时由本人完成 UAC；批次内不提权；身份不明即停止" })
+  $(if ($GenshinRewardAcceptance) { "数据目录: %LOCALAPPDATA%\VIvian-M6-GenshinAcceptance\<验收编号>（独立合流快照）" }
+    elseif ($UnifiedInstall) { "数据目录: %LOCALAPPDATA%\VIvian-UserData（需要已验证的合流库，SQLite schema v7）" }
     else { "数据目录: %LOCALAPPDATA%\VIvian-M6-StarRailTest（隔离档案，SQLite schema v7）" })
 ) | Set-Content "$Target/BUILD-INFO.txt" -Encoding utf8
 if (-not $SkipSmoke) { & "$PSScriptRoot/Smoke.ps1" -ExePath (Join-Path (Get-Location) "$Target/VIvian.exe") }

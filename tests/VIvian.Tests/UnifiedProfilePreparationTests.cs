@@ -147,6 +147,15 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
         Assert.Equal("true", (await prepared.LoadAccountSettingsAsync(a.Id)).Values["dailyRewards"]);
         Assert.Equal("true", (await prepared.LoadAccountSettingsAsync(b.Id)).Values["dailyRewards"]);
         Assert.Equal(starPlan, await prepared.LoadAccountTaskPlanAsync(starAccount.Id));
+        var acceptance = Path.Combine(_root, "reward-acceptance");
+        await UnifiedProfilePreparation.CopyPreparedProfileAsync(destination, acceptance, CancellationToken.None);
+        var acceptanceDb = new LocalDatabase(Path.Combine(acceptance, "vivian.db"), requirePreparedProfile: true);
+        var accepted = (await acceptanceDb.LoadAccountsAsync(GameId.Genshin)).Single(x => x.Id == a.Id);
+        Assert.False(accepted.AutoRun);
+        await acceptanceDb.SaveAccountAsync(accepted with { AutoRun = true });
+        Assert.False((await prepared.LoadAccountsAsync(GameId.Genshin)).Single(x => x.Id == a.Id).AutoRun);
+        await Assert.ThrowsAsync<IOException>(() => UnifiedProfilePreparation.CopyPreparedProfileAsync(
+            destination, acceptance, CancellationToken.None));
         Assert.Equal(6L, Scalar(keepWal, "PRAGMA user_version;"));
         Assert.Single(await starRail.LoadAccountsAsync(GameId.Genshin));
         Assert.Throws<IOException>(() => UnifiedProfilePreparation.VerifyPrepared(Path.Combine(_root, "absent")));

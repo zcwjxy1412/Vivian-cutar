@@ -370,7 +370,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             return View(GenshinView.Unknown);
 
         if (Find("paimon_cancel.png", Region(0, 0, 120, 120)) is not null &&
-            Label(normalized, Region(0, 190, 650, 790), t => t is "背包" or "图鉴" or "好友") is not null)
+            HasMenuContent(normalized, Region(0, 190, 650, 790)))
             return View(GenshinView.Menu, Region(38, 1012, 24, 24));
         if (Find("paimon_menu.png", Region(0, 0, 150, 150)) is not { } paimon)
         {
@@ -416,6 +416,9 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         var scale = frameHeight / 1080d;
         return new(1740 * scale, 850 * scale, 180 * scale, 230 * scale);
     }
+
+    internal static bool HasMenuContent(IEnumerable<RecognizedText> lines, ScreenRegion region) =>
+        lines.Any(line => region.Contains(line.CenterX, line.CenterY) && line.Text is "背包" or "图鉴" or "好友");
 
     private static ScreenRegion? Label(IEnumerable<RecognizedText> lines, ScreenRegion region, Func<string, bool> label)
     {

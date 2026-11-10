@@ -16,7 +16,7 @@ internal sealed class GenshinHomeReward(string officialDirectory, LocalDatabase 
 
     internal GenshinRewardAcceptance CreateRequest(GameAccount account)
     {
-        if (account is not { Game: GameId.Genshin, Enabled: true, LoginState: "recognized" } || account.Id == Guid.Empty)
+        if (account is not { Game: GameId.Genshin, Enabled: true, LoginState: "recognized" or "logged_in" } || account.Id == Guid.Empty)
             throw new InvalidOperationException("请选择一个已启用并绑定登录标识的原神账号。");
         return new(Guid.NewGuid(), account.Id, account.Revision, officialDirectory, installedDaily: true);
     }

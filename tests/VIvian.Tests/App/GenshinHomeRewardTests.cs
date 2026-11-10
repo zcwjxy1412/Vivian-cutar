@@ -23,6 +23,7 @@ public sealed class GenshinHomeRewardTests
             var second = await database.AddAccountAsync(GameId.Genshin, "排在最前", "", null);
             await database.SaveLoginProfileAsync(first.Id, "130****01", "130****01", 0, .95, null, "合成");
             await database.SaveLoginProfileAsync(second.Id, "130****02", "130****02", 1, .95, null, "合成");
+            await database.RecordAccountSwitchAsync(null, second.Id, "logged_in", "已核对入场");
             var paths = new AppPaths(folder.FullName);
             var supervisor = new RefusingProcessSupervisor();
             var queue = new QueueViewModel(new QueueScheduler(database, supervisor), database, paths);
@@ -109,6 +110,7 @@ public sealed class GenshinHomeRewardTests
                 await live.SaveLoginProfileAsync(account.Id, account.Id == first.Id ? "130****01" : "130****02",
                     account.Id == first.Id ? "130****01" : "130****02", 0, .95, null, "合成");
             }
+            await live.RecordAccountSwitchAsync(null, first.Id, "logged_in", "已核对入场");
             var selected = (await live.LoadAccountsAsync(GameId.Genshin))
                 .Where(a => a.Id == first.Id || a.Id == second.Id).OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
             var run = Guid.NewGuid();

@@ -968,6 +968,7 @@ public sealed class MainViewModel : ObservableObject
                 try
                 {
                     if (starRail.Length > 0) await Accounts.ReloadAsync();
+                    if (genshin.Length > 0 || acceptance is not null) await GenshinConfiguration.LoadAsync();
                     await RefreshLastRunsAsync();
                 }
                 catch (Exception ex) { Log.Warning("Refresh after daily batch failed: {ErrorType}", ex.GetType().Name); }

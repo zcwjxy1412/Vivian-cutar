@@ -22,6 +22,24 @@ public sealed class GenshinDesktopLoginTests
     private static readonly LoginTarget B = new("130****02", "130******02", 1, "234567891", A.MaskedPhone, "234567890");
     private static readonly SwitchPolicy Policy = new(StepTimeout: TimeSpan.FromSeconds(1));
 
+    [Theory]
+    [InlineData(LoginScanFailure.WindowOccluded, "画面被遮挡")]
+    [InlineData(LoginScanFailure.CaptureFailed, "未获得可核对的游戏画面")]
+    [InlineData(null, "画面尚未识别")]
+    public async Task LoginTimeoutDistinguishesRejectedCaptureFromAnUnrecognizedFrame(LoginScanFailure? captureFailure,
+        string diagnostic)
+    {
+        var frame = Frame(GenshinView.Unknown) with { CaptureFailure = captureFailure };
+        var desktop = new Desktop(frame);
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.FromSeconds(30));
+
+        var result = await driver.EnsureLoginAsync(new SwitchPolicy(LoginScreenTimeout: TimeSpan.FromMilliseconds(500)), default);
+
+        Assert.False(result.Ok);
+        Assert.Contains(diagnostic, result.Detail);
+        Assert.Empty(desktop.Actions);
+    }
+
     [Fact]
     public async Task AToBRequiresLogoutThenFreshTargetCardAndContinuousWorld()
     {

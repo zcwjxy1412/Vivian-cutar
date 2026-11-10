@@ -202,14 +202,15 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         if (window is not null)
         {
             var (frame, check) = ScreenCapture.CaptureChecked(window, ClientProcessName);
-            if (frame is not null && frame.Width == window.ClientWidth && frame.Height == window.ClientHeight &&
-                CaptureVerdict.Evaluate(check).Accept)
+            var capture = CaptureVerdict.Evaluate(check);
+            if (frame is not null && frame.Width == window.ClientWidth && frame.Height == window.ClientHeight && capture.Accept)
             {
                 var ocr = await WindowsOcrReader.ReadAsync(frame, ct).ConfigureAwait(false);
                 if (!ocr.Available) throw new InvalidOperationException(ocr.Error ?? "原神登录需要中文本地 OCR。");
                 view = Classify(window, frame, ocr.Lines, ct);
                 _pixels = frame;
             }
+            else view = view with { CaptureFailure = capture.Accept ? LoginScanFailure.CaptureFailed : capture.Failure };
         }
         if (!_active || FindForeground() != window) view = view with { Window = null };
         _readAt = observed;

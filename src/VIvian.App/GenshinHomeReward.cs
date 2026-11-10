@@ -25,7 +25,7 @@ internal sealed class GenshinHomeReward(string officialDirectory, LocalDatabase 
         Action<BatchAccountProgress>? progress, CancellationToken ct)
     {
         if (!string.Equals(officialDirectory, request.ProfileDirectory, StringComparison.OrdinalIgnoreCase)
-            || request.ReviewOnly || request.RewardOnly)
+            || !request.InstalledDaily || request.ReviewOnly || request.RewardOnly)
             throw new InvalidOperationException("原神日常请求与当前项目的保存计划不一致。");
         if ((await database.ReadUnresolvedAsync(ct).ConfigureAwait(false)).Count > 0)
             throw new InvalidOperationException("当前项目仍有待核对的运行记录。");

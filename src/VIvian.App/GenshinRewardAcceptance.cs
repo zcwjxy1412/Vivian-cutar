@@ -55,6 +55,7 @@ internal sealed class GenshinRewardAcceptance
         Attempt = attempt;
         AccountId = account;
         Revision = revision;
+        InstalledDaily = installedDaily;
         ProfileDirectory = installedDaily ? profileRoot : Path.Combine(profileRoot, attempt.ToString("N"));
         RewardOnly = !installedDaily;
     }
@@ -62,6 +63,7 @@ internal sealed class GenshinRewardAcceptance
     internal Guid Attempt { get; }
     internal Guid? AccountId { get; }
     private long Revision { get; }
+    internal bool InstalledDaily { get; }
     internal string ProfileDirectory { get; }
     internal bool ReviewOnly => AccountId is null;
     internal bool RewardOnly { get; private init; } = true;
@@ -101,13 +103,19 @@ internal sealed class GenshinRewardAcceptance
         if (AccountId is not { } id || !string.Equals(ProfileDirectory, profileDirectory, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("原神领奖验收需要本次请求对应的隔离合流档案。");
         var accounts = await database.LoadAccountsAsync(GameId.Genshin, ct).ConfigureAwait(false);
-        var target = accounts.SingleOrDefault(account => account.Id == id);
-        if (target is not { Enabled: true, LoginState: "recognized" or "logged_in" } || target.Revision != Revision)
-            throw new InvalidOperationException("原神验收账号缺失、未识别、已停用或 revision 已变化。");
-        var selected = RewardOnly ? [target] : accounts.Where(a => a.Enabled && a.AutoRun)
+        var selected = accounts.Where(a => a.Enabled && a.AutoRun)
             .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
-        if (selected.Length == 0 || selected[0].Id != id || selected.Any(a => a.LoginState is not ("recognized" or "logged_in")))
-            throw new InvalidOperationException("原神日常验收的勾选顺序或登录档案已变化。");
+        if (!InstalledDaily)
+        {
+            var target = accounts.SingleOrDefault(account => account.Id == id);
+            if (target is not { Enabled: true, LoginState: "recognized" or "logged_in" } || target.Revision != Revision)
+                throw new InvalidOperationException("原神验收账号缺失、未识别、已停用或 revision 已变化。");
+            if (RewardOnly) selected = [target];
+            if (selected.Length > 0 && selected[0].Id != id)
+                throw new InvalidOperationException("原神日常验收的勾选顺序已变化。");
+        }
+        if (selected.Length == 0 || selected.Any(a => a.LoginState is not ("recognized" or "logged_in")))
+            throw new InvalidOperationException("原神日常需要至少一个已绑定登录账号的有效勾选队列。");
         ExpectedAccountCount = selected.Length;
         ct.ThrowIfCancellationRequested();
         beforeVerify?.Invoke();

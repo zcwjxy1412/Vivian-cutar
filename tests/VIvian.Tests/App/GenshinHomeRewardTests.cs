@@ -130,14 +130,11 @@ public sealed class GenshinHomeRewardTests
                 });
             var stale = home.CreateRequest(selected[0]);
             await live.SaveAccountAsync(selected[0] with { Name = "已修改" });
-            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(stale, "root", "archive", null, default));
-            Assert.Equal(0, called);
-            var refreshed = (await live.LoadAccountsAsync(GameId.Genshin)).Single(a => a.Id == selected[0].Id);
-            await home.RunAsync(home.CreateRequest(refreshed), "root", "archive", null, default);
+            await home.RunAsync(stale, "root", "archive", null, default);
             Assert.Equal(1, called);
             Assert.Equal(run, Assert.Single(await live.ReadRecentRunsAsync(5)).RunId);
             Assert.Empty(await home.ReadRecentRunsAsync(5)); // No new isolated history.
-            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(home.CreateRequest(refreshed), "root", "archive", null, default));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => home.RunAsync(stale, "root", "archive", null, default));
             Assert.Equal(1, called);
         }
         finally { temp.Delete(recursive: true); }

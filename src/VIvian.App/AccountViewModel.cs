@@ -50,7 +50,7 @@ public sealed class AccountRowViewModel : ObservableObject
 }
 
 /// <summary>Persisted account profiles. Login secrets and game session files are never handled here.</summary>
-public sealed class AccountViewModel : ObservableObject
+public sealed partial class AccountViewModel : ObservableObject
 {
     private readonly LocalDatabase _database;
     private readonly AccountRecognitionService _recognition;
@@ -70,13 +70,14 @@ public sealed class AccountViewModel : ObservableObject
         MoveDownCommand = new(() => MoveAsync(1), Error);
         ReloadCommand = new(ReloadAsync, Error);
         ReloadZenlessCommand = new(ReloadZenlessAsync, _ => ZenlessStatus = "暂时无法读取绝区零本机档案。");
+        InitializeZenlessCommands();
     }
 
     public LocalDatabase Database => _database;
     public Func<Func<Action, Task>, Task> ExecuteScan { private get; set; } = action => action(() => { });
     public ObservableCollection<AccountRowViewModel> Rows { get; } = [];
     public ObservableCollection<GameAccount> ZenlessRows { get; } = [];
-    private string _zenlessStatus = "实例绑定和截图导入待接入。";
+    private string _zenlessStatus = "绑定 OneDragon 源档案后，可按勾选顺序执行。";
     public string ZenlessStatus { get => _zenlessStatus; private set => Set(ref _zenlessStatus, value); }
     public ObservableCollection<AccountBatch> RecentBatches { get; } = [];
     public ObservableCollection<AccountExecutionRecord> BatchResults { get; } = [];
@@ -162,10 +163,14 @@ public sealed class AccountViewModel : ObservableObject
     {
         try
         {
+            var selected = SelectedZenless?.Id;
             var accounts = await _database.LoadAccountsAsync(GameId.ZenlessZoneZero);
             ZenlessRows.Clear();
-            foreach (var account in accounts) ZenlessRows.Add(account);
-            ZenlessStatus = "当前仅显示本机档案。实例绑定和截图导入待接入。";
+            foreach (var account in accounts.Where(account => !account.IsLegacyPlaceholder))
+                ZenlessRows.Add(account);
+            SelectedZenless = ZenlessRows.FirstOrDefault(account => account.Id == selected) ?? ZenlessRows.FirstOrDefault();
+            await RefreshZenlessSourceAsync();
+            ExecutionSelectionChanged?.Invoke();
         }
         catch (Microsoft.Data.Sqlite.SqliteException)
         {

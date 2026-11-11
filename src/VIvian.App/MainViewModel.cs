@@ -56,6 +56,7 @@ public sealed class MainViewModel : ObservableObject
     private readonly IRunHistory _runs;
     private readonly IUnifiedTaskControl _control;
     private readonly GenshinDailyBatch? _genshinDailyBatch;
+    private readonly IProcessSupervisor _zenlessSupervisor;
     private readonly GenshinDailyRecovery? _genshinDailyRecovery;
     private GenshinHomeReward? _homeGenshinReward;
     private readonly MultiAccountOrchestrator _orchestrator;
@@ -75,7 +76,7 @@ public sealed class MainViewModel : ObservableObject
         HomeStatusAction.RecoverDesktop => "前往核对桌面交接",
         HomeStatusAction.RestoreConfiguration => "前往恢复临时配置",
         HomeStatusAction.ReviewRuns => "前往运行日志",
-        HomeStatusAction.SelectAccounts or HomeStatusAction.SelectGenshinAccounts or HomeStatusAction.SelectStarRailAccounts => "前往账号管理",
+        HomeStatusAction.SelectAccounts or HomeStatusAction.SelectGenshinAccounts or HomeStatusAction.SelectStarRailAccounts or HomeStatusAction.SelectZenlessAccounts => "前往账号管理",
         HomeStatusAction.ConfigureBetterGi => "前往设置 BetterGI 路径",
         _ => "",
     };
@@ -443,6 +444,9 @@ public sealed class MainViewModel : ObservableObject
         gamePath.Resolve = () => March7thGamePath.Read(Engines.Single(e => e.Id == GameId.StarRail).InstallPath);
         _settings = settings; _history = history; _preferences = preferences; _runs = runs; _paths = paths; Queue = queue;
         Accounts = accounts;
+        _zenlessSupervisor = statusSupervisor;
+        accounts.ConfigureZenless(() => Engines.Single(card => card.Id == GameId.ZenlessZoneZero).SavedInstallPath,
+            paths.DataDirectory, SerializeGenshinOperationAsync);
         accounts.ExecutionSelectionChanged += () => Raise(nameof(SelectedAccountsText));
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
@@ -634,7 +638,7 @@ public sealed class MainViewModel : ObservableObject
     private string _estimate = "—";
     public string EstimateText { get => _estimate; private set => Set(ref _estimate, value); }
     public string RunnableText => $"{Engines.Count(e => e.CanRunForReal)} / {Engines.Count}";
-    public string SelectedAccountsText => (Accounts.SelectedRows.Count + GenshinConfiguration.SelectedForDaily.Count).ToString();
+    public string SelectedAccountsText => (Accounts.SelectedRows.Count + GenshinConfiguration.SelectedForDaily.Count + Accounts.SelectedZenlessForDaily.Count).ToString();
     public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
     public string RunStateText => BatchRunning || Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
     public string ConfigSyncText => !CanOperateWorkspace ? "只读"
@@ -695,7 +699,7 @@ public sealed class MainViewModel : ObservableObject
             if ((!CanOperateWorkspace) != (acceptance is not null) ||
                 (acceptance is not null && (scope != GameId.Genshin || acceptance.ReviewOnly || verify is null)))
             { Status = "原神验收仅接受本次启动指定的请求。"; return; }
-            if (scope is not (null or GameId.StarRail or GameId.Genshin))
+            if (scope is not (null or GameId.StarRail or GameId.Genshin or GameId.ZenlessZoneZero))
             { Status = "所选游戏的真实日常入口尚未开放。"; return; }
             if (acceptance is null && scope is null or GameId.Genshin && _genshinDailyBatch is null &&
                 _homeGenshinReward is { } home && GenshinConfiguration.SelectedForDaily.FirstOrDefault() is { } selected)
@@ -706,6 +710,10 @@ public sealed class MainViewModel : ObservableObject
                 Status = $"原神日常 · 从 {selected.Name} 开始 · 按保存的任务顺序执行";
                 await withStopKey(() => RunAccountBatchAsync(scope, acceptance: request, homeReward: home));
             }
+            else if (acceptance is null && (scope == GameId.ZenlessZoneZero
+                         || scope is null && Accounts.SelectedZenlessForDaily.Count > 0)
+                     && RunWithHomeRewardStopKey is { } stopKey)
+                exitCode = await stopKey(() => RunAccountBatchAsync(scope));
             else
                 exitCode = await RunAccountBatchAsync(scope, acceptance: acceptance, verify: verify);
             ShowStatus(BatchStatus, _batchStatusAction);
@@ -885,15 +893,18 @@ public sealed class MainViewModel : ObservableObject
             || approved.Target.Game != GameId.StarRail || approved.Expires <= DateTimeOffset.UtcNow
             || Accounts.SelectedStarRail?.Id != approved.Target.AccountId))
         { BatchStatus = "运行计划已失效，或当前选中账号和计划不一致。"; return null; }
-        var starRail = scope == GameId.Genshin ? [] : Accounts.SelectedRows
+        var starRail = scope is GameId.Genshin or GameId.ZenlessZoneZero ? [] : Accounts.SelectedRows
             .Where(row => approved is null || row.Id == approved.Target.AccountId).Select(row => row.Account).ToArray();
-        var genshin = scope == GameId.StarRail || acceptance is not null ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
-        if (starRail.Length == 0 && genshin.Length == 0 && acceptance is null)
+        var genshin = scope is GameId.StarRail or GameId.ZenlessZoneZero || acceptance is not null ? [] : GenshinConfiguration.SelectedForDaily.ToArray();
+        var zenless = (scope is null or GameId.ZenlessZoneZero) && RealExecutionPolicy.IsUnifiedInstall
+            && (acceptance is null || homeReward is not null) ? Accounts.SelectedZenlessForDaily.ToArray() : [];
+        if (starRail.Length == 0 && genshin.Length == 0 && zenless.Length == 0 && acceptance is null)
         {
             SetBatchStatus("请先在账号管理勾选要执行的账号。", scope switch
             {
                 GameId.Genshin => HomeStatusAction.SelectGenshinAccounts,
                 GameId.StarRail => HomeStatusAction.SelectStarRailAccounts,
+                GameId.ZenlessZoneZero => HomeStatusAction.SelectZenlessAccounts,
                 _ => HomeStatusAction.SelectAccounts,
             });
             return null;
@@ -976,6 +987,26 @@ public sealed class MainViewModel : ObservableObject
                 };
             }
 
+            Func<CancellationToken, Task<MultiAccountOutcome>>? runZenless = null;
+            if (zenless.Length > 0)
+            {
+                var card = Engines.Single(e => e.Id == GameId.ZenlessZoneZero);
+                runZenless = async ct =>
+                {
+                    if (!card.CanRunForReal)
+                        throw new InvalidOperationException("请在引擎与环境保存并核对 OneDragon v2.6.0 安装。");
+                    var progress = Track(GameId.ZenlessZoneZero, zenless.Length);
+                    BatchRunning = true;
+                    BatchStatus = "绝区零 · 正在核对勾选账号和 OneDragon 源档案";
+                    try
+                    {
+                        return await Task.Run(() => OneDragonAccountBatch.ExecuteAsync(Accounts.Database, zenless,
+                            card.SavedInstallPath, _paths.DataDirectory, _zenlessSupervisor, progress, ct), ct);
+                    }
+                    finally { await Queue.RefreshAsync(); }
+                };
+            }
+
             await DailyBatchSequence.RunAsync(scope, starRail.Length == 0 ? null :
                 ct => RunStarRailBatchAsync(starRail, approved, Track(GameId.StarRail, starRail.Length), ct),
                 runGenshin, (game, outcome) =>
@@ -994,7 +1025,7 @@ public sealed class MainViewModel : ObservableObject
                     results.Add($"{RunPresentation.GameName(game)} · {label} · {outcome.Detail}");
                     SetBatchStatus(string.Join("  ", results),
                         !finished && Queue.HasUnresolved ? PendingRunAction : HomeStatusAction.None);
-                }, token);
+                }, token, runZenless);
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         { BatchStatus = string.Join("  ", results.Append("批次已由用户停止。")); }
@@ -1024,6 +1055,7 @@ public sealed class MainViewModel : ObservableObject
                 {
                     if (starRail.Length > 0) await Accounts.ReloadAsync();
                     if (genshin.Length > 0 || acceptance is not null) await GenshinConfiguration.LoadAsync();
+                    if (zenless.Length > 0) await Accounts.ReloadZenlessAsync();
                     await RefreshLastRunsAsync();
                 }
                 catch (Exception ex) { Log.Warning("Refresh after daily batch failed: {ErrorType}", ex.GetType().Name); }
@@ -1399,7 +1431,7 @@ public sealed class MainViewModel : ObservableObject
 
 internal enum HomeStatusAction
 {
-    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, ConfigureBetterGi,
+    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, SelectZenlessAccounts, ConfigureBetterGi,
 }
 
 /// <summary>Turns exceptions into actionable Chinese messages. Never shows stack traces or file contents.</summary>

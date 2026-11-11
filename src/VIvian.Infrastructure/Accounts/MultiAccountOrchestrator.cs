@@ -83,6 +83,7 @@ public sealed class MultiAccountOrchestrator
             // Reuse a client already at login, including one that is still starting.
             // The driver still verifies the saved-account screen before the first account can run.
             batch = await StageAsync(batch, accounts[0], BatchRunState.RecognizingLogin,
+                game == GameId.ZenlessZoneZero ? "正在等待绝区零已保存账号界面" :
                 game == GameId.Genshin ? "正在启动原神或等待已保存账号界面" : "正在启动星铁或等待已保存账号界面",
                 progress, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
@@ -115,7 +116,7 @@ public sealed class MultiAccountOrchestrator
                 batch = await StageAsync(batch, account, BatchRunState.RecognizingLogin,
                     $"{index + 1}/{accounts.Count}：确认账号选择界面", progress, cancellationToken);
                 batch = await StageAsync(batch, account, BatchRunState.SelectingAccount,
-                    game == GameId.Genshin ? "正在选择并核对原神账号" : "正在选择账号、等待进入世界并核对身份",
+                    game == GameId.StarRail ? "正在选择账号、等待进入世界并核对身份" : "正在选择并核对已保存账号",
                     progress, cancellationToken);
                 var target = new LoginTarget(profile.NormalizedPhone, profile.MaskedPhone, profile.RowOrder,
                     profile.ObservedUid, previousMasked, previousUid);
@@ -149,7 +150,7 @@ public sealed class MultiAccountOrchestrator
                 batch = await StageAsync(batch, account, BatchRunState.LoadingConfiguration,
                     switched.Detail + " 加载配置", progress, cancellationToken);
                 batch = await StageAsync(batch, account, BatchRunState.RunningTasks,
-                    switched.Stage == LoginSwitchStage.ReadyAtGate ? "已确认大门，正在交接 BetterGI"
+                    switched.Stage == LoginSwitchStage.ReadyAtGate ? (game == GameId.ZenlessZoneZero ? "已确认登录账号，正在交接 OneDragon" : "已确认大门，正在交接 BetterGI")
                         : game == GameId.Genshin ? "正在执行原神日常" : "正在执行星铁日常", progress, cancellationToken);
                 BatchTaskResult result;
                 try
@@ -175,7 +176,8 @@ public sealed class MultiAccountOrchestrator
                 }
                 else
                 {
-                    failed++;
+                    if (game != GameId.ZenlessZoneZero || result.Outcome is not (RunOutcome.Indeterminate or RunOutcome.Cancelled))
+                        failed++;
                     var state = result.Outcome switch
                     {
                         RunOutcome.Indeterminate => "indeterminate",
@@ -195,7 +197,8 @@ public sealed class MultiAccountOrchestrator
                     break;
                 }
 
-                if (result.Outcome is RunOutcome.Indeterminate or RunOutcome.Cancelled || (game == GameId.Genshin && !result.Success))
+                if (result.Outcome == RunOutcome.Cancelled || (game != GameId.ZenlessZoneZero && result.Outcome == RunOutcome.Indeterminate)
+                    || (game == GameId.Genshin && !result.Success))
                 {
                     cancelled = result.Outcome == RunOutcome.Cancelled;
                     aborted = true;
@@ -257,7 +260,9 @@ public sealed class MultiAccountOrchestrator
         return await FinishAsync(batch with
         {
             State = completed ? "finished" : "stopped",
-            Detail = $"完成 {succeeded}，失败 {failed}。" +
+            Detail = (game == GameId.ZenlessZoneZero
+                ? $"完成 {succeeded}，失败 {failed}，未完成 {accounts.Count - succeeded - failed}。"
+                : $"完成 {succeeded}，失败 {failed}。") +
                      (cancelled ? " 用户停止了批次。" : aborted ? " 批次已停止：" + stopReason : "")
         }, completed, succeeded, failed, CancellationToken.None, gameClean);
 

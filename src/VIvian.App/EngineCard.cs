@@ -34,6 +34,8 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
         GameId.StarRail => RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified,
         GameId.Genshin => GenshinDailyWired && InstallPath == SavedInstallPath &&
             Report?.Compatibility is CompatibilityClass.PendingValidation or CompatibilityClass.IdentityVerified,
+        GameId.ZenlessZoneZero => RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall
+            && InstallPath == SavedInstallPath && Report?.Compatibility == CompatibilityClass.IdentityVerified,
         _ => false,
     });
     public bool CanPlayFromHome => CanRunForReal || (CanOperateWorkspace && HomeRewardWired &&

@@ -40,6 +40,7 @@ Copy-Item 'docs/M5_2_ACCOUNT_SWITCH_SCREEN_FLOW.md' "$Target/账号切换截图�
   "构建标志: M5DailyTestBuild=true UnifiedInstallBuild=$($UnifiedInstall.IsPresent) GenshinRewardAcceptanceBuild=$($GenshinRewardAcceptance.IsPresent)"
   "SDK: $(dotnet --version)"
   $(if ($GenshinRewardAcceptance) { "真实任务: --genshin-reward-acceptance 为单账号零树脂领奖；--genshin-daily-acceptance 按已保存配置执行勾选账号日常与切号" }
+    elseif ($UnifiedInstall) { "真实任务: 星铁日常、原神 BetterGI 保存计划、绝区零 OneDragon v2.6.0 保存应用组" }
     else { "真实任务: March7thAssistant v2026.10.31 日常（预先配置，一键批次无逐项确认）" })
   $(if (-not $GenshinRewardAcceptance) { "多账号: 已保存账号切换；打开程序时由本人完成 UAC；批次内不提权；身份不明即停止" })
   $(if ($GenshinRewardAcceptance) { "数据目录: %LOCALAPPDATA%\VIvian-M6-GenshinAcceptance\<验收编号>（独立合流快照）" }

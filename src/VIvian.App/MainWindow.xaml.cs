@@ -7,6 +7,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = viewModel;
         viewModel.RunWithHomeRewardStopKey = RunWithRewardAcceptanceStopKeyAsync;
+        Activated += (_, _) =>
+        {
+            if (AccountTabs.SelectedIndex == 2 && viewModel.CanEditWorkspace)
+                _ = viewModel.Accounts.RefreshZenlessSourceAsync(keepDraft: true);
+        };
         var area = SystemParameters.WorkArea;
         MinWidth = Math.Min(MinWidth, area.Width);
         MinHeight = Math.Min(MinHeight, area.Height);
@@ -138,6 +143,13 @@ public partial class MainWindow : Window
             vm.GenshinConfiguration.Source.SetVisible(vm.CanOperateWorkspace && e.NewValue is true);
     }
 
+    private async void OpenZenlessAccounts(object sender, RoutedEventArgs e)
+    {
+        Navigation.SelectedItem = AccountManagementTab;
+        AccountTabs.SelectedIndex = 2;
+        if (DataContext is MainViewModel vm) await vm.Accounts.ReloadZenlessAsync();
+    }
+
     private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem = EngineEnvironmentTab;
 
     private void OpenStatusAction(object sender, RoutedEventArgs e)
@@ -161,9 +173,11 @@ public partial class MainWindow : Window
             case HomeStatusAction.SelectAccounts:
             case HomeStatusAction.SelectGenshinAccounts:
             case HomeStatusAction.SelectStarRailAccounts:
+            case HomeStatusAction.SelectZenlessAccounts:
                 Navigation.SelectedItem = AccountManagementTab;
                 if (vm.StatusAction == HomeStatusAction.SelectGenshinAccounts) AccountTabs.SelectedIndex = 1;
                 if (vm.StatusAction == HomeStatusAction.SelectStarRailAccounts) AccountTabs.SelectedIndex = 0;
+                if (vm.StatusAction == HomeStatusAction.SelectZenlessAccounts) AccountTabs.SelectedIndex = 2;
                 target = AccountTabs.SelectedIndex switch
                 {
                     0 => vm.Accounts.Rows.Count > 0 ? StarRailAccountList : ScanStarRailAccountsButton,

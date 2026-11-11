@@ -314,7 +314,7 @@ public partial class App : Application
                 reward is not null
                     ? "Genshin single-account reward acceptance profile."
                     : RealExecutionPolicy.IsUnifiedInstall
-                    ? "Unified install with prepared profile. Genshin and Zenless real execution remain gated."
+                    ? "Unified install with the prepared profile and native engine handoff."
                     : RealExecutionPolicy.IsM5DailyTest
                     ? "M5 daily manual-test build: per-run consent, pinned identity and cleanup admission."
                     : RealExecutionPolicy.IsReusableManualTest

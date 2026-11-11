@@ -334,16 +334,16 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </DockPanel></Border></TabItem>
 <TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
 <StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="{Binding Version, StringFormat=由 {0} 执行。正在接入：目前只读取安装状态，不会运行它。}" Style="{StaticResource Lead}"/>
+<TextBlock Text="{Binding Version, StringFormat=由 {0} 接管入场和日常任务。}" Style="{StaticResource Lead}"/>
 <Border Style="{StaticResource Panel}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
 <TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
 <Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="接下来会做到" Style="{StaticResource H2}"/>
-<TextBlock Text="明确选择账号实例：任何修改只作用于你选中的那个账号。" Style="{StaticResource Small}"/>
-<TextBlock Text="读取应用组、日常开关、体力计划和战斗预设，并提供已核对参数的修改与同步。" Style="{StaticResource Small}" Margin="0,4,0,0"/>
-<TextBlock Text="按 OneDragon v2.6.0 的真实要求核对安装目录，再开放应用组的真实执行。" Style="{StaticResource Small}" Margin="0,4,0,0"/></StackPanel></Border>
+<TextBlock Text="账号与源档案" Style="{StaticResource H2}"/>
+<TextBlock Text="在账号管理绑定已保存账号与 OneDragon 实例。常用任务开关直接保存在该实例。详细配置在 OneDragon 编辑。" Style="{StaticResource Small}" Margin="0,6,0,8"/>
+<Button Content="打开绝区零账号与任务设置" Click="OpenZenlessAccounts" HorizontalAlignment="Left"/>
+</StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 </TabControl></Grid></TabItem>
 
@@ -441,18 +441,41 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </StackPanel></Border>
 </StackPanel></TabItem>
 <TabItem Header="绝区零">
-<Border Style="{StaticResource Panel}" DataContext="{Binding Accounts}"><StackPanel>
+<Border Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}"><StackPanel DataContext="{Binding Accounts}">
 <DockPanel LastChildFill="True" Margin="0,0,0,6">
-<Button DockPanel.Dock="Right" Content="刷新档案" Command="{Binding ReloadZenlessCommand}"/>
-<TextBlock Text="绝区零本机档案" Style="{StaticResource H2}" VerticalAlignment="Center"/>
+<WrapPanel DockPanel.Dock="Right">
+<Button Content="刷新源档案" Command="{Binding ReloadZenlessCommand}" Margin="0,0,8,0"/>
+<Button Content="打开 OneDragon 详细设置" Command="{Binding OpenZenlessSourceCommand}"/>
+</WrapPanel>
+<TextBlock Text="绝区零账号" Style="{StaticResource H2}" VerticalAlignment="Center"/>
 </DockPanel>
 <TextBlock Text="{Binding ZenlessStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/>
-<ItemsControl x:Name="ZenlessAccountList" ItemsSource="{Binding ZenlessRows}" Margin="0,8,0,0">
-<ItemsControl.ItemTemplate><DataTemplate>
-<Border Background="#EAF0FF" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,8" Margin="0,0,0,6">
-<TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
-</Border>
-</DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+<ListBox x:Name="ZenlessAccountList" ItemsSource="{Binding ZenlessRows}" SelectedItem="{Binding SelectedZenless}"
+         Margin="0,8,0,8" MinHeight="50">
+<ListBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal">
+<TextBlock Text="{Binding Name}" FontWeight="Bold"/>
+<TextBlock Text="{Binding AutoRun, StringFormat=  · 执行 {0}}" Margin="8,0"/>
+<TextBlock Text="{Binding LastResult}" Style="{StaticResource Small}"/>
+</StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
+<WrapPanel Margin="0,0,0,8">
+<Button Content="新增账号" Command="{Binding AddZenlessCommand}" Margin="0,0,8,0"/>
+<Button Content="上移" Command="{Binding MoveZenlessUpCommand}" Margin="0,0,8,0"/>
+<Button Content="下移" Command="{Binding MoveZenlessDownCommand}"/>
+</WrapPanel>
+<WrapPanel Margin="0,0,0,8">
+<StackPanel Margin="0,0,12,0"><TextBlock Text="账号显示名"/><TextBox Width="170" Text="{Binding ZenlessName, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+<StackPanel Margin="0,0,12,0"><TextBlock Text="登录卡片的脱敏手机号"/><TextBox Width="180" Text="{Binding ZenlessMasked, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
+<StackPanel Margin="0,0,12,0"><TextBlock Text="OneDragon 实例"/><ComboBox Width="108" ItemsSource="{Binding ZenlessInstances}" SelectedItem="{Binding ZenlessInstance}"/></StackPanel>
+<CheckBox Content="加入日常批次" IsChecked="{Binding ZenlessAutoRun}" VerticalAlignment="Bottom" Margin="0,0,12,4"/>
+<Button Content="保存账号绑定" Command="{Binding SaveZenlessCommand}" VerticalAlignment="Bottom"/>
+</WrapPanel>
+<Separator Margin="0,6,0,8"/>
+<TextBlock Text="常用任务开关" Style="{StaticResource H2}"/>
+<WrapPanel Margin="0,8,0,0">
+<ComboBox Width="220" ItemsSource="{Binding ZenlessTasks}" DisplayMemberPath="Title" SelectedItem="{Binding SelectedZenlessTask}" Margin="0,0,12,0"/>
+<CheckBox Content="启用" IsEnabled="{Binding SelectedZenlessTask.CanEdit}" IsChecked="{Binding ZenlessTaskEnabled}" VerticalAlignment="Center" Margin="0,0,12,0"/>
+<Button Content="保存到源档案" Command="{Binding SaveZenlessTaskCommand}" IsEnabled="{Binding SelectedZenlessTask.CanEdit}"/>
+</WrapPanel>
 </StackPanel></Border>
 </TabItem>
 </TabControl>

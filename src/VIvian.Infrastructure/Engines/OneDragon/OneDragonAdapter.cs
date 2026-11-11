@@ -140,7 +140,7 @@ public sealed class OneDragonAdapter : IGameAdapter
     }
 
     internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct,
-        string? admittedRoot = null)
+        string? admittedRoot = null, OneDragonHandoff? handoff = null)
     {
         ArgumentNullException.ThrowIfNull(supervisor);
         var root = admittedRoot ?? _installRoot();
@@ -160,7 +160,10 @@ public sealed class OneDragonAdapter : IGameAdapter
         if (!_registry.TryAcquire(directory, context.RunId))
             throw new EngineStartException(ReasonCodes.ForeignProcess, nothingStarted: true, "该 OneDragon 安装已有一次运行，不能重复启动。");
 
-        var spec = new ProcessLaunchSpec(program, _request.ToArguments(), directory, OneDragonContract.Environment);
+        var environment = new Dictionary<string, string>(OneDragonContract.Environment);
+        if (handoff is not null)
+            foreach (var (key, value) in handoff.Environment(context.RunId)) environment.Add(key, value);
+        var spec = new ProcessLaunchSpec(program, _request.ToArguments(), directory, environment);
         ISupervisedProcessGroup group;
         try
         {
@@ -178,6 +181,6 @@ public sealed class OneDragonAdapter : IGameAdapter
         if (group.RunId != context.RunId)
             throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: false, "进程组的 RunId 与本次运行不一致。");
         return new OneDragonRun(context.RunId, group, _request, EngineCatalog.OneDragon.PinnedVersion, _options, _time,
-            cleanup => _registry.Release(directory, context.RunId, cleanup));
+            cleanup => _registry.Release(directory, context.RunId, cleanup), handoff);
     }
 }

@@ -9,6 +9,7 @@ public sealed record GameAccount(Guid Id, GameId Game, string Name, string Regio
     bool Enabled, bool AutoRun, int Order, string LoginState, string VerificationState,
     DateTimeOffset? LastRunAt, string? LastResult, long Revision)
 {
+    public bool IsLegacyPlaceholder => Id == LocalDatabase.LegacyId(Game);
     public bool HasGenshinLoginBinding { get; init; }
 }
 public sealed record AccountSettingsSnapshot(Guid AccountId, IReadOnlyDictionary<string, string> Values, long Revision);

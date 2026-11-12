@@ -44,7 +44,7 @@ public static class OneDragonAccountBatch
         if (accounts.Any(account => !profiles.Any(profile => profile.AccountId == account.Id && profile.NormalizedPhone.Length > 0)))
             throw new InvalidOperationException("有账号尚未绑定登录画面的脱敏标识。");
 
-        using var driver = new ZenlessLoginDriver(gamePaths[0], root);
+        using var driver = new ZenlessLoginDriver(gamePaths[0], root, lease.MarkDirty);
         var orchestrator = new MultiAccountOrchestrator(database, driver);
         var batchId = Guid.NewGuid();
         var handoffClean = true;
@@ -71,7 +71,7 @@ public static class OneDragonAccountBatch
                         root, batchId, handoff, token).ConfigureAwait(false);
                     handoffClean = result.CleanupConfirmed;
                     return result;
-                }, progress, ct, actionId: batchId, beforeDesktopMutation: lease.MarkDirty).ConfigureAwait(false);
+                }, progress, ct, actionId: batchId).ConfigureAwait(false);
         }
         finally
         {

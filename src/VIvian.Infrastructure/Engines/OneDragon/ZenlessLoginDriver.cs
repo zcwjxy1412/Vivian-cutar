@@ -1,5 +1,9 @@
+using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 using VIvian.Core.Accounts;
 using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Engines.BetterGi;
@@ -7,12 +11,11 @@ using VIvian.Infrastructure.Processes;
 
 namespace VIvian.Infrastructure.Engines.OneDragon;
 
-internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginSwitchDriver, IDisposable
+internal sealed class ZenlessLoginDriver(string gamePath, string root, Action beforeLaunch) : ILoginSwitchDriver, IDisposable
 {
     private const string GameProcess = "ZenlessZoneZero";
     private readonly Dictionary<string, CapturedFrame> _templates = [];
     private Process? _game;
-    private bool _unverifiedLaunch;
     private bool _handedOff;
     private DateTimeOffset? _started;
     internal int GamePid => _handedOff && _game is { HasExited: false } game
@@ -26,25 +29,29 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
 
     public async Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken ct)
     {
-        if (IsRunning() || EngineBusy() || StarRailWindow.IsProcessRunning() || HasProcess("YuanShen"))
-            return Failure("请先关闭现有游戏及 OneDragon 窗口。");
+        if (LaunchBlock() is { } initialBlock) return Failure(initialBlock);
         await LoadTemplatesAsync(ct).ConfigureAwait(false);
-        using var image = GenshinGameExecutable.OpenForSignatureVerification(gamePath);
-        try { GenshinGameExecutable.Verify(gamePath, image); }
-        catch (InvalidOperationException) { return Failure("无法核对绝区零客户端的米哈游签名或实际路径。"); }
-        ct.ThrowIfCancellationRequested();
-        _unverifiedLaunch = true;
-        try { _game = WindowsProcessSupervisor.StartUserProcess(gamePath, Path.GetDirectoryName(gamePath)!); }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        try
         {
-            _unverifiedLaunch = false;
-            return Failure("Windows 未确认游戏启动授权。");
+            using var image = GenshinGameExecutable.OpenForSignatureVerification(gamePath);
+            GenshinGameExecutable.Verify(gamePath, image);
+            ct.ThrowIfCancellationRequested();
+            if (LaunchBlock() is { } block) return Failure(block);
+            beforeLaunch();
+            // The batch already runs elevated. Retain the direct launch handle for identification and cleanup.
+            _game = WindowsProcessSupervisor.StartInheritedProcess(gamePath, "", Path.GetDirectoryName(gamePath)!);
         }
-        if (_game is null || !string.Equals(_game.MainModule?.FileName, gamePath, StringComparison.OrdinalIgnoreCase)
-            || StarRailWindow.StartTime(_game) is not { } started)
-            return Failure("无法核对本轮绝区零客户端的进程归属。");
+        catch (Win32Exception ex)
+        {
+            return Failure($"绝区零客户端启动失败（Windows 错误 {ex.NativeErrorCode}）。请核对客户端路径和管理员权限。");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Failure("无法核对绝区零客户端的米哈游签名、实际路径或桌面交接状态。");
+        }
+        if (VerifyStartedGame(_game, gamePath) is not { } started)
+            return Failure("无法核对本轮直接启动的绝区零进程，已停止交接。");
         _started = started;
-        _unverifiedLaunch = false;
         var timeout = Stopwatch.StartNew();
         while (timeout.Elapsed < policy.GameStart)
         {
@@ -56,6 +63,36 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
         }
         return Failure("等待绝区零窗口超时。");
     }
+
+    private static string? LaunchBlock()
+    {
+        if (IsRunning()) return "检测到已打开的绝区零。请退出游戏，然后让 Vivian 从首页启动并接管本轮。";
+        if (EngineBusy()) return "检测到 OneDragon 正在运行。请退出 OneDragon 窗口后重试。";
+        return StarRailWindow.IsProcessRunning() || HasProcess("YuanShen")
+            ? "原神或崩铁正在使用桌面。请退出该游戏后重试。" : null;
+    }
+
+    internal static DateTimeOffset? VerifyStartedGame(Process game, string expectedPath)
+    {
+        try
+        {
+            using var current = Process.GetCurrentProcess();
+            if (game.HasExited || game.SessionId != current.SessionId) return null;
+            var path = new StringBuilder(32768);
+            var length = (uint)path.Capacity;
+            return QueryFullProcessImageName(game.SafeHandle, 0, path, ref length)
+                && string.Equals(path.ToString(), expectedPath, StringComparison.OrdinalIgnoreCase)
+                ? StarRailWindow.StartTime(game) : null;
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, StringBuilder path, ref uint length);
 
     public async Task<LoginSwitchOutcome> SwitchAsync(LoginTarget target, SwitchPolicy policy, CancellationToken ct)
     {
@@ -195,9 +232,11 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
 
     public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken ct)
     {
-        if (EngineBusy() || _unverifiedLaunch)
-            return Task.FromResult(Failure("OneDragon 或绝区零客户端的清理尚未确认。"));
-        if (_game is not null && !WindowsProcessSupervisor.TerminateOwnedProcess(_game))
+        if (_game is null)
+            return Task.FromResult(LoginSwitchOutcome.Success(LoginSwitchStage.Done, "本轮未启动绝区零客户端。"));
+        if (EngineBusy())
+            return Task.FromResult(Failure("OneDragon 仍在运行，已保留桌面交接标记。"));
+        if (!WindowsProcessSupervisor.TerminateOwnedProcess(_game))
             return Task.FromResult(Failure("未能确认本轮绝区零客户端退出。"));
         if (IsRunning()) return Task.FromResult(Failure("仍有绝区零客户端运行，请核对桌面。"));
         _game?.Dispose();

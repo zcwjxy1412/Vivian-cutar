@@ -221,3 +221,28 @@ public sealed class OneDragonIntegrationTests
         Assert.Equal(RunOutcome.Indeterminate, evidence.Verdict(0, false, DateTimeOffset.UtcNow).Outcome);
     }
 }
+
+[Collection(VIvian.Tests.Processes.ProcessCollection.Name)]
+public sealed class ZenlessProcessAttributionTests
+{
+    [VIvian.Tests.Processes.WindowsFact]
+    public async Task ProcessAttributionUsesTheExactExecutableAndLeavesUnownedProcessesAlone()
+    {
+        var fake = VIvian.Tests.Processes.ProcessTestSupport.FakeEngine;
+        using var started = VIvian.Infrastructure.Processes.WindowsProcessSupervisor.StartInheritedProcess(
+            fake, "--scenario sleep-forever", AppContext.BaseDirectory);
+        try
+        {
+            Assert.NotNull(ZenlessLoginDriver.VerifyStartedGame(started, fake));
+            Assert.Null(ZenlessLoginDriver.VerifyStartedGame(started, @"C:\Other\ZenlessZoneZero.exe"));
+            using var driver = new ZenlessLoginDriver(@"C:\Other\ZenlessZoneZero.exe", "", () =>
+                throw new InvalidOperationException("Cleanup must not mark a new launch."));
+            Assert.True((await driver.StopGameAsync(default)).Ok);
+            Assert.False(started.HasExited);
+        }
+        finally
+        {
+            Assert.True(VIvian.Infrastructure.Processes.WindowsProcessSupervisor.TerminateOwnedProcess(started));
+        }
+    }
+}

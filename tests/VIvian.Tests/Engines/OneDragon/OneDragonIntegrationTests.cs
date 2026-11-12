@@ -68,38 +68,48 @@ public sealed class OneDragonIntegrationTests
     }
 
     [Theory]
-    [InlineData(false, false, "logout_pending")]
-    [InlineData(true, false, "logout")]
-    [InlineData(false, true, "retain")]
-    [InlineData(true, true, "logout_pending")]
-    public async Task LogoutRequiresAnUnambiguousKeepRecordSelection(bool keepSelected, bool clearSelected, string action)
+    [InlineData(true, false, true, true, "logout")]
+    [InlineData(false, true, true, true, "retain")]
+    [InlineData(false, false, true, true, "logout_pending")]
+    [InlineData(true, true, true, true, "logout_pending")]
+    [InlineData(true, false, false, true, "logout_pending")]
+    [InlineData(true, false, true, false, "logout_pending")]
+    public void LogoutChecksTheActualControlsWithoutRecognizedText(bool keepSelected, bool clearSelected,
+        bool hasConfirm, bool hasCancel, string action)
     {
         var frame = new VIvian.Infrastructure.Accounts.CapturedFrame(new byte[1920 * 1080 * 4], 1920, 1080, "");
-        void DrawMarker(int y)
+        void DrawIcon(int cx, int cy, bool filledButton, bool checkedRadio, byte red, byte green)
         {
-            for (var row = y; row < y + 16; row++)
-            for (var x = 630; x < 652; x++)
+            var radius = filledButton ? 16 : 14;
+            for (var y = cy - radius; y < cy + radius; y++)
+            for (var x = cx - radius; x < cx + radius; x++)
             {
-                var pixel = (row * frame.Width + x) * 4;
-                frame.Bgra[pixel + 1] = 215;
-                frame.Bgra[pixel + 2] = 245;
+                var dx = x - cx;
+                var dy = y - cy;
+                var squaredDistance = dx * dx + dy * dy;
+                var ring = squaredDistance >= 11 * 11 && squaredDistance < radius * radius;
+                var stroke = Math.Abs(dx + dy) < 3;
+                var iconPixel = filledButton
+                    ? squaredDistance < radius * radius && (squaredDistance >= 9 * 9 || !stroke)
+                    : ring || (checkedRadio && squaredDistance < 8 * 8 && stroke);
+                if (!iconPixel) continue;
+                var pixel = (y * frame.Width + x) * 4;
+                frame.Bgra[pixel + 1] = green;
+                frame.Bgra[pixel + 2] = red;
             }
         }
 
-        if (keepSelected) DrawMarker(516);
-        if (clearSelected) DrawMarker(437);
-        var result = await ZenlessLoginDriver.ClassifyLogoutAsync(frame,
-            [new("退出登录", 550, 280, 80, 25), new("退出并清除登录记录", 662, 433, 200, 26),
-             new("下次在该设备需要重新登录当前账号", 662, 465, 340, 22), new("确定", 1105, 760, 55, 28)],
-            default, (crop, _) =>
-            {
-                Assert.Equal(260, crop.Width);
-                return Task.FromResult(new VIvian.Infrastructure.Accounts.OcrReadResult(true, null,
-                    [new("退出并保留登录记录", 15, 13, 200, 26)]));
-            });
+        DrawIcon(632, 446, false, clearSelected, 202, 255);
+        DrawIcon(632, 526, false, keepSelected, 202, 255);
+        if (hasConfirm) DrawIcon(1002, 775, true, false, 0, 206);
+        if (hasCancel) DrawIcon(679, 775, true, false, 218, 0);
+        var result = ZenlessLoginDriver.ClassifyLogout(frame, []);
+
         Assert.NotNull(result);
         Assert.Equal(action, result.Value.Action);
         Assert.Equal(action != "logout_pending", result.Value.Point is not null);
+        if (action == "logout") Assert.True(result.Value.Point!.Contains(1144, 775));
+        if (action == "retain") Assert.True(result.Value.Point!.Contains(632, 526));
     }
 
     [Fact]

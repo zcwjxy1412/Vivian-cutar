@@ -104,6 +104,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         StarRailWindowInfo? previous = null;
         var waiting = "尚未找到登录账号确认页。";
         string? lastAction = null;
+        var awaitingLogout = false;
         while (timeout.Elapsed < policy.LoginScreen)
         {
             ct.ThrowIfCancellationRequested();
@@ -117,14 +118,16 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                 {
                     var ocr = await WindowsOcrReader.ReadAsync(pixels, ct).ConfigureAwait(false);
                     if (!ocr.Available) return Failure("无法使用本地中文 OCR 核对已保存账号。");
-                    var step = await ClassifyAsync(pixels, ocr.Lines, target.NormalizedPhone, ct).ConfigureAwait(false);
+                    var step = await ClassifyAsync(pixels, ocr.Lines, target.NormalizedPhone, ct, awaitingLogout).ConfigureAwait(false);
                     lastAction = step.Action;
+                    if (step.Action is "choose" or "handoff" or "dropdown" or "header_unknown" or "button_unknown" or "account_missing")
+                        awaitingLogout = false;
                     waiting = step.Action switch
                     {
                         "header_unknown" => "已找到登录卡片，但未能唯一核对脱敏手机号。",
                         "button_unknown" => "已读取登录账号，但未能确认「进入游戏」按钮。",
                         "account_missing" => "已打开保存账号列表，但未找到唯一的目标账号。",
-                        "logout_pending" => "已打开退出登录弹窗，正在核对保留登录记录选项。",
+                        "logout_pending" => "正在核对退出登录弹窗和保留登录记录选项。",
                         _ => "尚未完成登录账号确认。",
                     };
                     if (step.Action == "handoff" && ReadWindow() == window)
@@ -151,6 +154,8 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                                 return step.Action is "retain" or "logout"
                                     ? NeedsUser("请在绝区零选中「退出并保留登录记录」后确认。")
                                     : Failure("登录画面变化或账号选择未响应。");
+                            if (step.Action is "switch" or "logout")
+                                awaitingLogout = step.Action == "switch";
                             await Task.Delay(1100, ct).ConfigureAwait(false);
                             continue;
                         }
@@ -161,13 +166,13 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
             else { stable = 0; waiting = "请将绝区零保持在前台。"; }
             await Task.Delay(450, ct).ConfigureAwait(false);
         }
-        return lastAction == "logout_pending"
+        return awaitingLogout || lastAction == "logout_pending"
             ? NeedsUser("无法核对保留登录记录的选项，请在绝区零选中「退出并保留登录记录」后确认。")
             : Failure("等待登录账号确认超时。" + waiting);
     }
 
     private async Task<(string Action, ScreenRegion? Point)> ClassifyAsync(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,
-        string target, CancellationToken ct)
+        string target, CancellationToken ct, bool awaitingLogout)
     {
         ScreenRegion Box(double x, double y, double width, double height) =>
             ZenlessAccountImport.ScaleBox(frame.Width, frame.Height, x, y, width, height);
@@ -177,7 +182,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
 
         var panel = Box(540, 250, 820, 570);
         var modal = lines.Where(line => panel.Contains(line.CenterX, line.CenterY)).ToArray();
-        if (await ClassifyLogoutAsync(frame, modal, ct).ConfigureAwait(false) is { } logout)
+        if (ClassifyLogout(frame, modal) is { } logout)
             return logout;
         if (NeedsAuthentication(modal))
             return ("needs_user", null);
@@ -200,6 +205,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                 return ("button_unknown", null);
             return selected.NormalizedPhone == target ? ("handoff", null) : ("dropdown", closed);
         }
+        if (awaitingLogout) return ("logout_pending", null);
         if (closed is not null || expanded is not null) return ("wait", null);
         var title = Text("点击进入游戏", Box(770, 827, 400, 224));
         if (title is not null && Text("退出登录", panel) is null)
@@ -216,47 +222,64 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                 .Any(marker => value.Contains(marker, StringComparison.Ordinal));
     });
 
-    internal static async Task<(string Action, ScreenRegion? Point)?> ClassifyLogoutAsync(
-        CapturedFrame frame, IReadOnlyList<RecognizedText> lines, CancellationToken ct,
-        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
+    internal static (string Action, ScreenRegion? Point)? ClassifyLogout(
+        CapturedFrame frame, IReadOnlyList<RecognizedText> lines)
     {
-        ScreenRegion Box(double x, double y, double w, double h) =>
-            ZenlessAccountImport.ScaleBox(frame.Width, frame.Height, x, y, w, h);
-        RecognizedText? InBox(string label, ScreenRegion box) =>
-            LoginStateClassifier.FindExact(lines.Where(line => box.Contains(line.CenterX, line.CenterY)).ToArray(), label);
-        async Task<RecognizedText?> ReadLabelAsync(string label, ScreenRegion box)
+        // The CN logout dialog uses two identical lime outlines. The tick inside the ring is the selection.
+        // Check both radio controls and the red/green buttons in the 1920x1080 reference layout.
+        static bool Lime(int r, int g, int b) => r >= 140 && g >= 175 && g >= r - 8 && b <= 110 && r - b >= 95;
+        var clear = SampleIcon(frame, 632, 445.5, 7, 10, Lime);
+        var keep = SampleIcon(frame, 632, 525.5, 7, 10, Lime);
+        if (clear.Ring < .33 || keep.Ring < .33)
         {
-            if (InBox(label, box) is { } whole) return whole;
-            var localized = await ZenlessAccountImport.ReadHighContrastAsync(frame, box, ct, readCrop).ConfigureAwait(false);
-            var match = localized.Available ? LoginStateClassifier.FindExact(localized.Lines, label) : null;
-            return match is null ? null : match with { X = match.X + (int)box.X, Y = match.Y + (int)box.Y };
+            var knownDialog = LoginStateClassifier.FindExact(lines, "退出登录") is not null
+                || LoginStateClassifier.FindExact(lines, "退出并保留登录记录") is not null;
+            return knownDialog ? ("logout_pending", null) : null;
         }
 
-        const string keepLabel = "退出并保留登录记录";
-        const string clearLabel = "退出并清除登录记录";
-        var keepBox = Box(647, 498, 260, 49);
-        var clearBox = Box(647, 420, 260, 49);
-        var keep = InBox(keepLabel, keepBox);
-        var clear = InBox(clearLabel, clearBox);
-        var title = InBox("退出登录", Box(546, 250, 194, 112));
-        if (keep is null && clear is null && title is null &&
-            !lines.Any(line => LoginStateClassifier.Compact(line.Text).Contains("下次在该设备需要重新登录当前账号", StringComparison.Ordinal)))
-            return null;
+        var cancel = SampleIcon(frame, 678.5, 774.5, 8, 8, static (r, g, b) => r >= 140 && r - g >= 95 && r - b >= 95);
+        var confirm = SampleIcon(frame, 1001.5, 774.5, 8, 8, static (r, g, b) => g >= 130 && g - r >= 90 && g - b >= 90);
+        if (cancel.Ring < .67 || confirm.Ring < .67 || cancel.Center is < .15 or > .75 || confirm.Center is < .15 or > .75)
+            return ("logout_pending", null);
 
-        keep ??= await ReadLabelAsync(keepLabel, keepBox).ConfigureAwait(false);
-        if (keep is null) return ("logout_pending", null);
-        clear ??= await ReadLabelAsync(clearLabel, clearBox).ConfigureAwait(false);
-        if (clear is null) return ("logout_pending", null);
-        var keepSelected = LoginRetentionDetector.HasSelectedMarker(frame, keep, minimumBlue: 0);
-        var clearSelected = LoginRetentionDetector.HasSelectedMarker(frame, clear, minimumBlue: 0);
-        if (keepSelected && !clearSelected)
-        {
-            var confirm = await ReadLabelAsync("确定", Box(1010, 735, 250, 79)).ConfigureAwait(false);
-            return confirm is null ? ("logout_pending", null) : ("logout", Region(confirm));
-        }
-        if (clearSelected && !keepSelected)
-            return ("retain", new(keep.X - 1.4 * keep.Height, keep.Y, keep.Height, keep.Height));
+        ScreenRegion Box(double x, double y, double width, double height) =>
+            ZenlessAccountImport.ScaleBox(frame.Width, frame.Height, x, y, width, height);
+        if (keep.Center >= .23 && clear.Center <= .08)
+            return ("logout", Box(1100, 752, 88, 46));
+        if (clear.Center >= .23 && keep.Center <= .08)
+            return ("retain", Box(618, 512, 28, 27));
         return ("logout_pending", null);
+    }
+
+    private static (double Center, double Ring) SampleIcon(CapturedFrame frame, double centerX, double centerY,
+        int centerRadius, int ringRadius, Func<int, int, int, bool> matchesColor)
+    {
+        const int outerRadius = 15;
+        var box = ZenlessAccountImport.ScaleBox(frame.Width, frame.Height,
+            centerX - outerRadius, centerY - outerRadius, 2 * outerRadius, 2 * outerRadius);
+        var center = 0;
+        var ring = 0;
+        var centerTotal = 0;
+        var ringTotal = 0;
+        for (var y = (int)box.Y; y < box.Bottom; y++)
+        for (var x = (int)box.X; x < box.Right; x++)
+        {
+            var dx = (x + .5) * 1920 / frame.Width - centerX;
+            var dy = (y + .5) * 1080 / frame.Height - centerY;
+            var distance = dx * dx + dy * dy;
+            var i = (y * frame.Width + x) * 4;
+            if (distance < centerRadius * centerRadius)
+            {
+                centerTotal++;
+                if (matchesColor(frame.Bgra[i + 2], frame.Bgra[i + 1], frame.Bgra[i])) center++;
+            }
+            else if (distance >= ringRadius * ringRadius && distance < outerRadius * outerRadius)
+            {
+                ringTotal++;
+                if (matchesColor(frame.Bgra[i + 2], frame.Bgra[i + 1], frame.Bgra[i])) ring++;
+            }
+        }
+        return (center / (double)centerTotal, ring / (double)ringTotal);
     }
 
     private LoginSwitchOutcome NeedsUser(string reason)
@@ -347,9 +370,6 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         return await WindowsOcrReader.DecodeFileAsync(file, ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("无法读取 OneDragon 登录识别素材。");
     }
-
-    private static ScreenRegion? Region(RecognizedText? text) =>
-        text is null ? null : new(text.X, text.Y, text.Width, text.Height);
 
     private static LoginSwitchOutcome Failure(string message) =>
         LoginSwitchOutcome.Fail(LoginSwitchStage.WaitingForLogin, message) with { Fatal = true };

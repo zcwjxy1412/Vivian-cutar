@@ -629,8 +629,12 @@ public partial class App : Application
         await vm.Accounts.SaveDailyPlanAsync();
         if ((await database.LoadAccountTaskPlanAsync(row.Id)).DailyEnabled)
             throw new InvalidOperationException("Game task setting was not saved");
+        await database.AddAccountAsync(GameId.ZenlessZoneZero, "绝区零空白草稿", "", null);
         var zenless = await database.AddAccountAsync(GameId.ZenlessZoneZero, "绝区零冒烟档案", "", null);
+        await database.SaveOneDragonBindingAsync(zenless, new(root, 1), "138****1234");
         await vm.Accounts.ReloadZenlessAsync();
+        if (vm.Accounts.SelectedZenless?.Id != zenless.Id)
+            throw new InvalidOperationException("The Zenless account editor did not prefer the registered account");
         tabs.SelectedIndex = Array.IndexOf(headers, "账号管理");
         window.UpdateLayout();
         var gameHeaders = main.AccountTabs.Items.OfType<System.Windows.Controls.TabItem>().Select(t => t.Header as string);

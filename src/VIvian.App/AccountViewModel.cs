@@ -168,7 +168,14 @@ public sealed partial class AccountViewModel : ObservableObject
             ZenlessRows.Clear();
             foreach (var account in accounts.Where(account => !account.IsLegacyPlaceholder))
                 ZenlessRows.Add(account);
-            SelectedZenless = ZenlessRows.FirstOrDefault(account => account.Id == selected) ?? ZenlessRows.FirstOrDefault();
+            var preferred = ZenlessRows.FirstOrDefault(account => account.Id == selected)
+                ?? ZenlessRows.FirstOrDefault(account => account.AutoRun);
+            if (preferred is null && ZenlessRows.Count > 0)
+            {
+                var registered = await _database.LoadLoginProfilesAsync(GameId.ZenlessZoneZero);
+                preferred = ZenlessRows.FirstOrDefault(account => registered.Any(profile => profile.AccountId == account.Id));
+            }
+            SelectedZenless = preferred ?? ZenlessRows.FirstOrDefault();
             await RefreshZenlessSourceAsync();
             ExecutionSelectionChanged?.Invoke();
         }

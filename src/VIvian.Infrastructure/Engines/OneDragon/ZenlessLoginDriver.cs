@@ -100,11 +100,13 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var stable = 0;
         StarRailWindowInfo? previous = null;
+        var waiting = "尚未找到登录账号确认页。";
         while (timeout.Elapsed < policy.LoginScreen)
         {
             ct.ThrowIfCancellationRequested();
-            if (_game is null || _game.HasExited || EngineBusy()) return Failure("本轮窗口已退出或 OneDragon 已经启动。");
-            var window = ReadWindow(activate: true);
+            if (_game is null || _game.HasExited) return Failure("本轮绝区零客户端已退出，尚未交给 OneDragon。");
+            if (EngineBusy()) return Failure("检测到另一个 OneDragon 已打开，已停止登录操作。");
+            var window = ReadWindow();
             if (window is not null)
             {
                 var (pixels, check) = ScreenCapture.CaptureChecked(window, GameProcess);
@@ -113,6 +115,13 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                     var ocr = await WindowsOcrReader.ReadAsync(pixels, ct).ConfigureAwait(false);
                     if (!ocr.Available) return Failure("无法使用本地中文 OCR 核对已保存账号。");
                     var step = await ClassifyAsync(pixels, ocr.Lines, target.NormalizedPhone, ct).ConfigureAwait(false);
+                    waiting = step.Action switch
+                    {
+                        "header_unknown" => "已找到登录卡片，但未能唯一核对脱敏手机号。",
+                        "button_unknown" => "已读取登录账号，但未能确认「进入游戏」按钮。",
+                        "account_missing" => "已打开保存账号列表，但未找到唯一的目标账号。",
+                        _ => "尚未完成登录账号确认。",
+                    };
                     if (step.Action == "handoff" && ReadWindow() == window)
                     {
                         stable = previous == window ? stable + 1 : 1;
@@ -140,12 +149,12 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                         }
                     }
                 }
-                else stable = 0;
+                else { stable = 0; waiting = "暂时无法读取未被遮挡的绝区零游戏画面。"; }
             }
-            else stable = 0;
+            else { stable = 0; waiting = "请将绝区零保持在前台。"; }
             await Task.Delay(450, ct).ConfigureAwait(false);
         }
-        return Failure("未能核对唯一目标账号。请检查绝区零登录画面和该档案的脱敏手机号。");
+        return Failure("等待登录账号确认超时。" + waiting);
     }
 
     private async Task<(string Action, ScreenRegion? Point)> ClassifyAsync(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,
@@ -175,20 +184,22 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         var dropdown = Box(1197, 470, 65, 65);
         var expanded = Match("account_dropdown_collapse", dropdown);
         var closed = Match("account_dropdown_expand", dropdown);
-        var confirm = Text("进入游戏", Box(880, 580, 170, 85));
         if (expanded is not null && closed is null)
         {
             var rows = await ZenlessAccountImport.ReadExpandedRowsAsync(frame, lines, ct).ConfigureAwait(false);
             var matches = rows.Where(row => row.NormalizedPhone == target).ToArray();
             return matches.Length == 1
-                ? ("choose", new(matches[0].X, matches[0].Y, matches[0].Width, matches[0].Height)) : ("wait", null);
+                ? ("choose", new(matches[0].X, matches[0].Y, matches[0].Width, matches[0].Height)) : ("account_missing", null);
         }
-        if (closed is not null && expanded is null && confirm is not null)
+        if (closed is not null && expanded is null)
         {
-            var header = MaskedPhoneParser.FindAll(lines, Box(610, 450, 590, 82));
-            return header.Count == 1 && header[0].NormalizedPhone == target
-                ? ("handoff", null) : ("dropdown", closed);
+            var header = await ZenlessAccountImport.ReadHeaderAsync(frame, lines, ct).ConfigureAwait(false);
+            if (header is not [{ } selected]) return ("header_unknown", null);
+            if (!await ZenlessAccountImport.ConfirmButtonAsync(frame, lines, ct).ConfigureAwait(false))
+                return ("button_unknown", null);
+            return selected.NormalizedPhone == target ? ("handoff", null) : ("dropdown", closed);
         }
+        if (closed is not null || expanded is not null) return ("wait", null);
         var title = Text("点击进入游戏", Box(770, 827, 400, 224));
         if (title is not null && Text("退出登录", panel) is null)
             return ("switch", Match("switch_account", Box(1776, 950, 100, 94)));

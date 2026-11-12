@@ -28,14 +28,26 @@ def _vivian_handoff(self, args):
     def emit(*fields):
         print("|".join(("VIVIAN-ZZZ", run_id, *map(str, fields))), flush=True)
 
-    def run_from_login(app):
-        hwnd = ctx.controller.game_win._hWnd
-        owner = ctypes.c_ulong()
+    def owns_window():
+        hwnd = ctx.controller.game_win.get_hwnd()
         if not hwnd:
-            return OperationResult(success=False, status="Vivian game window unavailable")
+            return False
+        owner = ctypes.c_ulong()
         ctypes.windll.user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(owner))
-        if owner.value != pid:
-            return OperationResult(success=False, status="Vivian game window changed")
+        return owner.value == pid
+
+    def read_masks(texts):
+        return [
+            prefix + "****" + suffix
+            for text in texts
+            for prefix, suffix in re.findall(
+                r"(?<!\d)(\d{3})\s*[*•·]{3,}\s*(\d{2,4})(?!\d)", unicodedata.normalize("NFKC", text)
+            )
+        ]
+
+    def run_from_login(app):
+        if not owns_window():
+            return OperationResult(success=False, status="Vivian game window unavailable or changed")
 
         class EnterSavedAccount(EnterGame):
             confirmed = False
@@ -46,26 +58,34 @@ def _vivian_handoff(self, args):
                 return super().check_enter_click_status_text(screen, include_enter_click)
 
             def check_login_related(self, screen):
+                if not owns_window():
+                    emit("detail", "login_changed")
+                    return self.round_fail("游戏窗口不再属于本轮客户端")
                 if not self.confirmed:
-                    header = screen[444:535, 610:1195]
-                    identities = []
-                    for text in self.ctx.ocr.run_ocr(header):
-                        for prefix, suffix in re.findall(
-                            r"(?<!\d)(\d{3})\s*[*•·]{3,}\s*(\d{2,4})(?!\d)", unicodedata.normalize("NFKC", text)
-                        ):
-                            identities.append(prefix + "****" + suffix)
+                    identities = read_masks(self.ctx.ocr.run_ocr(screen[444:535, 610:1195]))
+                    if not identities:
+                        identities = read_masks([self.ctx.ocr.run_ocr_single_line(screen[477:523, 721:1015])])
                     if identities != [masked]:
                         emit("detail", "login_changed")
                         return self.round_fail("登录确认卡片的脱敏账号发生变化")
-                    result = self.round_by_find_and_click_area(screen, "打开游戏", "账号确认-进入游戏")
+                    button = self.round_by_find_area(screen, "打开游戏", "账号确认-进入游戏")
+                    if not button.is_success:
+                        label = self.ctx.ocr.run_ocr_single_line(screen[603:648, 897:1025])
+                        if "".join(label.split()) not in ("进入游戏", "入游戏"):
+                            emit("detail", "confirmation_missing")
+                            return self.round_fail("未找到已保存账号确认按钮")
+                    if not owns_window():
+                        emit("detail", "login_changed")
+                        return self.round_fail("游戏窗口不再属于本轮客户端")
+                    result = self.round_by_click_area("打开游戏", "账号确认-进入游戏")
                     if result.is_success:
                         self.confirmed = True
                         return self.round_wait("账号已确认", wait=1)
                     emit("detail", "confirmation_missing")
-                    return self.round_fail("未找到已保存账号确认按钮")
+                    return self.round_fail("无法点击已保存账号确认按钮")
                 if self.round_by_find_area(screen, "打开游戏", "点击进入游戏").is_success:
                     return self.round_success("点击进入游戏", wait=1)
-                return self.round_fail("未识别已保存账号确认画面")
+                return self.round_retry("等待账号确认后进入游戏", wait=1)
 
         enter = EnterSavedAccount(ctx)
         enter.force_login = False

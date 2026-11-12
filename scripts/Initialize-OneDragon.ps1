@@ -105,7 +105,8 @@ with zipfile.ZipFile(os.environ["VIVIAN_ZZZ_PREP_ARCHIVE"]) as archive:
         reference = archive.read(member)
         if path == version and lf(data).strip() == b"__version__ = 'v2.6.0'":
             continue
-        if (path == entry and data == installed) or (path == updates and data == pinned_updates):
+        previous_bridge = path == entry and hashlib.sha256(data).hexdigest() == "359e979a944186906c199e27ce0ed8318467ef41faab11e916c2a802cf3bec0b"
+        if previous_bridge or (path == entry and data == installed) or (path == updates and data == pinned_updates):
             continue
         if data != reference and lf(data) != lf(reference):
             raise RuntimeError("existing installed source differs: " + member.filename)

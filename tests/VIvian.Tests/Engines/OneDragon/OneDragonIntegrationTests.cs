@@ -41,6 +41,23 @@ public sealed class OneDragonIntegrationTests
         }
     }
 
+    [Theory]
+    [InlineData("进 入 游 戏", true)]
+    [InlineData("入 游 戏", true)]
+    [InlineData("点 击 进 入 游 戏", false)]
+    [InlineData("登 录 其 他 账 号", false)]
+    public async Task ConfirmationReadsOnlyTheLoginButtonCrop(string text, bool expected)
+    {
+        var frame = new VIvian.Infrastructure.Accounts.CapturedFrame(new byte[1920 * 1080 * 4], 1920, 1080, "");
+        var recognized = await ZenlessAccountImport.ConfirmButtonAsync(frame, [], default, (crop, _) =>
+        {
+            Assert.Equal(180, crop.Width);
+            Assert.Equal(87, crop.Height);
+            return Task.FromResult(new VIvian.Infrastructure.Accounts.OcrReadResult(true, null, [new(text, 2, 2, 70, 10)]));
+        });
+        Assert.Equal(expected, recognized);
+    }
+
     [Fact]
     public async Task PrepareRepairsBoundInstanceAndCompletesSecondInterruptedImport()
     {

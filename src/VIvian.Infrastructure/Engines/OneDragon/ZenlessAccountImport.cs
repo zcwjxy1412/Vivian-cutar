@@ -27,7 +27,9 @@ public static class ZenlessAccountImport
         var rows = hasExpanded
             ? await ReadExpandedRowsAsync(frame, ocr.Lines, ct).ConfigureAwait(false)
             : null;
-        var accounts = Recognize(frame.Width, frame.Height, ocr.Lines, hasClosed, hasExpanded, rows);
+        var header = await ReadHeaderAsync(frame, ocr.Lines, ct).ConfigureAwait(false);
+        var confirmed = hasClosed && await ConfirmButtonAsync(frame, ocr.Lines, ct).ConfigureAwait(false);
+        var accounts = Recognize(frame.Width, frame.Height, ocr.Lines, hasClosed, hasExpanded, rows, header, confirmed);
         return accounts.Count > 0 ? accounts : throw new InvalidOperationException(
             "截图中没有可唯一识别的脱敏账号，请收起列表后逐个截图，或重新截取清晰的完整列表。");
     }
@@ -97,7 +99,8 @@ public static class ZenlessAccountImport
     }
 
     internal static IReadOnlyList<string> Recognize(int width, int height, IReadOnlyList<RecognizedText> lines,
-        bool closed, bool expanded, IReadOnlyList<LoginAccountObservation>? expandedRows = null)
+        bool closed, bool expanded, IReadOnlyList<LoginAccountObservation>? expandedRows = null,
+        IReadOnlyList<LoginAccountObservation>? confirmedHeader = null, bool? confirmedButton = null)
     {
         if (!IsGameFrame(width, height) || closed == expanded) return [];
         RecognizedText[] InBox(double x, double y, double w, double h)
@@ -106,10 +109,10 @@ public static class ZenlessAccountImport
             return lines.Where(line => box.Contains(line.CenterX, line.CenterY)).ToArray();
         }
 
-        var header = MaskedPhoneParser.FindAll(InBox(610, 450, 590, 82));
+        var header = confirmedHeader ?? MaskedPhoneParser.FindAll(InBox(610, 450, 590, 82));
         if (header.Count != 1) return [];
         if (closed)
-            return LoginStateClassifier.FindExact(InBox(880, 580, 170, 85), "进入游戏") is not null
+            return (confirmedButton ?? (LoginStateClassifier.FindExact(InBox(880, 580, 170, 85), "进入游戏") is not null))
                 ? [header[0].NormalizedPhone] : [];
 
         var rows = expandedRows ?? MaskedPhoneParser.FindAll(InBox(620, 532, 610, 293));
@@ -119,14 +122,44 @@ public static class ZenlessAccountImport
             ? masks : [header[0].NormalizedPhone, .. masks];
     }
 
-    internal static async Task<IReadOnlyList<LoginAccountObservation>> ReadExpandedRowsAsync(CapturedFrame frame,
-        IReadOnlyList<RecognizedText> lines, CancellationToken ct,
-        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
+    internal static async Task<bool> ConfirmButtonAsync(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,
+        CancellationToken ct, Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
     {
-        var list = ScaleBox(frame.Width, frame.Height, 620, 532, 610, 293);
-        var visible = lines.Where(line => list.Contains(line.CenterX, line.CenterY)).ToArray();
-        var accounts = MaskedPhoneParser.FindAll(visible).ToList();
+        var box = ScaleBox(frame.Width, frame.Height, 870, 580, 180, 87);
+        if (LoginStateClassifier.FindExact(lines.Where(line => box.Contains(line.CenterX, line.CenterY)).ToArray(),
+                "进入游戏") is not null)
+            return true;
+
+        // The 4K game font can disappear from full-frame Windows OCR. This box contains only the confirmation label.
+        var crop = frame.Crop((int)box.X, (int)box.Y, (int)box.Width, (int)box.Height);
+        for (var i = 0; i < crop.Bgra.Length; i += 4)
+        {
+            var light = crop.Bgra[i] >= 190 && crop.Bgra[i + 1] >= 190 && crop.Bgra[i + 2] >= 190;
+            crop.Bgra[i] = crop.Bgra[i + 1] = crop.Bgra[i + 2] = light ? (byte)0 : (byte)255;
+        }
         readCrop ??= WindowsOcrReader.ReadAsync;
+        var read = await readCrop(crop, ct).ConfigureAwait(false);
+        // Used only with a verified closed dropdown and the account card. The stylized leading 进 can disappear.
+        return read.Available && read.Lines is [{ } label]
+            && LoginStateClassifier.Compact(label.Text) is "进入游戏" or "入游戏";
+    }
+
+    internal static Task<IReadOnlyList<LoginAccountObservation>> ReadHeaderAsync(CapturedFrame frame,
+        IReadOnlyList<RecognizedText> lines, CancellationToken ct) =>
+        ReadMaskedRowsAsync(frame, lines, ScaleBox(frame.Width, frame.Height, 610, 450, 590, 82), ct, WindowsOcrReader.ReadAsync);
+
+    internal static Task<IReadOnlyList<LoginAccountObservation>> ReadExpandedRowsAsync(CapturedFrame frame,
+        IReadOnlyList<RecognizedText> lines, CancellationToken ct,
+        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null) =>
+        ReadMaskedRowsAsync(frame, lines, ScaleBox(frame.Width, frame.Height, 620, 532, 610, 293), ct,
+            readCrop ?? WindowsOcrReader.ReadAsync);
+
+    private static async Task<IReadOnlyList<LoginAccountObservation>> ReadMaskedRowsAsync(CapturedFrame frame,
+        IReadOnlyList<RecognizedText> lines, ScreenRegion box, CancellationToken ct,
+        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>> readCrop)
+    {
+        var visible = lines.Where(line => box.Contains(line.CenterX, line.CenterY)).ToArray();
+        var accounts = MaskedPhoneParser.FindAll(visible).ToList();
         foreach (var line in visible)
         {
             var prefix = MaskedPhoneParser.ToAsciiDigits(line.Text.Trim());

@@ -96,7 +96,7 @@ public static class OneDragonAccountBatch
         await OneDragonInstalledSource.VerifyAsync(root, ct).ConfigureAwait(false);
     }
 
-    private const string BridgeDigest = "359E979A944186906C199E27CE0ED8318467EF41FAAB11E916C2A802CF3BEC0B";
+    private const string BridgeDigest = "41C671182B5BF210717F4003A236B07C4CE7963A55FBDE09B1277FBA4EA5EEF4";
 
     private static async Task<BatchTaskResult> RunAsync(IRunJournal journal, OneDragonAdapter adapter, IProcessSupervisor supervisor,
         string root, Guid batchId, OneDragonHandoff handoff, CancellationToken ct)

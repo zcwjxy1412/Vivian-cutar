@@ -58,6 +58,50 @@ public sealed class OneDragonIntegrationTests
         Assert.Equal(expected, recognized);
     }
 
+    [Theory]
+    [InlineData("下次在该设备需要重新登录当前账号", false)]
+    [InlineData("请重新登录", true)]
+    [InlineData("请输入短信验证码", true)]
+    public void LoginChallengeDoesNotTreatTheNormalLogoutDescriptionAsAuthentication(string text, bool expected)
+    {
+        Assert.Equal(expected, ZenlessLoginDriver.NeedsAuthentication([new(text, 662, 465, 280, 18)]));
+    }
+
+    [Theory]
+    [InlineData(false, false, "logout_pending")]
+    [InlineData(true, false, "logout")]
+    [InlineData(false, true, "retain")]
+    [InlineData(true, true, "logout_pending")]
+    public async Task LogoutRequiresAnUnambiguousKeepRecordSelection(bool keepSelected, bool clearSelected, string action)
+    {
+        var frame = new VIvian.Infrastructure.Accounts.CapturedFrame(new byte[1920 * 1080 * 4], 1920, 1080, "");
+        void DrawMarker(int y)
+        {
+            for (var row = y; row < y + 16; row++)
+            for (var x = 630; x < 652; x++)
+            {
+                var pixel = (row * frame.Width + x) * 4;
+                frame.Bgra[pixel + 1] = 215;
+                frame.Bgra[pixel + 2] = 245;
+            }
+        }
+
+        if (keepSelected) DrawMarker(516);
+        if (clearSelected) DrawMarker(437);
+        var result = await ZenlessLoginDriver.ClassifyLogoutAsync(frame,
+            [new("退出登录", 550, 280, 80, 25), new("退出并清除登录记录", 662, 433, 200, 26),
+             new("下次在该设备需要重新登录当前账号", 662, 465, 340, 22), new("确定", 1105, 760, 55, 28)],
+            default, (crop, _) =>
+            {
+                Assert.Equal(260, crop.Width);
+                return Task.FromResult(new VIvian.Infrastructure.Accounts.OcrReadResult(true, null,
+                    [new("退出并保留登录记录", 15, 13, 200, 26)]));
+            });
+        Assert.NotNull(result);
+        Assert.Equal(action, result.Value.Action);
+        Assert.Equal(action != "logout_pending", result.Value.Point is not null);
+    }
+
     [Fact]
     public async Task PrepareRepairsBoundInstanceAndCompletesSecondInterruptedImport()
     {

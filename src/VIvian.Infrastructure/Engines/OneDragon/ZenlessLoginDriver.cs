@@ -17,6 +17,8 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
     private readonly Dictionary<string, CapturedFrame> _templates = [];
     private Process? _game;
     private bool _handedOff;
+    private bool _keepGameForUser;
+    internal bool LeavesGameForUser => _keepGameForUser && _game is { HasExited: false };
     private DateTimeOffset? _started;
     internal int GamePid => _handedOff && _game is { HasExited: false } game
         ? game.Id : throw new InvalidOperationException("已核对的绝区零登录窗口已经退出。");
@@ -101,6 +103,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         var stable = 0;
         StarRailWindowInfo? previous = null;
         var waiting = "尚未找到登录账号确认页。";
+        string? lastAction = null;
         while (timeout.Elapsed < policy.LoginScreen)
         {
             ct.ThrowIfCancellationRequested();
@@ -115,11 +118,13 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                     var ocr = await WindowsOcrReader.ReadAsync(pixels, ct).ConfigureAwait(false);
                     if (!ocr.Available) return Failure("无法使用本地中文 OCR 核对已保存账号。");
                     var step = await ClassifyAsync(pixels, ocr.Lines, target.NormalizedPhone, ct).ConfigureAwait(false);
+                    lastAction = step.Action;
                     waiting = step.Action switch
                     {
                         "header_unknown" => "已找到登录卡片，但未能唯一核对脱敏手机号。",
                         "button_unknown" => "已读取登录账号，但未能确认「进入游戏」按钮。",
                         "account_missing" => "已打开保存账号列表，但未找到唯一的目标账号。",
+                        "logout_pending" => "已打开退出登录弹窗，正在核对保留登录记录选项。",
                         _ => "尚未完成登录账号确认。",
                     };
                     if (step.Action == "handoff" && ReadWindow() == window)
@@ -137,13 +142,15 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                     {
                         stable = 0;
                         if (step.Action == "needs_user")
-                            return Failure("绝区零需要重新登录、验证或确认协议。") with { NeedsUser = true };
+                            return NeedsUser("绝区零显示了需要本人处理的登录或验证提示。");
                         if (step.Point is { } point)
                         {
                             var count = counts.GetValueOrDefault(step.Action) + 1;
                             counts[step.Action] = count;
                             if (count > 2 || !Click(window, point))
-                                return Failure("登录画面变化或账号选择未响应。");
+                                return step.Action is "retain" or "logout"
+                                    ? NeedsUser("请在绝区零选中「退出并保留登录记录」后确认。")
+                                    : Failure("登录画面变化或账号选择未响应。");
                             await Task.Delay(1100, ct).ConfigureAwait(false);
                             continue;
                         }
@@ -154,7 +161,9 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
             else { stable = 0; waiting = "请将绝区零保持在前台。"; }
             await Task.Delay(450, ct).ConfigureAwait(false);
         }
-        return Failure("等待登录账号确认超时。" + waiting);
+        return lastAction == "logout_pending"
+            ? NeedsUser("无法核对保留登录记录的选项，请在绝区零选中「退出并保留登录记录」后确认。")
+            : Failure("等待登录账号确认超时。" + waiting);
     }
 
     private async Task<(string Action, ScreenRegion? Point)> ClassifyAsync(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,
@@ -168,17 +177,9 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
 
         var panel = Box(540, 250, 820, 570);
         var modal = lines.Where(line => panel.Contains(line.CenterX, line.CenterY)).ToArray();
-        var retain = Text("退出并保留登录记录", Box(610, 478, 390, 95));
-        if (retain is not null)
-        {
-            if (!LoginRetentionDetector.IsSelected(frame, modal))
-                return ("retain", new(retain.X - 1.4 * retain.Height, retain.Y, retain.Height, retain.Height));
-            var button = Text("确定", Box(1000, 680, 260, 140)) ?? Text("退出", Box(1000, 680, 260, 140));
-            return ("logout", Region(button));
-        }
-
-        if (modal.Any(line => new[] { "安全验证", "请输入密码", "请输入验证码", "短信验证码", "重新登录", "同意协议" }
-            .Any(marker => LoginStateClassifier.Compact(line.Text).Contains(marker, StringComparison.Ordinal))))
+        if (await ClassifyLogoutAsync(frame, modal, ct).ConfigureAwait(false) is { } logout)
+            return logout;
+        if (NeedsAuthentication(modal))
             return ("needs_user", null);
 
         var dropdown = Box(1197, 470, 65, 65);
@@ -204,6 +205,65 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         if (title is not null && Text("退出登录", panel) is null)
             return ("switch", Match("switch_account", Box(1776, 950, 100, 94)));
         return ("wait", null);
+    }
+
+    internal static bool NeedsAuthentication(IReadOnlyList<RecognizedText> lines) => lines.Any(line =>
+    {
+        var value = LoginStateClassifier.Compact(line.Text);
+        // The normal clear-record description says the next login will require authentication.
+        return value is "重新登录" or "请重新登录" or "登录已过期"
+            || new[] { "安全验证", "请输入密码", "请输入验证码", "短信验证码", "同意协议" }
+                .Any(marker => value.Contains(marker, StringComparison.Ordinal));
+    });
+
+    internal static async Task<(string Action, ScreenRegion? Point)?> ClassifyLogoutAsync(
+        CapturedFrame frame, IReadOnlyList<RecognizedText> lines, CancellationToken ct,
+        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
+    {
+        ScreenRegion Box(double x, double y, double w, double h) =>
+            ZenlessAccountImport.ScaleBox(frame.Width, frame.Height, x, y, w, h);
+        RecognizedText? InBox(string label, ScreenRegion box) =>
+            LoginStateClassifier.FindExact(lines.Where(line => box.Contains(line.CenterX, line.CenterY)).ToArray(), label);
+        async Task<RecognizedText?> ReadLabelAsync(string label, ScreenRegion box)
+        {
+            if (InBox(label, box) is { } whole) return whole;
+            var localized = await ZenlessAccountImport.ReadHighContrastAsync(frame, box, ct, readCrop).ConfigureAwait(false);
+            var match = localized.Available ? LoginStateClassifier.FindExact(localized.Lines, label) : null;
+            return match is null ? null : match with { X = match.X + (int)box.X, Y = match.Y + (int)box.Y };
+        }
+
+        const string keepLabel = "退出并保留登录记录";
+        const string clearLabel = "退出并清除登录记录";
+        var keepBox = Box(647, 498, 260, 49);
+        var clearBox = Box(647, 420, 260, 49);
+        var keep = InBox(keepLabel, keepBox);
+        var clear = InBox(clearLabel, clearBox);
+        var title = InBox("退出登录", Box(546, 250, 194, 112));
+        if (keep is null && clear is null && title is null &&
+            !lines.Any(line => LoginStateClassifier.Compact(line.Text).Contains("下次在该设备需要重新登录当前账号", StringComparison.Ordinal)))
+            return null;
+
+        keep ??= await ReadLabelAsync(keepLabel, keepBox).ConfigureAwait(false);
+        if (keep is null) return ("logout_pending", null);
+        clear ??= await ReadLabelAsync(clearLabel, clearBox).ConfigureAwait(false);
+        if (clear is null) return ("logout_pending", null);
+        var keepSelected = LoginRetentionDetector.HasSelectedMarker(frame, keep, minimumBlue: 0);
+        var clearSelected = LoginRetentionDetector.HasSelectedMarker(frame, clear, minimumBlue: 0);
+        if (keepSelected && !clearSelected)
+        {
+            var confirm = await ReadLabelAsync("确定", Box(1010, 735, 250, 79)).ConfigureAwait(false);
+            return confirm is null ? ("logout_pending", null) : ("logout", Region(confirm));
+        }
+        if (clearSelected && !keepSelected)
+            return ("retain", new(keep.X - 1.4 * keep.Height, keep.Y, keep.Height, keep.Height));
+        return ("logout_pending", null);
+    }
+
+    private LoginSwitchOutcome NeedsUser(string reason)
+    {
+        _keepGameForUser = true;
+        return Failure(reason + " 已保留游戏窗口。处理后请退出绝区零，在 Vivian 首页核对桌面交接再重试。")
+            with { NeedsUser = true };
     }
 
     private StarRailWindowInfo? ReadWindow(bool activate = false)

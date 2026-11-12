@@ -130,18 +130,22 @@ public static class ZenlessAccountImport
                 "进入游戏") is not null)
             return true;
 
-        // The 4K game font can disappear from full-frame Windows OCR. This box contains only the confirmation label.
+        var read = await ReadHighContrastAsync(frame, box, ct, readCrop).ConfigureAwait(false);
+        // Used only with a verified closed dropdown and the account card. The stylized leading 进 can disappear.
+        return read.Available && read.Lines is [{ } label]
+            && LoginStateClassifier.Compact(label.Text) is "进入游戏" or "入游戏";
+    }
+
+    internal static Task<OcrReadResult> ReadHighContrastAsync(CapturedFrame frame, ScreenRegion box,
+        CancellationToken ct, Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
+    {
         var crop = frame.Crop((int)box.X, (int)box.Y, (int)box.Width, (int)box.Height);
         for (var i = 0; i < crop.Bgra.Length; i += 4)
         {
             var light = crop.Bgra[i] >= 190 && crop.Bgra[i + 1] >= 190 && crop.Bgra[i + 2] >= 190;
             crop.Bgra[i] = crop.Bgra[i + 1] = crop.Bgra[i + 2] = light ? (byte)0 : (byte)255;
         }
-        readCrop ??= WindowsOcrReader.ReadAsync;
-        var read = await readCrop(crop, ct).ConfigureAwait(false);
-        // Used only with a verified closed dropdown and the account card. The stylized leading 进 can disappear.
-        return read.Available && read.Lines is [{ } label]
-            && LoginStateClassifier.Compact(label.Text) is "进入游戏" or "入游戏";
+        return (readCrop ?? WindowsOcrReader.ReadAsync)(crop, ct);
     }
 
     internal static Task<IReadOnlyList<LoginAccountObservation>> ReadHeaderAsync(CapturedFrame frame,

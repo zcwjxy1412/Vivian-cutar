@@ -75,7 +75,8 @@ public static class OneDragonAccountBatch
         }
         finally
         {
-            if (handoffClean && (await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false)).Ok)
+            if (handoffClean && !driver.LeavesGameForUser &&
+                (await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false)).Ok)
                 lease.ConfirmClean();
         }
     }

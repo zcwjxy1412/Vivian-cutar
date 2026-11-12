@@ -75,7 +75,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
                 {
                     var ocr = await WindowsOcrReader.ReadAsync(pixels, ct).ConfigureAwait(false);
                     if (!ocr.Available) return Failure("无法使用本地中文 OCR 核对已保存账号。");
-                    var step = Classify(pixels, ocr.Lines, target.NormalizedPhone, ct);
+                    var step = await ClassifyAsync(pixels, ocr.Lines, target.NormalizedPhone, ct).ConfigureAwait(false);
                     if (step.Action == "handoff" && ReadWindow() == window)
                     {
                         stable = previous == window ? stable + 1 : 1;
@@ -111,7 +111,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
         return Failure("未能核对唯一目标账号。请检查绝区零登录画面和该档案的脱敏手机号。");
     }
 
-    private (string Action, ScreenRegion? Point) Classify(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,
+    private async Task<(string Action, ScreenRegion? Point)> ClassifyAsync(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,
         string target, CancellationToken ct)
     {
         ScreenRegion Box(double x, double y, double width, double height) =>
@@ -141,8 +141,8 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
         var confirm = Text("进入游戏", Box(880, 580, 170, 85));
         if (expanded is not null && closed is null)
         {
-            var matches = MaskedPhoneParser.FindAll(lines, Box(620, 525, 610, 300))
-                .Where(row => row.NormalizedPhone == target).ToArray();
+            var rows = await ZenlessAccountImport.ReadExpandedRowsAsync(frame, lines, ct).ConfigureAwait(false);
+            var matches = rows.Where(row => row.NormalizedPhone == target).ToArray();
             return matches.Length == 1
                 ? ("choose", new(matches[0].X, matches[0].Y, matches[0].Width, matches[0].Height)) : ("wait", null);
         }

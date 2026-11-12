@@ -8,6 +8,39 @@ namespace VIvian.Tests.Engines.OneDragon;
 
 public sealed class OneDragonIntegrationTests
 {
+    [Theory]
+    [InlineData("139", 2)]
+    [InlineData("137", 1)]
+    public async Task ExpandedScreenshotRereadsOnlyIncompletePhoneRows(string rereadPrefix, int expected)
+    {
+        var frame = new VIvian.Infrastructure.Accounts.CapturedFrame(new byte[1920 * 1080 * 4], 1920, 1080, "");
+        VIvian.Core.Accounts.RecognizedText[] lines =
+        [
+            new("138****11", 739, 494, 154, 22),
+            new("138****11", 739, 608, 154, 22),
+            new("139", 739, 733, 47, 22),
+            new("1天前", 760, 775, 50, 19),
+        ];
+        var calls = 0;
+        var rows = await ZenlessAccountImport.ReadExpandedRowsAsync(frame, lines, default, (crop, _) =>
+        {
+            calls++;
+            Assert.True(crop.Width < frame.Width);
+            Assert.True(crop.Height < 100);
+            return Task.FromResult(new VIvian.Infrastructure.Accounts.OcrReadResult(true, null,
+                [new(rereadPrefix, 18, 26, 94, 44), new("22", 260, 26, 62, 44)]));
+        });
+        Assert.Equal(1, calls);
+        var accounts = ZenlessAccountImport.Recognize(frame.Width, frame.Height, lines, false, true, rows);
+        Assert.Equal(expected, accounts.Count);
+        Assert.Equal("138****11", accounts[0]);
+        if (expected == 2)
+        {
+            Assert.Equal("139****22", accounts[1]);
+            Assert.InRange(rows[1].CenterY, 744, 746);
+        }
+    }
+
     [Fact]
     public void LoginScreenshotRequiresTheZenlessCardAndKeepsDistinctSavedAccountsInOrder()
     {

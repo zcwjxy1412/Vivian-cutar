@@ -24,7 +24,10 @@ public static class ZenlessAccountImport
         var ocr = await WindowsOcrReader.ReadAsync(frame, ct).ConfigureAwait(false);
         if (!ocr.Available)
             throw new InvalidOperationException("Windows 无法识别此截图，请确认已安装简体中文 OCR，并使用清晰的游戏截图。");
-        var accounts = Recognize(frame.Width, frame.Height, ocr.Lines, hasClosed, hasExpanded);
+        var rows = hasExpanded
+            ? await ReadExpandedRowsAsync(frame, ocr.Lines, ct).ConfigureAwait(false)
+            : null;
+        var accounts = Recognize(frame.Width, frame.Height, ocr.Lines, hasClosed, hasExpanded, rows);
         return accounts.Count > 0 ? accounts : throw new InvalidOperationException(
             "截图中没有可唯一识别的脱敏账号，请收起列表后逐个截图，或重新截取清晰的完整列表。");
     }
@@ -71,7 +74,7 @@ public static class ZenlessAccountImport
     }
 
     internal static IReadOnlyList<string> Recognize(int width, int height, IReadOnlyList<RecognizedText> lines,
-        bool closed, bool expanded)
+        bool closed, bool expanded, IReadOnlyList<LoginAccountObservation>? expandedRows = null)
     {
         if (!IsGameFrame(width, height) || closed == expanded) return [];
         RecognizedText[] InBox(double x, double y, double w, double h)
@@ -86,11 +89,52 @@ public static class ZenlessAccountImport
             return LoginStateClassifier.FindExact(InBox(880, 580, 170, 85), "进入游戏") is not null
                 ? [header[0].NormalizedPhone] : [];
 
-        var rows = MaskedPhoneParser.FindAll(InBox(620, 532, 610, 293));
+        var rows = expandedRows ?? MaskedPhoneParser.FindAll(InBox(620, 532, 610, 293));
         var masks = rows.Select(row => row.NormalizedPhone).ToArray();
         if (masks.Distinct(StringComparer.Ordinal).Count() != masks.Length) return [];
         return masks.Contains(header[0].NormalizedPhone, StringComparer.Ordinal)
             ? masks : [header[0].NormalizedPhone, .. masks];
+    }
+
+    internal static async Task<IReadOnlyList<LoginAccountObservation>> ReadExpandedRowsAsync(CapturedFrame frame,
+        IReadOnlyList<RecognizedText> lines, CancellationToken ct,
+        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
+    {
+        var list = ScaleBox(frame.Width, frame.Height, 620, 532, 610, 293);
+        var visible = lines.Where(line => list.Contains(line.CenterX, line.CenterY)).ToArray();
+        var accounts = MaskedPhoneParser.FindAll(visible).ToList();
+        readCrop ??= WindowsOcrReader.ReadAsync;
+        foreach (var line in visible)
+        {
+            var prefix = MaskedPhoneParser.ToAsciiDigits(line.Text.Trim());
+            if (prefix.Length != 3 || !prefix.All(char.IsAsciiDigit) || line.Height < 8
+                || line.X * 1920 / frame.Width is < 700 or > 810
+                || accounts.Any(account => Math.Abs(account.CenterY - line.CenterY) < line.Height))
+                continue;
+
+            // Windows OCR can read the three leading digits and drop the tail in a full frame.
+            // Reread just that row at double scale, and require agreement on its prefix and position.
+            const int scale = 2;
+            var x = Math.Max(0, (int)Math.Round(line.X - line.Height * .4));
+            var y = Math.Max(0, (int)Math.Round(line.Y - line.Height * .6));
+            var w = Math.Min(frame.Width - x, (int)Math.Round(line.Height * 8.6));
+            var h = Math.Min(frame.Height - y, (int)Math.Round(line.Height * 2.1));
+            var retry = await readCrop(frame.Crop(x, y, w, h).Scale(scale), ct).ConfigureAwait(false);
+            if (!retry.Available || MaskedPhoneParser.FindAll(retry.Lines) is not [{ } recovered]
+                || !recovered.NormalizedPhone.StartsWith(prefix + "****", StringComparison.Ordinal)
+                || Math.Abs(recovered.X / scale + x - line.X) > line.Height * .5
+                || Math.Abs(recovered.CenterY / scale + y - line.CenterY) > line.Height * .5)
+                continue;
+
+            accounts.Add(recovered with
+            {
+                X = recovered.X / scale + x,
+                Y = recovered.Y / scale + y,
+                Width = recovered.Width / scale,
+                Height = recovered.Height / scale,
+            });
+        }
+        return accounts.OrderBy(account => account.CenterY).ThenBy(account => account.X).ToArray();
     }
 
     internal static ScreenRegion ScaleBox(int width, int height, double x, double y, double w, double h) =>

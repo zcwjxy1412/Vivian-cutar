@@ -70,6 +70,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
             Raise(nameof(CanRunForReal));
             Raise(nameof(CanPlayFromHome));
             Raise(nameof(RunHint));
+            Raise(nameof(Execution));
         }
     }
     private string _compatibility = "尚未检查";
@@ -103,7 +104,9 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
         : GenshinDailyWired
         ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
         : Id == GameId.ZenlessZoneZero && RealExecutionPolicy.IsUnifiedInstall
-        ? "导入登录截图并勾选账号后，Vivian 会在登录界面核对账号，再由 OneDragon 执行源档案中的任务。"
+        ? (CanRunForReal
+            ? "导入登录截图并勾选账号后，Vivian 会在登录界面核对账号，再由 OneDragon 执行源档案中的任务。"
+            : "真实任务未开放。请先保存 OneDragon 安装目录并完成核验。")
         : Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
         ? "可以执行：日常（清体力 + 每日实训 + 领奖），每次由你确认后启动；其他任务未开放。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
@@ -122,7 +125,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public void Show(EngineReadinessReport report)
     {
         Report = report;
-        foreach (var name in new[] { nameof(CanRunForReal), nameof(CanPlayFromHome), nameof(RunHint), nameof(HomePlayHint) }) Raise(name);
+        foreach (var name in new[] { nameof(CanRunForReal), nameof(CanPlayFromHome), nameof(RunHint), nameof(HomePlayHint), nameof(Execution) }) Raise(name);
         var (state, brush) = report.Compatibility switch
         {
             CompatibilityClass.NotConfigured => ("未设置路径", StateColors.Neutral),

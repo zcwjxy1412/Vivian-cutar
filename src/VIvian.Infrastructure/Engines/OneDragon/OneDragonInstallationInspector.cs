@@ -82,7 +82,7 @@ public static partial class OneDragonInstallationInspector
                 ? new("od:identity", "启动器身份", CheckState.Passed, EngineErrorCategory.None,
                     $"启动器与官方 {OneDragonContract.PinnedTag} WithRuntime-Full 发行包中的文件一致。")
                 : new("od:identity", "启动器身份", CheckState.Failed, EngineErrorCategory.IdentityMismatch,
-                    "启动器摘要与固定发行包不同，无法核对其身份。", "使用已经核对的官方完整包。"));
+                    "启动器文件与固定版不同，可能已被 OneDragon 更新替换。", "从已核对的 v2.6.0 WithRuntime-Full 原包一起恢复启动器和运行时。"));
             if (knownLauncher && compatibility is CompatibilityClass.UnknownVersion or CompatibilityClass.PendingValidation)
                 compatibility = CompatibilityClass.IdentityVerified;
             else if (!knownLauncher && compatibility == CompatibilityClass.PendingValidation)

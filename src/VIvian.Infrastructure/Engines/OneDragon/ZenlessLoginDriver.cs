@@ -22,7 +22,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
 
     private static bool HasProcess(string name) => StarRailWindow.IsProcessRunning(name);
 
-    private bool EngineBusy() => HasProcess("OneDragon-RuntimeLauncher") || HasProcess("OneDragon-Launcher");
+    internal static bool EngineBusy() => HasProcess("OneDragon-RuntimeLauncher") || HasProcess("OneDragon-Launcher");
 
     public async Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken ct)
     {
@@ -115,7 +115,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
         string target, CancellationToken ct)
     {
         ScreenRegion Box(double x, double y, double width, double height) =>
-            new(x * frame.Width / 1920, y * frame.Height / 1080, width * frame.Width / 1920, height * frame.Height / 1080);
+            ZenlessAccountImport.ScaleBox(frame.Width, frame.Height, x, y, width, height);
         RecognizedText? Text(string text, ScreenRegion box) =>
             LoginStateClassifier.FindExact(lines.Where(line => box.Contains(line.CenterX, line.CenterY)).ToArray(), text);
         ScreenRegion? Match(string name, ScreenRegion box) => GenshinLoginTemplates.Match(frame, _templates[name], box, ct);
@@ -211,24 +211,31 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root) : ILoginS
 
     private async Task LoadTemplatesAsync(CancellationToken ct)
     {
-        foreach (var (name, digest) in new[]
+        foreach (var name in new[] { "switch_account", "account_dropdown_expand", "account_dropdown_collapse" })
         {
-            ("switch_account", "3C4F74D1368DF72D7DA72122EE47BC06FB6D8BEA7CBA226E37BA5392DF6D276C"),
-            ("account_dropdown_expand", "C632794B1A632A7339FE879AD191B695AD5992FB55F89695ED7E0D75CDA59444"),
-            ("account_dropdown_collapse", "B51124493490EBA233C6FF6966E27FF06590F1DE88C79ABEC2B57BB9DFBEC11C"),
-        })
-        {
-            if (_templates.ContainsKey(name)) continue;
-            var file = Path.Combine(root, "assets", "template", "enter_game", name, "raw.png");
-            if (ReadOnlyFileAccess.FindReparsePoint(file) is not null)
-                throw new InvalidOperationException("OneDragon 登录识别素材包含链接。");
-            await using var stream = ReadOnlyFileAccess.OpenForStableRead(file);
-            if (!ReadOnlyFileAccess.HandlePathMatches(stream.SafeFileHandle, file) || stream.Length > 128 * 1024 ||
-                Convert.ToHexString(await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false)) != digest)
-                throw new InvalidOperationException("OneDragon 登录识别素材与 v2.6.0 不一致。");
-            _templates[name] = await WindowsOcrReader.DecodeFileAsync(file, ct).ConfigureAwait(false)
-                ?? throw new InvalidOperationException("无法读取 OneDragon 登录识别素材。");
+            if (!_templates.ContainsKey(name))
+                _templates[name] = await LoadTemplateAsync(root, name, ct).ConfigureAwait(false);
         }
+    }
+
+    internal static async Task<CapturedFrame> LoadTemplateAsync(string root, string name, CancellationToken ct)
+    {
+        var digest = name switch
+        {
+            "switch_account" => "3C4F74D1368DF72D7DA72122EE47BC06FB6D8BEA7CBA226E37BA5392DF6D276C",
+            "account_dropdown_expand" => "C632794B1A632A7339FE879AD191B695AD5992FB55F89695ED7E0D75CDA59444",
+            "account_dropdown_collapse" => "B51124493490EBA233C6FF6966E27FF06590F1DE88C79ABEC2B57BB9DFBEC11C",
+            _ => throw new ArgumentOutOfRangeException(nameof(name)),
+        };
+        var file = Path.Combine(root, "assets", "template", "enter_game", name, "raw.png");
+        if (ReadOnlyFileAccess.FindReparsePoint(file) is not null)
+            throw new InvalidOperationException("OneDragon 登录识别素材包含链接。");
+        await using var stream = ReadOnlyFileAccess.OpenForStableRead(file);
+        if (!ReadOnlyFileAccess.HandlePathMatches(stream.SafeFileHandle, file) || stream.Length > 128 * 1024 ||
+            Convert.ToHexString(await SHA256.HashDataAsync(stream, ct).ConfigureAwait(false)) != digest)
+            throw new InvalidOperationException("OneDragon 登录识别素材与 v2.6.0 不一致。");
+        return await WindowsOcrReader.DecodeFileAsync(file, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException("无法读取 OneDragon 登录识别素材。");
     }
 
     private static ScreenRegion? Region(RecognizedText? text) =>

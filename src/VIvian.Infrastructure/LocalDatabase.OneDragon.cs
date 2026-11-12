@@ -8,6 +8,57 @@ namespace VIvian.Infrastructure;
 
 public sealed partial class LocalDatabase
 {
+    internal async Task<Guid[]> RegisterZenlessScreenshotAsync(IReadOnlyList<string> masks, CancellationToken ct)
+    {
+        if (masks.Count == 0 || masks.Any(mask => mask.Length == 0 || MaskedPhoneParser.Normalize(mask) != mask)
+            || masks.Distinct(StringComparer.Ordinal).Count() != masks.Count)
+            throw new InvalidOperationException("截图包含无法唯一识别的账号。");
+
+        await using var connection = await OpenAsync(ct).ConfigureAwait(false);
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$game", (int)GameId.ZenlessZoneZero);
+        command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O"));
+        var idParameter = command.Parameters.AddWithValue("$id", "");
+        var maskedParameter = command.Parameters.AddWithValue("$masked", "");
+        var orderParameter = command.Parameters.AddWithValue("$order", 0);
+        var ids = new Guid[masks.Count];
+        for (var i = 0; i < masks.Count; i++)
+        {
+            maskedParameter.Value = masks[i];
+            command.CommandText = """
+                SELECT a.account_id FROM account_login_profiles p
+                JOIN game_accounts a ON a.account_id=p.account_id
+                WHERE a.game=$game AND p.normalized_phone=$masked;
+                """;
+            await using (var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            {
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (!Guid.TryParse(reader.GetString(0), out ids[i]) || await reader.ReadAsync(ct).ConfigureAwait(false))
+                        throw new InvalidOperationException("已有多个档案使用同一脱敏标识，请先核对账号。");
+                    continue;
+                }
+            }
+            ids[i] = Guid.NewGuid();
+            idParameter.Value = DatabaseId(ids[i]);
+            orderParameter.Value = i;
+            command.CommandText = """
+                INSERT INTO game_accounts(account_id,game,display_name,region,sort_order,login_state)
+                VALUES($id,$game,$masked,'国服',
+                    (SELECT COALESCE(MAX(sort_order),-1)+1 FROM game_accounts WHERE game=$game),'recognized');
+                INSERT INTO account_settings(account_id) VALUES($id);
+                INSERT INTO account_task_plans(account_id,plan_json) VALUES($id,'[]');
+                INSERT INTO account_login_profiles(account_id,masked_phone,normalized_phone,row_order,confidence,last_scan_at,detail)
+                VALUES($id,$masked,$masked,$order,0.9,$at,'登录截图导入，执行时核对登录画面');
+                """;
+            await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        transaction.Commit();
+        return ids;
+    }
+
     public async Task SaveOneDragonBindingAsync(GameAccount account, OneDragonProfileBinding binding, string masked,
         CancellationToken ct = default)
     {

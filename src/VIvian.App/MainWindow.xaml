@@ -157,7 +157,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="10,2" Margin="0,0,6,4"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
 <Button Content="&#xE713;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Click="OpenGameSettings" Tag="{Binding Id}" ToolTip="配置" Padding="10,8" Margin="0,0,8,0" AutomationProperties.Name="{Binding Name, StringFormat={}{0} 配置}"/>
-<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.PlayGameCardCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" IsEnabled="{Binding CanPlayFromHome}" ToolTip="{Binding HomePlayHint}" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
+<Button Style="{StaticResource Primary}" Content="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Command="{Binding DataContext.PlayGameCardCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding Id}" IsEnabled="{Binding CanPlayFromHome}" ToolTip="{Binding HomePlayHint}" ToolTipService.ShowOnDisabled="True" Padding="12,9" Margin="0" AutomationProperties.Name="{Binding Name, StringFormat=运行 {0}}"/>
 </StackPanel></Grid></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
 
 <!-- 最近运行 + 本次运行 -->
@@ -458,6 +458,7 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBlock Text="{Binding LastResult}" Style="{StaticResource Small}"/>
 </StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
 <WrapPanel Margin="0,0,0,8">
+<Button x:Name="ImportZenlessScreenshotButton" Content="导入登录截图" Command="{Binding ImportZenlessScreenshotCommand}" Margin="0,0,8,0"/>
 <Button Content="新增账号" Command="{Binding AddZenlessCommand}" Margin="0,0,8,0"/>
 <Button Content="上移" Command="{Binding MoveZenlessUpCommand}" Margin="0,0,8,0"/>
 <Button Content="下移" Command="{Binding MoveZenlessDownCommand}"/>

@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using System.Collections.ObjectModel;
 using VIvian.Core;
 using VIvian.Infrastructure;
@@ -58,6 +59,7 @@ public sealed partial class AccountViewModel
         .Where(a => a.AutoRun && a.Enabled && !a.IsLegacyPlaceholder)
         .OrderBy(a => a.Order).ThenBy(a => a.Id).ToArray();
 
+    public AsyncCommand ImportZenlessScreenshotCommand { get; private set; } = null!;
     public AsyncCommand AddZenlessCommand { get; private set; } = null!;
     public AsyncCommand SaveZenlessCommand { get; private set; } = null!;
     public AsyncCommand MoveZenlessUpCommand { get; private set; } = null!;
@@ -68,6 +70,7 @@ public sealed partial class AccountViewModel
     private void InitializeZenlessCommands()
     {
         AsyncCommand Command(Func<Task> task) => new(() => _serializeZenless(task), ex => ZenlessStatus = ex.Message);
+        ImportZenlessScreenshotCommand = Command(ImportZenlessScreenshotAsync);
         AddZenlessCommand = Command(async () =>
         {
             var account = await _database.AddAccountAsync(GameId.ZenlessZoneZero, "新绝区零账号", "国服", null);
@@ -127,7 +130,7 @@ public sealed partial class AccountViewModel
             }
             if (account is null)
             {
-                ZenlessStatus = "在 OneDragon 保存实例后，在此新增或选中 Vivian 账号进行绑定。";
+                ZenlessStatus = "导入国服绝区零登录截图，即可建立账号及独立的 OneDragon 源档案。";
                 return;
             }
             var settings = await _database.LoadAccountSettingsAsync(account.Id);
@@ -136,7 +139,7 @@ public sealed partial class AccountViewModel
             var binding = OneDragonProfileBinding.FromSettings(settings.Values);
             if (binding is null || !string.Equals(root, binding.Root, StringComparison.OrdinalIgnoreCase))
             {
-                ZenlessStatus = "请选中 OneDragon 实例，填写登录确认卡片显示的脱敏手机号，然后保存。";
+                ZenlessStatus = "请导入该账号的登录截图，或选择已有 OneDragon 实例并保存脱敏手机号。";
                 return;
             }
             if (!keepDraft)
@@ -176,6 +179,50 @@ public sealed partial class AccountViewModel
         if (!System.IO.Path.IsPathFullyQualified(root))
             throw new InvalidOperationException("请先在引擎与环境保存 OneDragon 安装目录。");
         return System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(root));
+    }
+
+    private async Task ImportZenlessScreenshotAsync()
+    {
+        var root = RequireZenlessRoot();
+        var screenshot = new OpenFileDialog
+        {
+            Title = "导入绝区零登录截图",
+            Filter = "图片 (*.png;*.jpg;*.jpeg;*.bmp)|*.png;*.jpg;*.jpeg;*.bmp",
+            CheckFileExists = true,
+        };
+        if (screenshot.ShowDialog() != true) return;
+        ZenlessStatus = "正在本机识别绝区零登录截图…";
+        var masks = await ZenlessAccountImport.ReadScreenshotAsync(root, screenshot.FileName);
+
+        var gamePath = @"E:\ZenlessZoneZero Game\ZenlessZoneZero.exe";
+        if (!System.IO.File.Exists(gamePath))
+        {
+            var executable = new OpenFileDialog
+            {
+                Title = "选择国服绝区零客户端",
+                Filter = "ZenlessZoneZero.exe|ZenlessZoneZero.exe",
+                CheckFileExists = true,
+            };
+            if (executable.ShowDialog() != true)
+            {
+                ZenlessStatus = "已取消选择客户端。";
+                return;
+            }
+            gamePath = executable.FileName;
+        }
+
+        IReadOnlyList<Guid> ids;
+        try
+        {
+            ids = await ZenlessAccountImport.RegisterAsync(_database, root, _zenlessProfileDirectory, gamePath, masks);
+        }
+        finally
+        {
+            await ReloadZenlessAsync();
+        }
+        SelectedZenless = ZenlessRows.Single(row => row.Id == ids[0]);
+        await RefreshZenlessSourceAsync();
+        ZenlessStatus = $"已核对 {ids.Count} 个账号及对应的 OneDragon 源档案。请确认名称和顺序，勾选「加入日常批次」并保存。";
     }
 
     private async Task SaveZenlessAsync()

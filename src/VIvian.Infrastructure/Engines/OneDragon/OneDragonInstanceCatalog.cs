@@ -41,7 +41,7 @@ public static class OneDragonInstanceCatalog
         { return new(OneDragonInstanceStatus.Unavailable, []); }
     }
 
-    private static OneDragonInstanceList Parse(string yaml)
+    internal static OneDragonInstanceList Parse(string yaml)
     {
         var parsed = OneDragonConfigRead.ReadSequence(yaml, "instance_list");
         if (parsed is null) return new(OneDragonInstanceStatus.Invalid, []);

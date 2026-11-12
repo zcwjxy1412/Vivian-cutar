@@ -182,7 +182,7 @@ public partial class MainWindow : Window
                 {
                     0 => vm.Accounts.Rows.Count > 0 ? StarRailAccountList : ScanStarRailAccountsButton,
                     1 => vm.GenshinConfiguration.Accounts.Count > 0 ? GenshinAccountList : ImportGenshinButton,
-                    _ => AccountTabs,
+                    _ => vm.Accounts.ZenlessRows.Count > 0 ? ZenlessAccountList : ImportZenlessScreenshotButton,
                 };
                 break;
             case HomeStatusAction.ConfigureBetterGi:

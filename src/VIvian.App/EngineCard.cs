@@ -35,15 +35,19 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
         GameId.Genshin => GenshinDailyWired && InstallPath == SavedInstallPath &&
             Report?.Compatibility is CompatibilityClass.PendingValidation or CompatibilityClass.IdentityVerified,
         GameId.ZenlessZoneZero => RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall
-            && InstallPath == SavedInstallPath && Report?.Compatibility == CompatibilityClass.IdentityVerified,
+            && InstallPath == SavedInstallPath && Report is { Compatibility: CompatibilityClass.IdentityVerified } zenless
+            && !zenless.Checks.Any(check => check.State == CheckState.Failed && check.Id != "od:instances"),
         _ => false,
     });
     public bool CanPlayFromHome => CanRunForReal || (CanOperateWorkspace && HomeRewardWired &&
         InstallPath == SavedInstallPath && Report?.Compatibility == CompatibilityClass.PendingValidation);
-    public string HomePlayHint => HomeRewardWired ? "原神日常 · 按勾选顺序执行已保存计划" : "运行";
+    public string HomePlayHint => HomeRewardWired ? "原神日常 · 按勾选顺序执行已保存计划"
+        : Id == GameId.ZenlessZoneZero && !CanRunForReal ? Evidence : "运行";
     public string RunHint => !CanOperateWorkspace ? "隔离验收 · 只读"
         : HomeRewardWired ? (CanPlayFromHome ? "按顺序执行保存计划" : "日常 · 待安装核验")
-        : CanRunForReal ? "可以执行" : Id == GameId.StarRail || GenshinDailyWired ? "待安装核验" : "接入中";
+        : CanRunForReal ? "可以执行"
+        : Id == GameId.ZenlessZoneZero && RealExecutionPolicy.IsUnifiedInstall ? Compatibility
+        : Id == GameId.StarRail || GenshinDailyWired ? "待安装核验" : "接入中";
     /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
     public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
     public string BannerTo => Id switch { GameId.Genshin => "#2B4C9A", GameId.StarRail => "#2A2F7A", _ => "#3A2A10" };
@@ -70,9 +74,17 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     }
     private string _compatibility = "尚未检查";
     /// <summary>Short state shown on the card.</summary>
-    public string Compatibility { get => _compatibility; set => Set(ref _compatibility, value); }
+    public string Compatibility
+    {
+        get => _compatibility;
+        set { Set(ref _compatibility, value); Raise(nameof(RunHint)); }
+    }
     private string _evidence = "保存安装目录后，VIvian 会只读检查引擎文件。";
-    public string Evidence { get => _evidence; set => Set(ref _evidence, value); }
+    public string Evidence
+    {
+        get => _evidence;
+        set { Set(ref _evidence, value); Raise(nameof(HomePlayHint)); }
+    }
     private string _stateBrush = StateColors.Neutral;
     public string StateBrush { get => _stateBrush; set => Set(ref _stateBrush, value); }
     private string _detectedVersion = "检测到的版本：—";
@@ -90,6 +102,8 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
         : HomeRewardWired ? "按账号管理的勾选顺序执行已保存的任务和消耗设置；启用合成时先合成树脂，再领取每日奖励。"
         : GenshinDailyWired
         ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
+        : Id == GameId.ZenlessZoneZero && RealExecutionPolicy.IsUnifiedInstall
+        ? "导入登录截图并勾选账号后，Vivian 会在登录界面核对账号，再由 OneDragon 执行源档案中的任务。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
         ? "可以执行：日常（清体力 + 每日实训 + 领奖），每次由你确认后启动；其他任务未开放。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
@@ -108,7 +122,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public void Show(EngineReadinessReport report)
     {
         Report = report;
-        foreach (var name in new[] { nameof(CanRunForReal), nameof(CanPlayFromHome), nameof(RunHint) }) Raise(name);
+        foreach (var name in new[] { nameof(CanRunForReal), nameof(CanPlayFromHome), nameof(RunHint), nameof(HomePlayHint) }) Raise(name);
         var (state, brush) = report.Compatibility switch
         {
             CompatibilityClass.NotConfigured => ("未设置路径", StateColors.Neutral),

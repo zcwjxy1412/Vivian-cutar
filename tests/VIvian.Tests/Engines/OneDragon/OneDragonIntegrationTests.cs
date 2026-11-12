@@ -9,6 +9,55 @@ namespace VIvian.Tests.Engines.OneDragon;
 public sealed class OneDragonIntegrationTests
 {
     [Fact]
+    public void LoginScreenshotRequiresTheZenlessCardAndKeepsDistinctSavedAccountsInOrder()
+    {
+        VIvian.Core.Accounts.RecognizedText[] lines =
+        [
+            new("138****1111", 700, 480, 150, 20),
+            new("138****1111", 700, 554, 150, 20),
+            new("139****2222", 700, 615, 150, 20),
+            new("进入游戏", 912, 613, 85, 20),
+        ];
+        Assert.Empty(ZenlessAccountImport.Recognize(1920, 1080, lines, false, false));
+        Assert.Equal("138****1111", Assert.Single(ZenlessAccountImport.Recognize(1920, 1080, lines, true, false)));
+        Assert.Equal(["138****1111", "139****2222"], ZenlessAccountImport.Recognize(1920, 1080, lines, false, true));
+        Assert.Empty(ZenlessAccountImport.Recognize(1920, 1080,
+            [.. lines, new("139****2222", 700, 675, 150, 20)], false, true));
+    }
+
+    [Fact]
+    public async Task ScreenshotRegistrationReusesAccountAndCreatesAnIndependentNativeProfile()
+    {
+        await using var fixture = new OneDragonFixture();
+        var db = new LocalDatabase(Path.Combine(fixture.Root, "accounts.db"));
+        await db.InitializeAsync();
+        var root = fixture.Root;
+        Directory.CreateDirectory(Path.Combine(root, "config"));
+        var source = Path.Combine(root, "config", "one_dragon.yml");
+        var original = "instance_list:\n- idx: 1\n  name: '01'\n  active: true\n  active_in_od: true\n";
+        await File.WriteAllTextAsync(source, original);
+        var first = await db.RegisterZenlessScreenshotAsync(["138****1111", "139****2222"], default);
+        Assert.All(first, id => Assert.NotEqual(Guid.Empty, id));
+        var a = await OneDragonImportedProfile.EnsureAsync(root, first[0], @"C:\Games\ZenlessZoneZero.exe", default);
+        var b = await OneDragonImportedProfile.EnsureAsync(root, first[1], @"C:\Games\ZenlessZoneZero.exe", default);
+        Assert.Equal(2, a.Instance);
+        Assert.Equal(3, b.Instance);
+        Assert.StartsWith(original, await File.ReadAllTextAsync(source));
+        Assert.Equal(a, await OneDragonImportedProfile.EnsureAsync(root, first[0], @"C:\Games\ZenlessZoneZero.exe", default));
+        var accounts = (await db.LoadAccountsAsync(GameId.ZenlessZoneZero)).Where(account => !account.IsLegacyPlaceholder).ToArray();
+        await db.SaveOneDragonBindingAsync(accounts.Single(account => account.Id == first[0]), a, "138****1111");
+        await db.SaveOneDragonBindingAsync(accounts.Single(account => account.Id == first[1]), b, "139****2222");
+        Assert.Equal(first, await db.RegisterZenlessScreenshotAsync(["138****1111", "139****2222"], default));
+        Assert.Equal(a, OneDragonProfileBinding.FromSettings((await db.LoadAccountSettingsAsync(first[0])).Values));
+        Assert.Equal(b, OneDragonProfileBinding.FromSettings((await db.LoadAccountSettingsAsync(first[1])).Values));
+        Assert.All(accounts, account => Assert.False(account.AutoRun));
+        var profile = await OneDragonSourceProfile.ReadAsync(a);
+        Assert.Equal("engagement_reward", Assert.Single(profile.Tasks, task => task.Enabled).Id);
+        await OneDragonSourceProfile.SaveTaskAsync(a, profile.Revision, "engagement_reward", false);
+        Assert.True((await OneDragonSourceProfile.ReadAsync(b)).Tasks.First().Enabled);
+    }
+
+    [Fact]
     public async Task StoresOnlyTheBindingAndRejectsSharedInstanceOrIdentity()
     {
         await using var fixture = new OneDragonFixture();

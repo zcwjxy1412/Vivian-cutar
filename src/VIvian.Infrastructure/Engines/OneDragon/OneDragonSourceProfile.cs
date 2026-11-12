@@ -28,43 +28,126 @@ public sealed record OneDragonSourceProfile(string GamePath, string Revision, IR
 
         var account = await OneDragonConfigRead.ReadAsync(binding.Root, Relative(binding, "game_account.yml"), ct).ConfigureAwait(false)
             ?? throw new InvalidOperationException("请在该 OneDragon 实例中保存绝区零游戏路径。");
-        var lines = OneDragonConfigRead.Lines(account);
-        var region = YamlScalarEditor.Locate(lines, "game_region")?.Value ?? "cn";
-        var language = YamlScalarEditor.Locate(lines, "game_language")?.Value ?? "cn";
-        var gamePath = YamlScalarEditor.Locate(lines, "game_path")?.Value;
-        if (region != "cn" || language != "cn" || gamePath is null || !Path.IsPathFullyQualified(gamePath)
-            || !string.Equals(Path.GetFileName(gamePath), "ZenlessZoneZero.exe", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("请在 OneDragon 为该实例设置国服简体中文客户端及 ZenlessZoneZero.exe 路径。");
+        var gamePath = ReadGamePath(account);
         var (text, tasks) = await ReadGroupAsync(binding, ct).ConfigureAwait(false);
-        return new(Path.GetFullPath(gamePath), Digest(text), tasks);
+        return new(gamePath, Digest(text), tasks);
     }
 
-    public static async Task SaveTaskAsync(OneDragonProfileBinding binding, string revision, string appId, bool enabled, CancellationToken ct = default)
+    private static string ReadGamePath(string account)
+    {
+        var lines = OneDragonConfigRead.Lines(account);
+        CheckRegion(lines);
+        var gamePath = YamlScalarEditor.Locate(lines, "game_path")?.Value;
+        if (gamePath is null || !Path.IsPathFullyQualified(gamePath)
+            || !string.Equals(Path.GetFileName(gamePath), "ZenlessZoneZero.exe", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("请在 OneDragon 为该实例保存国服 ZenlessZoneZero.exe 路径。");
+        return Path.GetFullPath(gamePath);
+    }
+
+    private static void CheckRegion(IReadOnlyList<string> lines)
+    {
+        if ((YamlScalarEditor.Locate(lines, "game_region")?.Value ?? "cn") != "cn"
+            || (YamlScalarEditor.Locate(lines, "game_language")?.Value ?? "cn") != "cn")
+            throw new InvalidOperationException("请在 OneDragon 为该实例选择国服和简体中文。");
+    }
+
+    internal static string GameAccountDefaults(string gamePath) =>
+        $"game_path: \"{gamePath.Replace('\\', '/')}\"\ngame_region: cn\ngame_language: cn\n";
+
+    internal static string TaskDefaults() => "app_list:\n" + string.Concat(OneDragonTaskPlans.Catalog.Select(task =>
+        TaskEntry(task.Id, task.Id == "engagement_reward")));
+
+    private static string TaskEntry(string id, bool enabled) =>
+        $"- app_id: {id}\n  enabled: {(enabled ? "true" : "false")}\n";
+
+    internal static async Task PrepareMissingAsync(OneDragonProfileBinding binding, string gamePath, CancellationToken ct)
+    {
+        var catalog = await OneDragonInstanceCatalog.ReadAsync(binding.Root, ct).ConfigureAwait(false);
+        if (!catalog.ContainsExactlyOne([binding.Instance]))
+            throw new InvalidOperationException("请在 OneDragon 核对该实例，并将一条龙实例范围设为全部实例。");
+
+        var accountFile = Relative(binding, "game_account.yml");
+        var account = await OneDragonConfigRead.ReadAsync(binding.Root, accountFile, ct).ConfigureAwait(false);
+        var updatedAccount = account ?? GameAccountDefaults(gamePath);
+        if (account is not null)
+        {
+            var lines = YamlScalarEditor.Lines(account);
+            CheckRegion(lines);
+            var portablePath = gamePath.Replace('\\', '/');
+            if (YamlScalarEditor.Locate(lines, "game_path") is { Value.Length: 0, Quote: not null } path)
+                updatedAccount = YamlScalarEditor.Replace(account, path, portablePath);
+            else if (!lines.Any(line => line.StartsWith("game_path:", StringComparison.Ordinal)))
+                updatedAccount = account.TrimEnd('\r', '\n') + $"\ngame_path: \"{portablePath}\"\n";
+        }
+        _ = ReadGamePath(updatedAccount);
+        if (updatedAccount != account)
+            await WriteAsync(binding.Root, accountFile, account, updatedAccount, ct).ConfigureAwait(false);
+
+        var groupFile = Group(binding);
+        if (await OneDragonConfigRead.ReadAsync(binding.Root, groupFile, ct).ConfigureAwait(false) is null)
+            await WriteAsync(binding.Root, groupFile, null, TaskDefaults(), ct).ConfigureAwait(false);
+        await ReadAsync(binding, ct).ConfigureAwait(false);
+    }
+
+    public static Task SaveTaskAsync(OneDragonProfileBinding binding, string revision, string appId, bool enabled, CancellationToken ct = default) =>
+        SaveTasksAsync(binding, revision, new Dictionary<string, bool> { [appId] = enabled }, ct);
+
+    public static async Task SaveTasksAsync(OneDragonProfileBinding binding, string revision,
+        IReadOnlyDictionary<string, bool> desired, CancellationToken ct = default)
     {
         var (text, tasks) = await ReadGroupAsync(binding, ct).ConfigureAwait(false);
         if (revision != Digest(text)) throw new InvalidOperationException("OneDragon 已修改该档案，请刷新后重试。");
-        if (tasks.SingleOrDefault(task => task.Id == appId) is not { CanEdit: true } existing)
-            throw new InvalidOperationException("此任务在 OneDragon 的详细设置中维护。");
-        if (existing.Enabled == enabled) return;
-        var lines = YamlScalarEditor.Lines(text);
-        var index = lines.FindIndex(line => line.StartsWith("- app_id:", StringComparison.Ordinal)
-            && YamlScalarEditor.Locate([line[2..]], "app_id")?.Value == appId);
-        if (index < 0 || index + 1 >= lines.Count || !lines[index + 1].StartsWith("  enabled:", StringComparison.Ordinal)
-            || YamlScalarEditor.Locate([lines[index + 1][2..]], "enabled") is not { } value)
-            throw new InvalidOperationException("此档案的字段布局请在 OneDragon 中修改。");
-        var updated = YamlScalarEditor.Replace(text, value with { Line = index + 1, ValueStart = value.ValueStart + 2 },
-            enabled ? "true" : "false");
-        var path = Path.Combine(binding.Root, "config", Group(binding));
+
+        var updated = text;
+        foreach (var (appId, enabled) in desired)
+        {
+            if (!OneDragonTaskPlans.Catalog.Any(task => task.Id == appId))
+                throw new InvalidOperationException("此任务在 OneDragon 的详细设置中维护。");
+            var existing = tasks.SingleOrDefault(task => task.Id == appId);
+            if (existing is null)
+            {
+                if (!enabled) continue;
+                var empty = YamlScalarEditor.Lines(updated).FindIndex(line => line.TrimEnd() == "app_list: []");
+                if (empty >= 0)
+                {
+                    var lines = YamlScalarEditor.Lines(updated);
+                    lines[empty] = "app_list:";
+                    updated = string.Join('\n', lines);
+                }
+                updated = updated.TrimEnd('\r', '\n') + "\n" + TaskEntry(appId, true);
+                continue;
+            }
+            if (existing.Enabled == enabled) continue;
+            var current = YamlScalarEditor.Lines(updated);
+            var index = current.FindIndex(line => line.StartsWith("- app_id:", StringComparison.Ordinal)
+                && YamlScalarEditor.Locate([line[2..]], "app_id")?.Value == appId);
+            if (index < 0 || index + 1 >= current.Count || !current[index + 1].StartsWith("  enabled:", StringComparison.Ordinal)
+                || YamlScalarEditor.Locate([current[index + 1][2..]], "enabled") is not { } value)
+                throw new InvalidOperationException("此档案的字段布局请在 OneDragon 中修改。");
+            updated = YamlScalarEditor.Replace(updated, value with { Line = index + 1, ValueStart = value.ValueStart + 2 },
+                enabled ? "true" : "false");
+        }
+        if (updated != text)
+            await WriteAsync(binding.Root, Group(binding), text, updated, ct).ConfigureAwait(false);
+    }
+
+    private static async Task WriteAsync(string root, string relative, string? before, string updated, CancellationToken ct)
+    {
+        var path = Path.Combine(root, "config", relative);
+        if (ReadOnlyFileAccess.FindReparsePoint(path) is not null)
+            throw new InvalidOperationException("OneDragon 源档案路径包含链接。");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             await File.WriteAllTextAsync(temp, updated, new UTF8Encoding(false), ct).ConfigureAwait(false);
-            var (current, _) = await ReadGroupAsync(binding, ct).ConfigureAwait(false);
-            if (current != text || new OneDragonProcessProbe().CountRunning(Path.Combine(binding.Root, OneDragonContract.EntryProgram)) > 0)
+            var current = await OneDragonConfigRead.ReadAsync(root, relative, ct).ConfigureAwait(false);
+            if (current != before || ZenlessLoginDriver.EngineBusy())
                 throw new InvalidOperationException("OneDragon 已打开或修改了档案，请关闭后刷新。");
-            File.Replace(temp, path, null);
-            var (readBack, _) = await ReadGroupAsync(binding, CancellationToken.None).ConfigureAwait(false);
-            if (readBack != updated) throw new InvalidOperationException("源档案写入后的回读不一致，请在 OneDragon 核对。");
+            if (before is null) File.Move(temp, path);
+            else File.Replace(temp, path, null);
+            if (await OneDragonConfigRead.ReadAsync(root, relative, CancellationToken.None).ConfigureAwait(false) != updated)
+                throw new InvalidOperationException("源档案写入后的回读不一致，请在 OneDragon 核对。");
         }
         finally { if (File.Exists(temp)) File.Delete(temp); }
     }

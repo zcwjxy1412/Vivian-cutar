@@ -9,7 +9,9 @@ public partial class MainWindow : Window
         viewModel.RunWithHomeRewardStopKey = RunWithRewardAcceptanceStopKeyAsync;
         Activated += (_, _) =>
         {
-            if (AccountTabs.SelectedIndex == 2 && viewModel.CanEditWorkspace)
+            if (viewModel.CanEditWorkspace &&
+                ((Navigation.SelectedItem == AccountManagementTab && AccountTabs.SelectedIndex == 2) ||
+                 (Navigation.SelectedIndex == 1 && GameTabs.SelectedIndex == 2)))
                 _ = viewModel.Accounts.RefreshZenlessSourceAsync(keepDraft: true);
         };
         var area = SystemParameters.WorkArea;

@@ -42,6 +42,44 @@ public sealed class OneDragonIntegrationTests
     }
 
     [Fact]
+    public async Task PrepareRepairsBoundInstanceAndCompletesSecondInterruptedImport()
+    {
+        await using var fixture = new OneDragonFixture();
+        var root = fixture.Root;
+        var db = new LocalDatabase(Path.Combine(root, "accounts.db"));
+        await db.InitializeAsync();
+        Directory.CreateDirectory(Path.Combine(root, "config", "01"));
+        await File.WriteAllTextAsync(Path.Combine(root, "config", "one_dragon.yml"),
+            "instance_list:\n- idx: 1\n  name: '01'\n  active: true\n  active_in_od: true\n");
+        var ids = await db.RegisterZenlessScreenshotAsync(["138****11", "139****22"], default);
+        var accounts = await db.LoadAccountsAsync(GameId.ZenlessZoneZero);
+        var first = accounts.Single(account => account.Id == ids[0]);
+        var second = accounts.Single(account => account.Id == ids[1]);
+        var firstBinding = new OneDragonProfileBinding(root, 1);
+        await db.SaveOneDragonBindingAsync(first with { AutoRun = true }, firstBinding, "138****11");
+        var gamePath = @"C:\Games\ZenlessZoneZero.exe";
+
+        await ZenlessAccountImport.PrepareRegisteredAsync(db, first, root, gamePath, "138****11", default);
+        await ZenlessAccountImport.PrepareRegisteredAsync(db, second, root, gamePath, "139****22", default);
+        var snapshot = await OneDragonSourceProfile.ReadAsync(firstBinding);
+        await OneDragonSourceProfile.SaveTasksAsync(firstBinding, snapshot.Revision,
+            new Dictionary<string, bool> { ["engagement_reward"] = false, ["email"] = true });
+        await ZenlessAccountImport.PrepareRegisteredAsync(db, first, root, gamePath, "138****11", default);
+        var after = await OneDragonSourceProfile.ReadAsync(firstBinding);
+        Assert.Equal("email", Assert.Single(after.Tasks, task => task.Enabled).Id);
+        Assert.Equal(firstBinding, OneDragonProfileBinding.FromSettings((await db.LoadAccountSettingsAsync(first.Id)).Values));
+        var secondBinding = Assert.IsType<OneDragonProfileBinding>(
+            OneDragonProfileBinding.FromSettings((await db.LoadAccountSettingsAsync(second.Id)).Values));
+        Assert.NotEqual(firstBinding.Instance, secondBinding.Instance);
+        Assert.Equal("engagement_reward", Assert.Single((await OneDragonSourceProfile.ReadAsync(secondBinding)).Tasks,
+            task => task.Enabled).Id);
+        Assert.True((await db.LoadAccountsAsync(GameId.ZenlessZoneZero)).Single(row => row.Id == first.Id).AutoRun);
+        await db.DeleteAccountAsync(second.Id);
+        Assert.DoesNotContain(await db.LoadAccountsAsync(GameId.ZenlessZoneZero), row => row.Id == second.Id);
+        Assert.NotEmpty((await OneDragonSourceProfile.ReadAsync(secondBinding)).Tasks);
+    }
+
+    [Fact]
     public void LoginScreenshotRequiresTheZenlessCardAndKeepsDistinctSavedAccountsInOrder()
     {
         VIvian.Core.Accounts.RecognizedText[] lines =

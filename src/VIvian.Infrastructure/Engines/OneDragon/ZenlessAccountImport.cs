@@ -36,8 +36,51 @@ public static class ZenlessAccountImport
         string gamePath, IReadOnlyList<string> masks, CancellationToken ct = default)
     {
         using var desktop = DesktopOperationLease.Acquire(profileDirectory);
+        await ValidateSetupAsync(root, gamePath, ct).ConfigureAwait(false);
+        var ids = await database.RegisterZenlessScreenshotAsync(masks, ct).ConfigureAwait(false);
+        var accounts = await database.LoadAccountsAsync(GameId.ZenlessZoneZero, ct).ConfigureAwait(false);
+        for (var index = 0; index < ids.Length; index++)
+            await PrepareRegisteredAsync(database, accounts.Single(account => account.Id == ids[index]),
+                root, gamePath, masks[index], ct).ConfigureAwait(false);
+        return ids;
+    }
+
+    public static async Task PrepareAsync(LocalDatabase database, GameAccount account, string root,
+        string profileDirectory, string gamePath, string masked, CancellationToken ct = default)
+    {
+        using var desktop = DesktopOperationLease.Acquire(profileDirectory);
+        await ValidateSetupAsync(root, gamePath, ct).ConfigureAwait(false);
+        await PrepareRegisteredAsync(database, account, root, gamePath, masked, ct).ConfigureAwait(false);
+    }
+
+    internal static async Task PrepareRegisteredAsync(LocalDatabase database, GameAccount account, string root,
+        string gamePath, string masked, CancellationToken ct)
+    {
+        if (account.Game != GameId.ZenlessZoneZero || account.IsLegacyPlaceholder)
+            throw new InvalidOperationException("请选择一个绝区零账号档案。");
+        var normalized = MaskedPhoneParser.Normalize(masked.Trim());
+        if (normalized.Length == 0 || !masked.Trim().All(ch => char.IsAsciiDigit(ch) || ch is '*' or '＊'))
+            throw new InvalidOperationException("请填写登录卡片上的脱敏手机号，或先导入登录截图。");
+        var profiles = await database.LoadLoginProfilesAsync(GameId.ZenlessZoneZero, ct).ConfigureAwait(false);
+        var profile = profiles.SingleOrDefault(row => row.AccountId == account.Id);
+        if (profiles.Any(row => row.AccountId != account.Id && row.NormalizedPhone == normalized))
+            throw new InvalidOperationException("该脱敏手机号已登记。请选中已有账号。");
+
+        var existing = OneDragonProfileBinding.FromSettings(
+            (await database.LoadAccountSettingsAsync(account.Id, ct).ConfigureAwait(false)).Values);
+        if (existing is not null && !string.Equals(existing.Root, root, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("该账号已绑定另一处 OneDragon 安装，请在账号管理核对原绑定。");
+
+        var binding = existing ?? await OneDragonImportedProfile.EnsureAsync(root, account.Id, gamePath, ct).ConfigureAwait(false);
+        if (existing is null || profile?.NormalizedPhone != normalized)
+            await database.SaveOneDragonBindingAsync(account, binding, normalized, ct).ConfigureAwait(false);
+        await OneDragonSourceProfile.PrepareMissingAsync(binding, gamePath, ct).ConfigureAwait(false);
+    }
+
+    private static async Task ValidateSetupAsync(string root, string gamePath, CancellationToken ct)
+    {
         if (ZenlessLoginDriver.EngineBusy())
-            throw new InvalidOperationException("请关闭 OneDragon 窗口后再导入，以免覆盖正在编辑的档案。");
+            throw new InvalidOperationException("请关闭 OneDragon 窗口后再准备运行配置。");
         await OneDragonAccountBatch.ValidateInstallationAsync(root, ct).ConfigureAwait(false);
         if (!Path.IsPathFullyQualified(gamePath) ||
             !string.Equals(Path.GetFileName(gamePath), "ZenlessZoneZero.exe", StringComparison.OrdinalIgnoreCase))
@@ -51,26 +94,6 @@ public static class ZenlessAccountImport
         {
             throw new InvalidOperationException("无法核对绝区零客户端的文件路径或米哈游签名。", ex);
         }
-
-        var ids = await database.RegisterZenlessScreenshotAsync(masks, ct).ConfigureAwait(false);
-        var accounts = await database.LoadAccountsAsync(GameId.ZenlessZoneZero, ct).ConfigureAwait(false);
-        for (var index = 0; index < ids.Length; index++)
-        {
-            var id = ids[index];
-            var existing = OneDragonProfileBinding.FromSettings(
-                (await database.LoadAccountSettingsAsync(id, ct).ConfigureAwait(false)).Values);
-            if (existing is not null)
-            {
-                if (!string.Equals(existing.Root, root, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("该账号已绑定另一处 OneDragon 安装，请在账号管理核对原绑定。");
-                await OneDragonSourceProfile.ReadAsync(existing, ct).ConfigureAwait(false);
-                continue;
-            }
-            var binding = await OneDragonImportedProfile.EnsureAsync(root, id, gamePath, ct).ConfigureAwait(false);
-            await database.SaveOneDragonBindingAsync(accounts.Single(account => account.Id == id),
-                binding, masks[index], ct).ConfigureAwait(false);
-        }
-        return ids;
     }
 
     internal static IReadOnlyList<string> Recognize(int width, int height, IReadOnlyList<RecognizedText> lines,

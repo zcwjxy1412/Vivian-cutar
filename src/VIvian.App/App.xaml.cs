@@ -649,11 +649,20 @@ public partial class App : Application
         window.UpdateLayout();
         if (!ReferenceEquals(main.ZenlessAccountList.ItemsSource, vm.Accounts.ZenlessRows)
             || main.ImportZenlessScreenshotButton.Command != vm.Accounts.ImportZenlessScreenshotCommand
+            || main.DeleteZenlessButton.Command != vm.Accounts.DeleteZenlessCommand
             || vm.Accounts.ZenlessRows.All(a => a.Id != zenless.Id)
             || vm.Accounts.ZenlessRows.Any(a => a.Game != GameId.ZenlessZoneZero))
             throw new InvalidOperationException("The Zenless account tab is not bound to Zenless accounts");
         main.AccountTabs.SelectedIndex = 0;
         tabs.SelectedIndex = Array.IndexOf(headers, "游戏管理");
+        main.GameTabs.SelectedIndex = 0;
+        window.UpdateLayout();
+        main.GameTabs.SelectedIndex = 2;
+        window.UpdateLayout();
+        if (!ReferenceEquals(main.ZenlessTaskAccountPicker.ItemsSource, vm.Accounts.ZenlessRows)
+            || !ReferenceEquals(main.ZenlessGameTaskEditor.Content, vm.Accounts)
+            || vm.Accounts.ZenlessTasks.Count != 4)
+            throw new InvalidOperationException("The Zenless game page is missing the shared task editor");
         main.GameTabs.SelectedIndex = 0;
         window.UpdateLayout();
         var starRailSettingsWidth = ((main.GameTabs.SelectedItem as System.Windows.Controls.TabItem)?.Content

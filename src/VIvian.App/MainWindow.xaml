@@ -75,6 +75,25 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" ToolTip="{Binding Rule}" Visibility="{Binding IsTextual, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
 <TextBlock Text="由原软件管理" Style="{StaticResource Small}" HorizontalAlignment="Right" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></Grid>
 </Grid></Border></DataTemplate>
+<DataTemplate x:Key="ZenlessTaskEditor">
+<StackPanel>
+<TextBlock Text="{Binding ZenlessReadiness}" FontWeight="SemiBold" AutomationProperties.LiveSetting="Polite"/>
+<WrapPanel Margin="0,8,0,12">
+<Button Content="准备运行配置" Command="{Binding PrepareZenlessCommand}" IsEnabled="{Binding HasZenlessAccount}" Margin="0,0,8,0"/>
+<Button Content="打开 OneDragon 详细设置" Command="{Binding OpenZenlessSourceCommand}"/>
+</WrapPanel>
+<TextBlock Text="常用任务" Style="{StaticResource H2}"/>
+<ItemsControl ItemsSource="{Binding ZenlessTasks}" IsEnabled="{Binding CanEditZenlessTasks}">
+<ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+<ItemsControl.ItemTemplate><DataTemplate>
+<CheckBox Content="{Binding Title}" IsChecked="{Binding Enabled}" Margin="0,0,18,8"/>
+</DataTemplate></ItemsControl.ItemTemplate>
+</ItemsControl>
+<TextBlock Text="刷本关卡、队伍、次数和任务顺序可在 OneDragon 详细设置中调整。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
+<Button Content="保存任务到 OneDragon" Command="{Binding SaveZenlessTaskCommand}" IsEnabled="{Binding CanEditZenlessTasks}" HorizontalAlignment="Left"/>
+<TextBlock Text="{Binding ZenlessStatus}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel>
+</DataTemplate>
 </Window.Resources>
 
 <Grid>
@@ -332,17 +351,23 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 </StackPanel></ScrollViewer></TabItem>
 </TabControl>
 </DockPanel></Border></TabItem>
-<TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left" DataContext="{Binding Engines[2]}">
+<TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="{Binding Version, StringFormat=由 {0} 接管入场和日常任务。}" Style="{StaticResource Lead}"/>
-<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock DataContext="{Binding Engines[2]}" Text="{Binding Version, StringFormat=由 {0} 接管入场和日常任务。}" Style="{StaticResource Lead}"/>
+<Border Style="{StaticResource Panel}" DataContext="{Binding Engines[2]}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
 <TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="账号与源档案" Style="{StaticResource H2}"/>
-<TextBlock Text="在账号管理绑定已保存账号与 OneDragon 实例。常用任务开关直接保存在该实例。详细配置在 OneDragon 编辑。" Style="{StaticResource Small}" Margin="0,6,0,8"/>
-<Button Content="打开绝区零账号与任务设置" Click="OpenZenlessAccounts" HorizontalAlignment="Left"/>
+<Border Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}">
+<StackPanel DataContext="{Binding Accounts}">
+<TextBlock Text="账号与任务" Style="{StaticResource H2}"/>
+<WrapPanel Margin="0,0,0,10">
+<ComboBox x:Name="ZenlessTaskAccountPicker" Width="200" ItemsSource="{Binding ZenlessRows}" SelectedItem="{Binding SelectedZenless}" DisplayMemberPath="Name" AutomationProperties.Name="选择绝区零账号" Margin="0,0,8,0"/>
+<CheckBox Content="加入日常批次" IsEnabled="{Binding HasZenlessAccount}" IsChecked="{Binding ZenlessAutoRun}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+<Button Content="保存批次选择" Command="{Binding SaveZenlessCommand}" IsEnabled="{Binding HasZenlessAccount}" Margin="0,0,8,0"/>
+<Button Content="管理绝区零账号" Click="OpenZenlessAccounts"/>
+</WrapPanel>
+<ContentControl x:Name="ZenlessGameTaskEditor" Content="{Binding}" ContentTemplate="{StaticResource ZenlessTaskEditor}"/>
 </StackPanel></Border>
 </StackPanel></ScrollViewer></TabItem>
 </TabControl></Grid></TabItem>
@@ -444,39 +469,36 @@ Title="{Binding Theme.Title}" Width="1460" Height="900" MinWidth="1180" MinHeigh
 <Border Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}"><StackPanel DataContext="{Binding Accounts}">
 <DockPanel LastChildFill="True" Margin="0,0,0,6">
 <WrapPanel DockPanel.Dock="Right">
-<Button Content="刷新源档案" Command="{Binding ReloadZenlessCommand}" Margin="0,0,8,0"/>
-<Button Content="打开 OneDragon 详细设置" Command="{Binding OpenZenlessSourceCommand}"/>
+<Button Content="刷新源档案" Command="{Binding ReloadZenlessCommand}"/>
 </WrapPanel>
 <TextBlock Text="绝区零账号" Style="{StaticResource H2}" VerticalAlignment="Center"/>
 </DockPanel>
-<TextBlock Text="{Binding ZenlessStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/>
 <ListBox x:Name="ZenlessAccountList" ItemsSource="{Binding ZenlessRows}" SelectedItem="{Binding SelectedZenless}"
          Margin="0,8,0,8" MinHeight="50">
 <ListBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal">
 <TextBlock Text="{Binding Name}" FontWeight="Bold"/>
-<TextBlock Text="{Binding AutoRun, StringFormat=  · 执行 {0}}" Margin="8,0"/>
+<TextBlock Margin="8,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}">
+<Setter Property="Text" Value="未加入批次"/>
+<Style.Triggers><DataTrigger Binding="{Binding AutoRun}" Value="True"><Setter Property="Text" Value="已加入批次"/></DataTrigger></Style.Triggers>
+</Style></TextBlock.Style></TextBlock>
 <TextBlock Text="{Binding LastResult}" Style="{StaticResource Small}"/>
 </StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
 <WrapPanel Margin="0,0,0,8">
 <Button x:Name="ImportZenlessScreenshotButton" Content="导入登录截图" Command="{Binding ImportZenlessScreenshotCommand}" Margin="0,0,8,0"/>
 <Button Content="新增账号" Command="{Binding AddZenlessCommand}" Margin="0,0,8,0"/>
 <Button Content="上移" Command="{Binding MoveZenlessUpCommand}" Margin="0,0,8,0"/>
-<Button Content="下移" Command="{Binding MoveZenlessDownCommand}"/>
+<Button Content="下移" Command="{Binding MoveZenlessDownCommand}" Margin="0,0,8,0"/>
+<Button x:Name="DeleteZenlessButton" Content="删除账号" Command="{Binding DeleteZenlessCommand}" IsEnabled="{Binding HasZenlessAccount}"/>
 </WrapPanel>
 <WrapPanel Margin="0,0,0,8">
 <StackPanel Margin="0,0,12,0"><TextBlock Text="账号显示名"/><TextBox Width="170" Text="{Binding ZenlessName, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
 <StackPanel Margin="0,0,12,0"><TextBlock Text="登录卡片的脱敏手机号"/><TextBox Width="180" Text="{Binding ZenlessMasked, UpdateSourceTrigger=PropertyChanged}"/></StackPanel>
 <StackPanel Margin="0,0,12,0"><TextBlock Text="OneDragon 实例"/><ComboBox Width="108" ItemsSource="{Binding ZenlessInstances}" SelectedItem="{Binding ZenlessInstance}"/></StackPanel>
 <CheckBox Content="加入日常批次" IsChecked="{Binding ZenlessAutoRun}" VerticalAlignment="Bottom" Margin="0,0,12,4"/>
-<Button Content="保存账号绑定" Command="{Binding SaveZenlessCommand}" VerticalAlignment="Bottom"/>
+<Button Content="保存账号与批次选择" Command="{Binding SaveZenlessCommand}" IsEnabled="{Binding HasZenlessAccount}" VerticalAlignment="Bottom"/>
 </WrapPanel>
 <Separator Margin="0,6,0,8"/>
-<TextBlock Text="常用任务开关" Style="{StaticResource H2}"/>
-<WrapPanel Margin="0,8,0,0">
-<ComboBox Width="220" ItemsSource="{Binding ZenlessTasks}" DisplayMemberPath="Title" SelectedItem="{Binding SelectedZenlessTask}" Margin="0,0,12,0"/>
-<CheckBox Content="启用" IsEnabled="{Binding SelectedZenlessTask.CanEdit}" IsChecked="{Binding ZenlessTaskEnabled}" VerticalAlignment="Center" Margin="0,0,12,0"/>
-<Button Content="保存到源档案" Command="{Binding SaveZenlessTaskCommand}" IsEnabled="{Binding SelectedZenlessTask.CanEdit}"/>
-</WrapPanel>
+<ContentControl Content="{Binding}" ContentTemplate="{StaticResource ZenlessTaskEditor}"/>
 </StackPanel></Border>
 </TabItem>
 </TabControl>

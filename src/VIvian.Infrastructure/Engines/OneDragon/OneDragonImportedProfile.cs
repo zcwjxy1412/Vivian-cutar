@@ -23,11 +23,7 @@ internal static class OneDragonImportedProfile
         var recovered = parsed?.Rows.Select((row, index) => (Row: row, Index: index))
             .Where(item => item.Row.GetValueOrDefault("name")?.Value == name).ToArray();
         if (recovered is { Length: 1 })
-        {
-            var binding = new OneDragonProfileBinding(root, catalog.Instances[recovered[0].Index].Index);
-            await OneDragonSourceProfile.ReadAsync(binding, ct).ConfigureAwait(false);
-            return binding;
-        }
+            return new OneDragonProfileBinding(root, catalog.Instances[recovered[0].Index].Index);
         if (recovered is { Length: > 1 }) throw new InvalidOperationException("OneDragon 有重复的导入实例，请先核对源档案。");
 
         var index = Enumerable.Range(1, 99).FirstOrDefault(candidate => !catalog.Instances.Any(row => row.Index == candidate)
@@ -57,13 +53,10 @@ internal static class OneDragonImportedProfile
         try
         {
             Directory.CreateDirectory(Path.Combine(stagedProfile, "one_dragon"));
-            var portablePath = gamePath.Replace('\\', '/');
             await File.WriteAllTextAsync(Path.Combine(stagedProfile, "game_account.yml"),
-                $"game_path: \"{portablePath}\"\ngame_region: cn\ngame_language: cn\n", ct).ConfigureAwait(false);
-            var tasks = OneDragonTaskPlans.Catalog.Select(task =>
-                $"- app_id: {task.Id}\n  enabled: {(task.Id == "engagement_reward" ? "true" : "false")}\n");
+                OneDragonSourceProfile.GameAccountDefaults(gamePath), ct).ConfigureAwait(false);
             await File.WriteAllTextAsync(Path.Combine(stagedProfile, "one_dragon", "_group.yml"),
-                "app_list:\n" + string.Concat(tasks), ct).ConfigureAwait(false);
+                OneDragonSourceProfile.TaskDefaults(), ct).ConfigureAwait(false);
             await File.WriteAllTextAsync(stagedCatalog, string.Join('\n', lines).TrimEnd('\n') + "\n", ct).ConfigureAwait(false);
             if (ZenlessLoginDriver.EngineBusy() ||
                 await OneDragonConfigRead.ReadAsync(root, "one_dragon.yml", ct).ConfigureAwait(false) != original)

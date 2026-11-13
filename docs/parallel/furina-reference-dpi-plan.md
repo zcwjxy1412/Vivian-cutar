@@ -29,9 +29,12 @@ Use existing WPF composition (chosen by prior approved plan and explicit autonom
 - Non-solid decoration must not hide contrast failures; all reading areas keep explicit solid surfaces.
 
 ## Tasks
-- [ ] A: regenerate three independent text-free character banners; inspect and record hashes in A increment. Preserve existing filenames/override resolution, no reference edits.
-- [ ] B1: code-native crown/plaque/glass-edge/wave/execute ornament, home density and role placement, independent summary breakpoint. Extend offscreen checks for1280 and readable long captions; run existing input/confirmation tests.
-- [ ] B2: assistant header/side-avatar message cards and integrated input/shortcuts, preserving all gate events and controls. Test minimum viewport and long Chinese at360x460, normal460x720 and optional512x720.
-- [ ] B3: pure monitor resolver tests RED (negative origins, mixedDPI, removed monitor, tiny workarea, repeat clamping), minimal native monitor adapter and window hooks GREEN. No actual monitor queries required by unit tests.
-- [ ] Evidence: render actual content offscreen at100/125/150/200 pixel densities and representative logical workareas; validate controls/contrast without Show; identify images as offscreen, bind commit/hash. Tests appropriate to changes, no smoke.
-- [ ] Fresh whole-branch review, then DeepSeek actual diff/context, fix confirmed blockers and use only one final re-review if needed. New draft PR to integration; final visual score left to Q, not declared passed absent evidence.
+- [x] A: regenerate three independent text-free character banners; inspect and record hashes in A increment. Preserve existing filenames/override resolution, no reference edits.
+- [x] B1: code-native crown/plaque/glass-edge/wave/execute ornament, home density and role placement, independent summary breakpoint. Extend offscreen checks for1280 and readable long captions; run existing input/confirmation tests.
+- [x] B2: assistant header/side-avatar message cards and integrated input/shortcuts, preserving all gate events and controls. Test minimum viewport and long Chinese at360x460, normal460x720 and optional512x720.
+- [x] B3: pure monitor resolver tests RED (negative origins, mixedDPI, removed monitor, tiny workarea, repeat clamping), minimal native monitor adapter and window hooks GREEN. No actual monitor queries required by unit tests.
+- [x] Evidence: render actual content offscreen at100/125/150/200 pixel densities and representative logical workareas; validate controls/contrast without Show; identify images as offscreen, bind commit/hash. Tests appropriate to changes, no smoke.
+- [x] Fresh whole-branch review, then DeepSeek actual diff/context, fix confirmed blockers and use only one final re-review if needed. New draft PR to integration; final visual score left to Q, not declared passed absent evidence.
+
+- [ ] Q actual desktop/DPI and independent visual85/70 acceptance: pending, not self-certified.
+

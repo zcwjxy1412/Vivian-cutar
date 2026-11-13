@@ -24,4 +24,3 @@ B 消费 AssistantViewModel：Messages、Input、IsBusy、StatusLine、QuickComm
 - ThemeAssets.cs 归 A，保留用户外置素材覆盖与缺图回退；不要把资源存在当作绘图已验收。无法准备某项素材时记录缺口，不以合成 UI 图充当分层素材。
 
 视觉品牌 furina，助手 芙宁娜。1600×900 DIP 为视觉基准，低于1280 DIP紧凑布局，960×500 DIP 最小工作区。
-

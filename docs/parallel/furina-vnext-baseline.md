@@ -30,4 +30,3 @@ Build.ps1 覆盖默认构建、全量测试、自包含包和模拟 WPF 冒烟�
 ## 审查
 
 本次工具目录未提供 DeepSeekHelper deepseek_review。当前独立审查状态 blocked，轮次 0。继续可做的开发/本地验证，不标通过；恢复工具后以实际 diff 和脱敏证据首审。
-

@@ -64,16 +64,48 @@ public sealed class FurinaWindowLayoutTests
             var vm = new MainViewModel(db, db, db, db, paths, queue, supervisor, accounts,
                 new MultiAccountOrchestrator(db, null!), new GamePathProvider());
             main = new MainWindow(vm);
+            Assert.Equal(4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);
             var home = (FrameworkElement)main.Content;
-            foreach (var (width, height) in new[] { (1600, 900), (960, 500) })
+            foreach (var (width, height) in new[] { (1600, 900), (1280, 800), (1440, 900), (960, 500) })
             {
                 main.Width = width; main.Height = height; main.UpdateHomeLayout();
                 Assert.Equal(width < 1280, main.IsCompactLayout);
                 Render(home, width, height, Path.Combine(output, $"home-content-{width}x{height}.png"));
-                Assert.Equal(width < 1280 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
+                Assert.Equal(width < 1500 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
                 var stopBounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
                 Assert.True(stopBounds.Bottom <= height && stopBounds.Right <= width, $"Stop clipped: {stopBounds}");
+                if (width >= 1280)
+                {
+                    var character = (Button)main.FindName("HomeCharacterPanel");
+                    var point = character.TranslatePoint(new Point(character.ActualWidth / 2, character.ActualHeight / 2), home);
+                    DependencyObject? hit = null;
+                    VisualTreeHelper.HitTest(home,
+                        node => node is UIElement { IsHitTestVisible: false } ? HitTestFilterBehavior.ContinueSkipSelfAndChildren : HitTestFilterBehavior.Continue,
+                        result => { hit = result.VisualHit; return HitTestResultBehavior.Stop; }, new PointHitTestParameters(point));
+                    while (hit is not null && hit != character) hit = VisualTreeHelper.GetParent(hit);
+                    Assert.Same(character, hit);
+                }
             }
+            foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                var width = (int)(1920 / scale); var height = (int)(1000 / scale);
+                main.Width = width; main.Height = height; main.UpdateHomeLayout();
+                VisualTreeHelper.SetRootDpi(main, new DpiScale(scale, scale));
+                Render(home, width, height, Path.Combine(output, $"home-dpi-{scale * 100:0}.png"), scale);
+                var stop = (Button)main.FindName("PersistentStopButton");
+                var bounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
+                Assert.True(new Rect(0, 0, width, height).Contains(bounds), $"Stop at {scale}: {bounds}");
+            }
+            VisualTreeHelper.SetRootDpi(main, new DpiScale(1, 1));
+            main.Width = 1600; main.Height = 900; main.UpdateHomeLayout();
+            var navigation = (TabControl)main.FindName("Navigation");
+            for (int tab = 0; tab < navigation.Items.Count; tab++)
+            {
+                navigation.SelectedIndex = tab;
+                Render(home, 1600, 900, Path.Combine(output, $"page-{tab}-1600x900.png"));
+                AuditOffscreenText(home);
+            }
+            navigation.SelectedIndex = 0;
             vm.ReportAssistantInputBlocked("测试提示：运行中暂不能进入聊天。");
             FlushBindings();
             Assert.Equal(vm.Status, ((TextBlock)main.FindName("PersistentStatusText")).Text);
@@ -86,6 +118,8 @@ public sealed class FurinaWindowLayoutTests
             Assert.Equal(0, gate.Acquisitions);
             Assert.True(assistant.Interaction.TryEnter());
             FlushBindings();
+            Render((FrameworkElement)assistant.Content, 460, 720, Path.Combine(output, "assistant-reference-460x720.png"));
+            AuditOffscreenText((FrameworkElement)assistant.Content);
             Assert.True(input.IsEnabled);
             assistant.LockInput();
             FlushBindings();
@@ -122,6 +156,19 @@ public sealed class FurinaWindowLayoutTests
             Assert.NotNull(input.Template.FindName("PART_ContentHost", input));
             Assert.True(input.AcceptsReturn);
             Assert.True(input.MaxHeight < double.PositiveInfinity);
+            foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                VisualTreeHelper.SetRootDpi(assistant, new DpiScale(scale, scale));
+                Render((FrameworkElement)assistant.Content, 360, 460, Path.Combine(output, $"assistant-dpi-{scale * 100:0}.png"), scale);
+                var bounds = send.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(send.RenderSize));
+                Assert.True(bounds.Bottom <= 452, $"Send at {scale}: {bounds}");
+                Assert.True(((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight >= 22);
+            }
+            VisualTreeHelper.SetRootDpi(assistant, new DpiScale(1, 1));
+            Render((FrameworkElement)assistant.Content, 360, 400, Path.Combine(output, "assistant-small-workarea-360x400.png"));
+            var tinySendBounds = send.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(send.RenderSize));
+            Assert.True(tinySendBounds.Bottom <= 392, $"Small work area hides Send: {tinySendBounds}");
+            Assert.True(((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight >= 22, "Tiny work area hides every message line.");
             assistant.Close();
             var confirmationGate = new FakeGate();
             var submissions = 0;
@@ -156,11 +203,35 @@ public sealed class FurinaWindowLayoutTests
     private static void FlushBindings() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
         () => { }, System.Windows.Threading.DispatcherPriority.DataBind);
 
-    private static void Render(FrameworkElement element, int width, int height, string path)
+    private static void AuditOffscreenText(FrameworkElement root)
+    {
+        // Reuse the owning audit's color resolution/threshold. Only native IsVisible is unavailable without Show.
+        var background = typeof(ContrastAudit).GetMethod("BackgroundBehind", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(background);
+        int checkedCount = 0;
+        var pending = new Stack<DependencyObject>(); pending.Push(root);
+        while (pending.TryPop(out var item))
+        {
+            if (item is UIElement { Visibility: not Visibility.Visible }) continue;
+            if (item is TextBlock { IsEnabled: true, ActualWidth: > 0, ActualHeight: > 0 } text
+                && !string.IsNullOrWhiteSpace(text.Text)
+                && text.Foreground is SolidColorBrush { Color.A: > 200 } fg
+                && background.Invoke(null, [text]) is Color bg)
+            {
+                checkedCount++;
+                Assert.True(ContrastAudit.Ratio(fg.Color, bg) >= ContrastAudit.MinimumRatio,
+                    $"Offscreen contrast {text.Text}: {fg.Color} on {bg}");
+            }
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(item); i++) pending.Push(VisualTreeHelper.GetChild(item, i));
+        }
+        Assert.True(checkedCount >= 5, "Offscreen audit checked no meaningful text.");
+    }
+
+    private static void Render(FrameworkElement element, int width, int height, string path, double scale = 1)
     {
         element.Width = double.NaN; element.Height = double.NaN;
         element.Measure(new Size(width, height)); element.Arrange(new Rect(0, 0, width, height)); element.UpdateLayout();
-        var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        var bitmap = new RenderTargetBitmap((int)Math.Round(width * scale), (int)Math.Round(height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
         bitmap.Render(element);
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var stream = File.Create(path); encoder.Save(stream);

@@ -18,6 +18,7 @@ public sealed class ThemeAssets
     public string? Assistant { get; }
     public string? Background { get; }
     public string? WaterForeground { get; }
+    public string? WaterFrame { get; }
     public string? BannerGenshin { get; }
     public string? BannerStarRail { get; }
     public string? BannerZenless { get; }
@@ -37,6 +38,7 @@ public sealed class ThemeAssets
             ?? Find(bundledFolder, "furina-avatar", "png") ?? Character;
         Background = Layer("background", "scene-background", "png", "jpg", "jpeg");
         WaterForeground = Layer("water-foreground", "water-foreground", "png");
+        WaterFrame = Layer("water-frame", "water-frame", "png");
         BannerGenshin = Layer("banner-genshin", "game-genshin", "png", "jpg", "jpeg", "gif");
         BannerStarRail = Layer("banner-starrail", "game-hsr", "png", "jpg", "jpeg", "gif");
         BannerZenless = Layer("banner-zzz", "game-zzz", "png", "jpg", "jpeg", "gif");

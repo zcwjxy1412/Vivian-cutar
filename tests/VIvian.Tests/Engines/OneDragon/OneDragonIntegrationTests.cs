@@ -308,6 +308,31 @@ public sealed class OneDragonIntegrationTests
     }
 
     [Theory]
+    [InlineData("success", "already_done", "success", RunOutcome.Success)]
+    [InlineData("already_done", "already_done", "success", RunOutcome.Success)]
+    [InlineData("already_done", null, "success", RunOutcome.Indeterminate)]
+    [InlineData("failed", "already_done", "failed", RunOutcome.Failed)]
+    [InlineData("success", "already_done", "incomplete", RunOutcome.Indeterminate)]
+    [InlineData("success", null, "cancelled", RunOutcome.Cancelled)]
+    public void CurrentRunSeparatesSourceConfirmedSkipsFromMissingResults(string coffee, string? email,
+        string end, RunOutcome expected)
+    {
+        var id = Guid.NewGuid();
+        var evidence = new OneDragonHandoffEvidence(id, 123, new(456, 2, ["coffee", "email"], "138****1111"));
+        var prefix = $"VIVIAN-ZZZ|{id:D}|";
+        evidence.Read(prefix + "start|123|2");
+        evidence.Read(prefix + "entered");
+        if (coffee != "already_done")
+            Assert.Contains("执行中", evidence.Read(prefix + "task_start|coffee"));
+        var coffeeMessage = evidence.Read(prefix + $"task|coffee|{coffee}");
+        if (coffee == "already_done") Assert.Contains("本轮跳过", coffeeMessage);
+        if (email is not null) evidence.Read(prefix + $"task|email|{email}");
+        Assert.Contains("未确认", evidence.Read(prefix + $"end|{end}"));
+        Assert.Equal(expected, evidence.Verdict(0, true, DateTimeOffset.UtcNow).Outcome);
+        Assert.Equal(RunOutcome.Indeterminate, evidence.Verdict(0, false, DateTimeOffset.UtcNow).Outcome);
+    }
+
+    [Theory]
     [InlineData("start|123|2", "success", true, RunOutcome.Success)]
     [InlineData("start|999|2", "success", true, RunOutcome.Indeterminate)]
     [InlineData("start|123|1", "success", true, RunOutcome.Indeterminate)]
@@ -324,7 +349,9 @@ public sealed class OneDragonIntegrationTests
         evidence.Read($"VIVIAN-ZZZ|{Guid.NewGuid():D}|task|coffee|failed");
         if (reportTasks)
         {
+            evidence.Read($"VIVIAN-ZZZ|{id:D}|task_start|coffee");
             evidence.Read($"VIVIAN-ZZZ|{id:D}|task|coffee|success");
+            evidence.Read($"VIVIAN-ZZZ|{id:D}|task_start|email");
             evidence.Read($"VIVIAN-ZZZ|{id:D}|task|email|success");
         }
         evidence.Read($"VIVIAN-ZZZ|{id:D}|end|{end}");

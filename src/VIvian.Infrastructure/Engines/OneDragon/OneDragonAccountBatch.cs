@@ -69,7 +69,9 @@ public static class OneDragonAccountBatch
                         profiles.Single(profile => profile.AccountId == account.Id).NormalizedPhone);
                     handoffClean = false;
                     var result = await RunAsync(database, new OneDragonAdapter(() => root, request), supervisor,
-                        root, batchId, handoff, token).ConfigureAwait(false);
+                        root, batchId, handoff, progress is null ? null : detail =>
+                            progress(new(account.Id, account.Name, BatchRunState.RunningTasks, detail, 1, DateTimeOffset.UtcNow)),
+                        token).ConfigureAwait(false);
                     handoffClean = result.CleanupConfirmed;
                     return result;
                 }, progress, ct, actionId: batchId).ConfigureAwait(false);
@@ -98,10 +100,10 @@ public static class OneDragonAccountBatch
         await OneDragonInstalledSource.VerifyAsync(root, ct).ConfigureAwait(false);
     }
 
-    private const string BridgeDigest = "41C671182B5BF210717F4003A236B07C4CE7963A55FBDE09B1277FBA4EA5EEF4";
+    private const string BridgeDigest = "04C1D2D88B85D6E7FF3B14836CC86F788382FB6055D66E5EB40C9E38C9649EC6";
 
     private static async Task<BatchTaskResult> RunAsync(IRunJournal journal, OneDragonAdapter adapter, IProcessSupervisor supervisor,
-        string root, Guid batchId, OneDragonHandoff handoff, CancellationToken ct)
+        string root, Guid batchId, OneDragonHandoff handoff, Action<string>? progress, CancellationToken ct)
     {
         var context = new RunContext(Guid.NewGuid(), batchId, Game, DateTimeOffset.UtcNow);
         Task Update(RunPhase phase, RunOutcome? outcome, CleanupState cleanup, string? reason) =>
@@ -145,7 +147,7 @@ public static class OneDragonAccountBatch
             await Update(clean ? RunPhase.Finished : RunPhase.Blocked, verdict.Outcome, cleanup, verdict.ReasonCode).ConfigureAwait(false);
             var detail = verdict.Outcome switch
             {
-                RunOutcome.Success => "OneDragon 已报告此账号的所有任务完成。",
+                RunOutcome.Success => "OneDragon 已确认此账号的任务均已完成，含按源项目记录跳过的任务。",
                 RunOutcome.Failed => "OneDragon 报告执行失败，详情见运行日志。",
                 RunOutcome.Cancelled => "用户停止了 OneDragon。",
                 _ => "OneDragon 未报告此账号的全部任务完成，请查看运行日志。",
@@ -155,7 +157,10 @@ public static class OneDragonAccountBatch
             async Task ReadEventsAsync()
             {
                 await foreach (var entry in run.Events.ConfigureAwait(false))
+                {
                     await journal.AppendEventsAsync([entry], CancellationToken.None).ConfigureAwait(false);
+                    if (entry.Kind == RunEventKind.Progress) progress?.Invoke(entry.Message);
+                }
             }
         }
     }

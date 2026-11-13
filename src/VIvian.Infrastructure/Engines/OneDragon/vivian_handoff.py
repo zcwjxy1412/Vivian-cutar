@@ -12,6 +12,8 @@ def _vivian_handoff(self, args):
     import time
     import re
     import unicodedata
+    from one_dragon.base.operation.application.application_run_context import RunFinishReason
+    from one_dragon.base.operation.application.group_application import GroupApplication
     from one_dragon.base.operation.operation_base import OperationResult
     from zzz_od.application.one_dragon_app.zzz_one_dragon_app import ZOneDragonApp
     from zzz_od.operation.enter_game.enter_game import EnterGame
@@ -24,6 +26,9 @@ def _vivian_handoff(self, args):
     outcome = "failed"
     results = {}
     original_execute = ZOneDragonApp.execute
+    run_app_node = GroupApplication.run_app.operation_node_annotation
+    original_run_app = run_app_node.op_method
+    get_app = ctx.run_context.get_application
 
     def emit(*fields):
         print("|".join(("VIVIAN-ZZZ", run_id, *map(str, fields))), flush=True)
@@ -110,14 +115,13 @@ def _vivian_handoff(self, args):
         if [row.app_id for row in config.app_list if row.enabled] != expected:
             return
 
-        get_app = ctx.run_context.get_application
-
         def track_app(app_id, instance_idx, group_id):
             app = get_app(app_id, instance_idx, group_id)
             if app_id in expected and instance_idx == instance and group_id == "one_dragon" and app is not None:
                 execute = app.execute
 
                 def track_execution():
+                    emit("task_start", app_id)
                     result = execute()
                     status = "success" if result.success else "failed"
                     results[app_id] = status
@@ -127,12 +131,32 @@ def _vivian_handoff(self, args):
                 app.execute = track_execution
             return app
 
+        def track_group_step(group):
+            # Observe the pinned group's real skip decision after it refreshes the task record.
+            # The operation graph calls the callable stored on the node annotation.
+            index = group._current_app_idx
+            items = group._group_config.app_list
+            item = items[index] if 0 <= index < len(items) else None
+            result = original_run_app(group)
+            if (group._group_id == "one_dragon" and ctx.current_instance_idx == instance
+                    and item is not None and item.enabled and item.app_id in expected
+                    and item.app_id not in results and result.is_success
+                    and (result.status or "").startswith("应用已完成 ")):
+                results[item.app_id] = "already_done"
+                emit("task", item.app_id, "already_done")
+            return result
+
         ctx.run_context.get_application = track_app
+        run_app_node.op_method = track_group_step
         ZOneDragonApp.execute = run_from_login
         result = ctx.run_context.run_application("one_dragon", instance, "one_dragon")
-        if str(result.finish_reason) == "COMPLETED" and all(status == "success" for status in results.values()):
+        if result.finish_reason == RunFinishReason.STOPPED:
+            outcome = "cancelled"
+        elif result.finish_reason == RunFinishReason.COMPLETED and "failed" not in results.values():
             outcome = "success" if all(app in results for app in expected) else "incomplete"
     finally:
+        ctx.run_context.get_application = get_app
+        run_app_node.op_method = original_run_app
         ZOneDragonApp.execute = original_execute
         ctx.after_app_shutdown()
         emit("end", outcome)

@@ -66,6 +66,8 @@ public sealed class AssistantViewModel : ObservableObject
     private readonly string _profileDirectory;
     private readonly Func<Task> _afterApply;
     private readonly Func<AssistantRunPlan, Task<string>> _submitPlan;
+    private readonly Func<string, string, MessageBoxImage, bool> _confirm;
+    public event Action? ExclusiveActionStarting;
     private int _confirmationRevision;
     private AssistantSession _session;
     private AssistantEndpoint _endpoint;
@@ -117,7 +119,14 @@ public sealed class AssistantViewModel : ObservableObject
     public AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools,
         Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply,
         Func<AssistantRunPlan, Task<string>> submitPlan)
+        : this(theme, settings, tools, canApply, profileDirectory, afterApply, submitPlan,
+            (text, title, icon) => MessageBox.Show(text, title, MessageBoxButton.YesNo, icon, MessageBoxResult.No) == MessageBoxResult.Yes) { }
+
+    internal AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools,
+        Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply,
+        Func<AssistantRunPlan, Task<string>> submitPlan, Func<string, string, MessageBoxImage, bool> confirm)
     {
+        _confirm = confirm;
         Theme = theme; Avatar = new ArtSlot(theme.Assistant); _settings = settings; _tools = tools;
         _canApply = canApply; _profileDirectory = profileDirectory; _afterApply = afterApply; _submitPlan = submitPlan;
         _endpoint = settings.Load();
@@ -168,7 +177,7 @@ public sealed class AssistantViewModel : ObservableObject
         finally { _request = null; IsBusy = false; }
     }
 
-    private async Task ConfirmAsync(ProposalCard card)
+    internal async Task ConfirmAsync(ProposalCard card)
     {
         if (!card.CanConfirm) return;
         var revision = Volatile.Read(ref _confirmationRevision);
@@ -177,10 +186,16 @@ public sealed class AssistantViewModel : ObservableObject
             card.State = "请先选中卡片上的账号，并确认任务、清理和配置恢复均已结束。";
             return;
         }
-        if (MessageBox.Show($"{card.TargetText}\n\n{card.Lines}\n\n确认写入该账号的独立设置？系统会保留备份和审计，并读回核对。",
-                $"{Name} · 确认修改", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+        if (!_confirm($"{card.TargetText}\n\n{card.Lines}\n\n确认写入该账号的独立设置？系统会保留备份和审计，并读回核对。",
+                $"{Name} · 确认修改", MessageBoxImage.Question))
             return;
         card.CanConfirm = false;
+        if (revision != Volatile.Read(ref _confirmationRevision))
+        {
+            card.State = "修改提案已失效，请重新生成。";
+            return;
+        }
+        ExclusiveActionStarting?.Invoke();
         try
         {
             using var desktop = DesktopOperationLease.Acquire(_profileDirectory);
@@ -203,7 +218,7 @@ public sealed class AssistantViewModel : ObservableObject
         catch (Exception) { card.State += " · 游戏管理页刷新失败，请手动重新读取"; }
     }
 
-    private async Task ConfirmRunAsync(ProposalCard card, AssistantRunPlan plan)
+    internal async Task ConfirmRunAsync(ProposalCard card, AssistantRunPlan plan)
     {
         if (!card.CanConfirm || !EnableScheduleProposals) return;
         var revision = Volatile.Read(ref _confirmationRevision);
@@ -218,10 +233,16 @@ public sealed class AssistantViewModel : ObservableObject
             card.State = "请在账号管理选中目标账号，结束当前任务及恢复后重试。";
             return;
         }
-        if (MessageBox.Show($"{card.TargetText}\n\n{card.Lines}\n\n确认提交给现有调度器？",
-                $"{Name} · 确认运行", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+        if (!_confirm($"{card.TargetText}\n\n{card.Lines}\n\n确认提交给现有调度器？",
+                $"{Name} · 确认运行", MessageBoxImage.Warning))
             return;
         card.CanConfirm = false;
+        if (revision != Volatile.Read(ref _confirmationRevision) || !EnableScheduleProposals)
+        {
+            card.State = "运行计划已失效，请重新生成。";
+            return;
+        }
+        ExclusiveActionStarting?.Invoke();
         if (revision != Volatile.Read(ref _confirmationRevision) || !EnableScheduleProposals)
         {
             card.State = "运行计划已失效，请重新生成。";

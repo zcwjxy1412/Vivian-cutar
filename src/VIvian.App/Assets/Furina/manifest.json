@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "source": "Native image generation; reference artwork, not application screenshots",
+  "generatedOn": "2026-11-13",
+  "assets": [
+    {
+      "file": "furina-avatar.png",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 1751399,
+      "sha256": "8842bd31e2d016cd20288c0c4dfb10c6c002c2c10edbe17ef45531eb604a6508",
+      "transparent": true
+    },
+    {
+      "file": "furina-main.png",
+      "width": 1024,
+      "height": 1536,
+      "bytes": 2390779,
+      "sha256": "0086c8c5540aafd071d54e1f115794926cabdf588e15766afabf734cea5fa2ec",
+      "transparent": true
+    },
+    {
+      "file": "game-genshin.png",
+      "width": 2172,
+      "height": 724,
+      "bytes": 2229004,
+      "sha256": "d6fe37d6909f6240c4687265d0717ed973f7fdc8da0b4c7ed619c721bc33ad92",
+      "transparent": false
+    },
+    {
+      "file": "game-hsr.png",
+      "width": 2172,
+      "height": 724,
+      "bytes": 2301873,
+      "sha256": "86b9dd7fedcb59e939114ab1fc1592b092a8f355c56fb5806091617a2baaccfc",
+      "transparent": false
+    },
+    {
+      "file": "game-zzz.png",
+      "width": 2172,
+      "height": 724,
+      "bytes": 1975106,
+      "sha256": "c4f1dc69d427306b03694c529deccfe31d78016cb15fabfdde003ab1b96e1e58",
+      "transparent": false
+    },
+    {
+      "file": "scene-background.png",
+      "width": 1672,
+      "height": 941,
+      "bytes": 1790642,
+      "sha256": "dff56aa2c7d983d72226719a655ddb1d540e3a2854dbfe603f290b1ce9ec2511",
+      "transparent": false
+    },
+    {
+      "file": "water-foreground.png",
+      "width": 2172,
+      "height": 724,
+      "bytes": 1157909,
+      "sha256": "899d9e1596b616463d17f303be136bc282a1401892c5122808b98a058a62c8db",
+      "transparent": true
+    }
+  ]
+}

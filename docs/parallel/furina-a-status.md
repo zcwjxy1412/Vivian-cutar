@@ -5,7 +5,8 @@
 - 分支：feat/furina-art-theme；工作树：C:\Users\胡桃\.codex\worktrees\furina-vnext-art\Vivian-source。
 - SOURCE_BASE_SHA：ce3ebeea79c507825e66a9e97097a6f80ede33cc。
 - BASE_SHA / 依赖公共 T0：8f857cf2cd16515d81f4c65f8e50b693374dccd4。
-- HEAD：首批实现提交待生成；以本文件最后提交所属的分支 HEAD 为准，随后记录具体实现提交。
+- 实现 HEAD：f6cb0af3f7f21b1a29077a0d8a3760e54404998e；状态补记以本文件最后提交为准。
+- 草稿 PR：https://github.com/zcwjxy1412/Vivian-cutar/pull/71；base=integration/furina-vnext，已推送自己的分支。
 - 状态：首批资产/主题可审阅；尚未集成、部署，也未开始 B。
 
 ## 已交付
@@ -50,7 +51,7 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release --no-restore --log
 
 ## 下一步
 
-完成本分支复核、提交/推送并创建以 integration/furina-vnext 为 base 的草稿 PR。总控处理最小注册、合流 A 后，本聊天才进入 B；不部署、不合并 main。
+首批已复核、提交/推送并创建草稿 PR #71。总控处理最小注册、合流 A 后，本聊天才进入 B；不部署、不合并 main。
 
 ## 首批复核与决策
 
@@ -61,3 +62,9 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release --no-restore --log
 - Ruling：重复请求幂等、恢复、日志与账号/RunId 归属、误停隔离及 AI 断网/假完成时执行链继续等由 C/D/E/F/Q 验证；A 不碰执行链。风险是本 PR 的测试不能证明这些行为。
 - Ruling：保留旧的损坏非空图片/WEBP 解码边界；新默认 PNG 已实际解码，但不扩展外置图片校验。风险是用户损坏素材仍可能显示失败。
 - Ruling：四种输出密度已生成，目视检查两个尺寸 100% 样张；没有参考图相似度评分。图像生成过程在本聊天的工具调用有记录，复核者仅验证文件/哈希而未独立认证生成过程。风险是最终像素级视觉与美术偏好仍待 B/Q/用户验收。
+
+
+最终离屏图 SHA256（组件证据，可由专属测试重建）：
+- theme-1600x900-100.png：55eb0ec3ba1b46153fa274a89a3092dacf4733a54a35c4c8186a4682eed4267f。
+- theme-960x500-100.png：8b2fc8aa2714eeb2626960c1a7ed484fe942ffebadabd250aba3029f09fc3681。
+- 对比例图只在 artifacts 下，不打包进产品。最终样张水纹按原比例限制在 24 DIP 装饰带，不覆盖控件；调整后针对性验证仍为 11/11。

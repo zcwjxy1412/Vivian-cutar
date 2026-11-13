@@ -10,12 +10,15 @@ public partial class AssistantWindow : Window
 {
     public AssistantInputSession Interaction { get; }
     public MainViewModel? StopSource { get; }
+    private readonly WindowWorkArea _workArea;
+    private bool _opened;
 
     public AssistantWindow(AssistantViewModel model, IAssistantInputGate? gate = null, MainViewModel? host = null)
     {
         Interaction = new AssistantInputSession(gate);
         StopSource = host;
         InitializeComponent();
+        _workArea = new WindowWorkArea(this, new Size(360, 460));
         DataContext = model;
         model.Messages.CollectionChanged += OnMessagesChanged;
         model.PropertyChanged += OnModelChanged;
@@ -53,8 +56,9 @@ public partial class AssistantWindow : Window
         if (!Interaction.TryEnter()) return false;
         try
         {
-            KeepOnScreen();
             Show();
+            _workArea.Recover(preferOwner: !_opened);
+            _opened = true;
             if (Activate()) InputBox.Focus();
             else LockInput();
             return Interaction.CanEdit;
@@ -81,16 +85,6 @@ public partial class AssistantWindow : Window
     {
         LockInput();
         if (StopSource?.CanStopAll == true) StopSource.StopAll();
-    }
-
-    private void KeepOnScreen()
-    {
-        // First slice uses the primary work area; per-monitor placement is a separate live acceptance gate.
-        var area = SystemParameters.WorkArea;
-        MinWidth = Math.Min(360, area.Width); MinHeight = Math.Min(460, area.Height);
-        Width = Math.Min(Width, area.Width); Height = Math.Min(Height, area.Height);
-        Left = Math.Clamp(double.IsNaN(Left) ? area.Left : Left, area.Left, area.Right - Width);
-        Top = Math.Clamp(double.IsNaN(Top) ? area.Top : Top, area.Top, area.Bottom - Height);
     }
 
     private void OnHostStateChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e) => RecheckInput();

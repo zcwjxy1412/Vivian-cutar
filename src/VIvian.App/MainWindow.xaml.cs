@@ -16,11 +16,7 @@ public partial class MainWindow : Window
                  (Navigation.SelectedIndex == 1 && GameTabs.SelectedIndex == 2)))
                 _ = viewModel.Accounts.RefreshZenlessSourceAsync(keepDraft: true);
         };
-        var area = SystemParameters.WorkArea;
-        MinWidth = Math.Min(MinWidth, area.Width);
-        MinHeight = Math.Min(MinHeight, area.Height);
-        Width = Math.Min(Width, area.Width);
-        Height = Math.Min(Height, area.Height);
+        _workArea = new WindowWorkArea(this, new Size(960, 500));
         // Closing the window while a queue runs stops it immediately, then waits (bounded) for the queue to record
         // its final state before the window really closes.
         Closing += async (_, e) =>
@@ -83,18 +79,26 @@ public partial class MainWindow : Window
     public bool IsCompactLayout => (bool)GetValue(IsCompactLayoutProperty);
     internal void UpdateHomeLayout()
     {
-        var compact = (ActualWidth > 0 ? ActualWidth : Width) < 1280;
+        var width = ActualWidth > 0 ? ActualWidth : Width;
+        var compact = width < 1280;
+        var character = compact ? 0 : Math.Clamp(width - 1120, 240, 360);
+        var controls = width < 1440 ? 240 : 280;
+        var middle = width - (compact ? 72 : 176) - character - controls - 40;
         SetValue(IsCompactLayoutProperty, compact);
-        Resources["Furina.NavigationWidth"] = new GridLength(compact ? 72 : 180);
-        Resources["Furina.CharacterWidth"] = new GridLength(compact ? 0 : 360);
-        Resources["Furina.ControlsWidth"] = new GridLength(compact ? 228 : 260);
-        Resources["Furina.GameBannerWidth"] = new GridLength(compact ? 136 : 180);
+        Resources["Furina.NavigationWidth"] = new GridLength(compact ? 72 : 176);
+        Resources["Furina.CharacterWidth"] = new GridLength(character);
+        Resources["Furina.ControlsWidth"] = new GridLength(controls);
+        Resources["Furina.GameBannerWidth"] = new GridLength(middle >= 640 ? 240 : 156);
+        Resources["Furina.BannerTextWidth"] = middle >= 640 ? 132.0 : 100.0;
+        Resources["Furina.CharacterArtWidth"] = character + 100;
+        Resources["Furina.CharacterArtHeight"] = (character + 100) * 1.5;
         HomeCharacterPanel.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
-        HomeSummary.Columns = compact ? 2 : 4;
-        Resources["Furina.RunButtonSize"] = compact ? 120.0 : 176.0;
+        HomeSummary.Columns = middle >= 640 ? 4 : 2;
+        Resources["Furina.RunButtonSize"] = compact ? 168.0 : 218.0;
     }
 
     private StopHotkey? _hotkey;
+    private readonly WindowWorkArea _workArea;
 
     internal async Task<int?> RunWithRewardAcceptanceStopKeyAsync(Func<Task<int?>> run)
     {

@@ -132,4 +132,3 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M5DailyTestBuil
 ### 交接约束
 
 I 可按已落地签名连接；validateConfirmed 的持锁调用位置通过源码/编译核查，未启动真实 D/E 公共入口。星铁 RunId 与配置前置登记由 I 修改旧 scheduler/宿主，不在此分支。OneDragon 资源文件与迁移回退建议详见对接说明，未读取正式账号配置、未更改 SourceProfile.Revision 语义。E 旧启动诊断遮蔽/可能悬挂 journal、D-2 Finished 语义残余仍开放。
-

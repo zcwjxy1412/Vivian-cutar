@@ -43,4 +43,3 @@ WhenIdleAsync 等待当前已接受工作；持久化故障会抛出，且协调
 咖啡 `run_charge_plan_afterwards` 默认 false，可触发后续体力计划；体力 `restore_charge` 有不使用/储蓄电量/以太电池/两者四档，另有 plan_list（plan_times/run_times/card_num 等）、double_reward、combat_simulation_double_reward_config、skip_plan。不能仅哈希 _group.yml 宣称已冻结资源策略。
 
 最小建议：I 将两份当前文件的路径、存在标志与全文摘要纳入确认版本；缺失时同时记录旧路径是否存在及其全文摘要，模拟上游只读选择语义但不主动迁移。源代码版本身份、game_account/group/relevant binding 等仍独立进入总摘要。全部缺失时明确表示上游默认，不能把缺失等同于显式禁用。摘要仅检测变更，未实现字段解释/资源预算核验；确认卡应写“资源参数由 OneDragon 上游设置控制，未解析消耗上限，请实机前核对”。未更改 OneDragonSourceProfile.Revision 兼容语义。
-

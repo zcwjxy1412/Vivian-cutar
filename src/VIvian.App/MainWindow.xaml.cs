@@ -6,6 +6,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        SizeChanged += (_, _) => UpdateHomeLayout();
+        UpdateHomeLayout();
         viewModel.RunWithHomeRewardStopKey = RunWithRewardAcceptanceStopKeyAsync;
         Activated += (_, _) =>
         {
@@ -76,6 +78,22 @@ public partial class MainWindow : Window
         };
     }
 
+    public static readonly DependencyProperty IsCompactLayoutProperty = DependencyProperty.Register(
+        nameof(IsCompactLayout), typeof(bool), typeof(MainWindow), new PropertyMetadata(false));
+    public bool IsCompactLayout => (bool)GetValue(IsCompactLayoutProperty);
+    internal void UpdateHomeLayout()
+    {
+        var compact = (ActualWidth > 0 ? ActualWidth : Width) < 1280;
+        SetValue(IsCompactLayoutProperty, compact);
+        Resources["Furina.NavigationWidth"] = new GridLength(compact ? 72 : 180);
+        Resources["Furina.CharacterWidth"] = new GridLength(compact ? 0 : 360);
+        Resources["Furina.ControlsWidth"] = new GridLength(compact ? 228 : 260);
+        Resources["Furina.GameBannerWidth"] = new GridLength(compact ? 136 : 180);
+        HomeCharacterPanel.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        HomeSummary.Columns = compact ? 2 : 4;
+        Resources["Furina.RunButtonSize"] = compact ? 120.0 : 176.0;
+    }
+
     private StopHotkey? _hotkey;
 
     internal async Task<int?> RunWithRewardAcceptanceStopKeyAsync(Func<Task<int?>> run)
@@ -121,13 +139,12 @@ public partial class MainWindow : Window
         if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         if (_assistant is null)
         {
-            _assistant = new AssistantWindow(vm.Assistant) { Owner = this };
+            _assistant = new AssistantWindow(vm.Assistant, vm.AssistantInputGate, vm) { Owner = this };
             _assistant.Closed += (_, _) => _assistant = null;
             _assistant.Left = Left + Math.Max(0, ActualWidth - _assistant.Width - 40);
             _assistant.Top = Top + 90;
         }
-        _assistant.Show();
-        _assistant.Activate();
+        if (!_assistant.TryOpenForUser()) vm.ReportAssistantInputBlocked(_assistant.Interaction.Hint);
     }
 
     private void OpenGameSettings(object sender, RoutedEventArgs e)

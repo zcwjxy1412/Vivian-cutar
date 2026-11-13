@@ -69,6 +69,7 @@ public sealed class AssistantViewModel : ObservableObject
     private int _confirmationRevision;
     private AssistantSession _session;
     private AssistantEndpoint _endpoint;
+    private bool _memoryBlocked;
 
     public ThemeAssets Theme { get; }
     public ArtSlot Avatar { get; }
@@ -95,6 +96,8 @@ public sealed class AssistantViewModel : ObservableObject
     private string _settingsStatus = "密钥只保存在本机，并用 Windows 账户加密；诊断包与日志不会包含它。";
     public string SettingsStatus { get => _settingsStatus; private set => Set(ref _settingsStatus, value); }
 
+    public RelayCommand NewConversationCommand { get; }
+    public RelayCommand ArchivesCommand { get; }
     public AsyncCommand SendCommand { get; }
     public RelayCommand ToggleSettingsCommand { get; }
     public AsyncCommand SaveSettingsCommand { get; }
@@ -122,15 +125,60 @@ public sealed class AssistantViewModel : ObservableObject
         _canApply = canApply; _profileDirectory = profileDirectory; _afterApply = afterApply; _submitPlan = submitPlan;
         _endpoint = settings.Load();
         _baseUrl = _endpoint.BaseUrl; _model = _endpoint.Model;
-        _session = new AssistantSession(_client, tools, theme.AssistantName);
+        _session = CreateSession();
+        NewConversationCommand = new(() =>
+        {
+            if (IsBusy || _memoryBlocked) return;
+            try
+            {
+                _session.NewConversation();
+                InvalidateProposals(); Messages.Clear();
+                Add(false, "已新开空白会话，旧对话保留在归档中。未继承任何操作授权。");
+            }
+            catch (Exception ex) when (ex is AssistantException or IOException or UnauthorizedAccessException or System.Security.Cryptography.CryptographicException)
+            { Add(false, "新会话未能保存，旧对话保持不变。请检查本机存储。"); }
+        });
+        ArchivesCommand = new(() =>
+        {
+            if (!IsBusy) new ConversationArchiveWindow(_session.Archives).ShowDialog();
+        });
         SendCommand = new(() => SendAsync(Input), _ => Add(false, "助手请求失败，可以重试。"));
         ToggleSettingsCommand = new(() => ShowSettings = !ShowSettings);
         SaveSettingsCommand = new(SaveSettingsAsync, _ => SettingsStatus = "保存失败，请检查本机数据目录权限。");
         TestConnectionCommand = new(TestConnectionAsync, _ => SettingsStatus = "测试失败，请检查接口设置。");
         CancelRequestCommand = new(CancelRequest);
         QuickCommand = new(text => { Input = text ?? ""; SendCommand.Execute(null); });
+        RestoreConversation();
         Add(false, $"旅行者，欢迎回来！我是{theme.AssistantName}。\n我可以帮你查看三款游戏的任务和配置、解释每个参数、把你的要求整理成修改提案（你确认后才会写入），以及查看运行结果。\n" +
             (_endpoint.IsComplete ? "有什么需要我帮忙的吗？" : "先点右上角的齿轮，填好 AI 接口地址、模型和密钥就能开始聊天啦。"));
+    }
+
+    private AssistantSession CreateSession()
+    {
+        _memoryBlocked = false;
+        try
+        {
+            return new AssistantSession(_client, _tools, Name,
+                store: _endpoint.IsComplete ? new ConversationStore(_profileDirectory, _endpoint) : null);
+        }
+        catch (Exception ex) when (ex is AssistantException or IOException or UnauthorizedAccessException
+            or System.Security.Cryptography.CryptographicException)
+        {
+            _memoryBlocked = true;
+            Add(false, "无法读取或验证本机对话存档，原文件已保留。恢复存档前暂停发送，避免覆盖历史。");
+            return new AssistantSession(_client, _tools, Name);
+        }
+    }
+
+    private void RestoreConversation()
+    {
+        foreach (var turn in _session.ActiveConversation.Turns)
+            foreach (var message in turn)
+                if (message?["role"]?.ToString() is "user" or "assistant"
+                    && message["content"]?.ToString() is { Length: > 0 } content)
+                    Add(message["role"]!.ToString() == "user", content);
+        if (_session.ActiveConversation.Summary.Length > 0)
+            Add(false, "此会话携带上一段对话的摘要；历史操作需重新确认。完整记录可在归档中查看。");
     }
 
     private void Add(bool fromUser, string text, IReadOnlyList<ProposalCard>? cards = null) =>
@@ -140,6 +188,7 @@ public sealed class AssistantViewModel : ObservableObject
     {
         text = text.Trim();
         if (text.Length == 0 || IsBusy) return;
+        if (_memoryBlocked) { Add(false, "对话存档尚未恢复，发送已暂停。"); return; }
         Input = "";
         Add(true, text);
         if (!_endpoint.IsComplete || DraftEndpoint != _endpoint)
@@ -153,7 +202,13 @@ public sealed class AssistantViewModel : ObservableObject
         IsBusy = true;
         try
         {
+            var previous = _session.ConversationId;
             var reply = await _session.AskAsync(_endpoint, text, request.Token);
+            if (previous != _session.ConversationId)
+            {
+                foreach (var oldCard in Messages.SelectMany(m => m.Proposals)) oldCard.CanConfirm = false;
+                Messages.Clear(); Add(true, text);
+            }
             if (request.IsCancellationRequested) return;
             var cards = _session.LastProposals.Select(p => new ProposalCard(p.Id, p.Target, p.AccountName,
                 string.Join("\n", p.Changes.Select(c => $"{c.Title}：{c.Old} → {c.New}")), "修改预览", "确认修改", ConfirmAsync)).ToList();
@@ -161,6 +216,7 @@ public sealed class AssistantViewModel : ObservableObject
                 "日常（清体力、每日实训、领奖）\n" + plan.Resources, "运行计划", "确认提交",
                 card => ConfirmRunAsync(card, plan))));
             Add(false, reply, cards);
+            if (_session.MemoryNotice.Length > 0) Add(false, _session.MemoryNotice);
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
         catch (OperationCanceledException) { Add(false, "助手请求超时，可以重试。"); }
@@ -256,7 +312,10 @@ public sealed class AssistantViewModel : ObservableObject
         if (endpoint != _endpoint)
         {
             InvalidateProposals();
-            _session = new AssistantSession(_client, _tools, Name);
+            _endpoint = endpoint;
+            Messages.Clear();
+            _session = CreateSession();
+            RestoreConversation();
         }
         _endpoint = endpoint;
         _newApiKey = "";
@@ -324,3 +383,4 @@ public sealed class AssistantViewModel : ObservableObject
         }
     }
 }
+

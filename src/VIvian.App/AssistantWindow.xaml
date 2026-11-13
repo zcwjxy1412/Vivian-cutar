@@ -65,7 +65,7 @@ ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei
 </StackPanel></Border></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
 
 <!-- Quick commands -->
-<StackPanel Grid.Row="3" Margin="14,4,14,6"><TextBlock Text="快捷指令" FontWeight="SemiBold" FontSize="13" Margin="2,0,0,6"/>
+<StackPanel Grid.Row="3" Margin="14,4,14,6"><WrapPanel><Button Content="新会话" Command="{Binding NewConversationCommand}"/><Button Content="对话归档" Command="{Binding ArchivesCommand}" Margin="6,0,0,0"/></WrapPanel><TextBlock Text="快捷指令" FontWeight="SemiBold" FontSize="13" Margin="2,0,0,6"/>
 <ItemsControl ItemsSource="{Binding QuickCommands}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Command="{Binding DataContext.QuickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" FontSize="12" Padding="12,5" Margin="0,0,6,6" Background="White"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 
@@ -76,3 +76,4 @@ ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei
 <TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Background="White" AutomationProperties.Name="输入你的问题">
 <TextBox.InputBindings><KeyBinding Key="Enter" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox></DockPanel></Border>
 </Grid></Border></Window>
+

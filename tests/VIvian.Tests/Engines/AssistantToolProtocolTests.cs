@@ -55,6 +55,24 @@ public sealed class AssistantToolProtocolTests
         Assert.Equal("完成", await session.AskAsync(Endpoint, "再问", CancellationToken.None));
     }
 
+    [Fact]
+    public async Task TruncatedToolRoundDoesNotInvokeToolsOrContaminateHistory()
+    {
+        var invoked = false;
+        var handler = new Handler(Turn(Call("partial", "get_run_status", "{}")), Answer)
+        { FirstFinishReason = "length" };
+        using var http = new HttpClient(handler);
+        var session = Session(http, _ =>
+        {
+            invoked = true;
+            return Task.FromResult<IReadOnlyList<RunRecord>>([]);
+        });
+        await Assert.ThrowsAsync<AssistantException>(() => session.AskAsync(Endpoint, "失败轮次", CancellationToken.None));
+        Assert.False(invoked);
+        Assert.Equal("完成", await session.AskAsync(Endpoint, "重试", CancellationToken.None));
+        Assert.Equal(2, handler.Requests[1]["messages"]!.AsArray().Count);
+    }
+
     private static AssistantSession Session(HttpClient http, Func<CancellationToken, Task<IReadOnlyList<RunRecord>>>? history = null) =>
         new(new ChatCompletionsClient(http),
             new AssistantTools(() => [], history ?? (_ => Task.FromResult<IReadOnlyList<RunRecord>>([]))),
@@ -71,11 +89,18 @@ public sealed class AssistantToolProtocolTests
 
     private sealed class Handler(params string[] messages) : HttpMessageHandler
     {
+        public string? FirstFinishReason { get; init; }
         public List<JsonObject> Requests { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Requests.Add(JsonNode.Parse(await request.Content!.ReadAsStringAsync(ct))!.AsObject());
-            return new(HttpStatusCode.OK) { Content = new StringContent("{\"choices\":[{\"message\":" + messages[Requests.Count - 1] + "}]}") };
+            var choice = new JsonObject
+            {
+                ["message"] = JsonNode.Parse(messages[Requests.Count - 1]),
+                ["finish_reason"] = Requests.Count == 1 ? FirstFinishReason : null,
+            };
+            return new(HttpStatusCode.OK) { Content = new StringContent(new JsonObject
+            { ["choices"] = new JsonArray(choice) }.ToJsonString()) };
         }
     }
 }

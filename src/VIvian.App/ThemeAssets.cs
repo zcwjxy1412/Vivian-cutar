@@ -4,10 +4,9 @@ using System.Text.Json;
 namespace VIvian.App;
 
 /// <summary>
-/// The user's own artwork, read from a local folder next to the install (default: ..\VIvian-素材). Nothing here is
-/// shipped in the repository; when a file is missing VIvian falls back to its original vector guide 小星.
-/// Recognised files: character.(gif|png|jpg|webp) · assistant.(gif|png|jpg) · banner-genshin/starrail/zzz.(png|jpg) ·
-/// background.(png|jpg) · theme.json { "assistantName": "…", "title": "…" }.
+/// External artwork (default: ..\VIvian-素材) overrides bundled Assets/Furina layers.
+/// Legacy names and GIF precedence remain supported; missing files retain the vector fallback.
+/// Loading never creates or rewrites the user's directory or metadata.
 /// </summary>
 public sealed class ThemeAssets
 {
@@ -18,39 +17,54 @@ public sealed class ThemeAssets
     public string? Character { get; }
     public string? Assistant { get; }
     public string? Background { get; }
+    public string? WaterForeground { get; }
     public string? BannerGenshin { get; }
     public string? BannerStarRail { get; }
     public string? BannerZenless { get; }
-    public string AssistantName { get; } = "小星";
-    public string Title { get; } = "Vivian-cutar";
+    public string AssistantName { get; } = "芙宁娜";
+    public string Title { get; } = "furina";
 
-    public ThemeAssets(string? folder = null)
+    public ThemeAssets(string? folder = null) : this(folder, Path.Combine(AppContext.BaseDirectory, "Assets", "Furina")) { }
+
+    internal ThemeAssets(string? folder, string bundledFolder)
     {
-        Folder = folder ?? DefaultFolder;
-        Character = Find("character", "gif", "png", "jpg", "jpeg", "webp");
-        Assistant = Find("assistant", "gif", "png", "jpg", "jpeg", "webp") ?? Character;
-        Background = Find("background", "png", "jpg", "jpeg");
-        BannerGenshin = Find("banner-genshin", "png", "jpg", "jpeg", "gif");
-        BannerStarRail = Find("banner-starrail", "png", "jpg", "jpeg", "gif");
-        BannerZenless = Find("banner-zzz", "png", "jpg", "jpeg", "gif");
+        Folder = Path.GetFullPath(folder ?? DefaultFolder);
+        var externalCharacter = Find(Folder, "character", "gif", "png", "jpg", "jpeg", "webp")
+            ?? Find(Folder, "furina-main", "png");
+        Character = externalCharacter ?? Find(bundledFolder, "furina-main", "png");
+        Assistant = Find(Folder, "assistant", "gif", "png", "jpg", "jpeg", "webp")
+            ?? Find(Folder, "furina-avatar", "png") ?? externalCharacter
+            ?? Find(bundledFolder, "furina-avatar", "png") ?? Character;
+        Background = Layer("background", "scene-background", "png", "jpg", "jpeg");
+        WaterForeground = Layer("water-foreground", "water-foreground", "png");
+        BannerGenshin = Layer("banner-genshin", "game-genshin", "png", "jpg", "jpeg", "gif");
+        BannerStarRail = Layer("banner-starrail", "game-hsr", "png", "jpg", "jpeg", "gif");
+        BannerZenless = Layer("banner-zzz", "game-zzz", "png", "jpg", "jpeg", "gif");
+
+        string? Layer(string legacy, string canonical, params string[] extensions) =>
+            Find(Folder, legacy, extensions) ?? Find(Folder, canonical, "png") ?? Find(bundledFolder, canonical, "png");
         try
         {
             var json = Path.Combine(Folder, "theme.json");
             if (File.Exists(json) && new FileInfo(json).Length < 16_000)
             {
                 using var doc = JsonDocument.Parse(File.ReadAllText(json));
-                if (doc.RootElement.TryGetProperty("assistantName", out var n) && n.GetString() is { Length: > 0 and <= 16 } name) AssistantName = name;
-                if (doc.RootElement.TryGetProperty("title", out var t) && t.GetString() is { Length: > 0 and <= 30 } title) Title = title;
+                if (doc.RootElement.ValueKind != JsonValueKind.Object) return;
+                if (doc.RootElement.TryGetProperty("assistantName", out var n) && n.ValueKind == JsonValueKind.String
+                    && n.GetString() is { Length: > 0 and <= 16 } name && !string.IsNullOrWhiteSpace(name)) AssistantName = name;
+                if (doc.RootElement.TryGetProperty("title", out var t) && t.ValueKind == JsonValueKind.String
+                    && t.GetString() is { Length: > 0 and <= 30 } title && !string.IsNullOrWhiteSpace(title))
+                    Title = title.Equals("Vivian-cutar", StringComparison.OrdinalIgnoreCase) ? "furina" : title;
             }
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }
     }
 
-    private string? Find(string stem, params string[] extensions)
+    private static string? Find(string folder, string stem, params string[] extensions)
     {
         foreach (var ext in extensions)
         {
-            var path = Path.Combine(Folder, stem + "." + ext);
+            var path = Path.GetFullPath(Path.Combine(folder, stem + "." + ext));
             try { if (File.Exists(path) && new FileInfo(path).Length is > 0 and < 60_000_000) return path; }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }

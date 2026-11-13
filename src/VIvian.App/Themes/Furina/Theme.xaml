@@ -1,0 +1,138 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=System.Runtime">
+    <!-- Explicit keys only: merging this dictionary does not restyle legacy windows. -->
+    <SolidColorBrush x:Key="Furina.StageBrush" Color="#101E4A"/>
+    <SolidColorBrush x:Key="Furina.PanelBrush" Color="#F1F6FF"/>
+    <SolidColorBrush x:Key="Furina.TextBrush" Color="#17284F"/>
+    <SolidColorBrush x:Key="Furina.MutedTextBrush" Color="#4D607F"/>
+    <SolidColorBrush x:Key="Furina.AccentBrush" Color="#2856BD"/>
+    <SolidColorBrush x:Key="Furina.GoldBrush" Color="#CEB476"/>
+    <SolidColorBrush x:Key="Furina.DangerBrush" Color="#A5293E"/>
+    <SolidColorBrush x:Key="Furina.OnAccentBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="Furina.BorderBrush" Color="#B4C7E7"/>
+    <SolidColorBrush x:Key="Furina.InputBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="Furina.SoftBrush" Color="#E3EDFC"/>
+    <SolidColorBrush x:Key="Furina.FocusBrush" Color="#123C89"/>
+    <SolidColorBrush x:Key="Furina.ErrorSurfaceBrush" Color="#FFF0F2"/>
+    <LinearGradientBrush x:Key="Furina.PrimaryBrush" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#3267D3" Offset="0"/><GradientStop Color="#234AA6" Offset="1"/>
+    </LinearGradientBrush>
+    <CornerRadius x:Key="Furina.PanelCornerRadius">18</CornerRadius>
+    <CornerRadius x:Key="Furina.ControlCornerRadius">10</CornerRadius>
+    <Thickness x:Key="Furina.PanelPadding">20</Thickness>
+    <Thickness x:Key="Furina.ControlPadding">18,10</Thickness>
+    <sys:Double x:Key="Furina.BodyFontSize">14</sys:Double>
+    <FontFamily x:Key="Furina.BodyFontFamily">Microsoft YaHei UI, Segoe UI</FontFamily>
+    <FontFamily x:Key="Furina.BrandFontFamily">Palatino Linotype, Georgia</FontFamily>
+    <!-- Geometry assets scale without raster edges; decoration must not intercept input. -->
+    <Geometry x:Key="Furina.CrownGeometry">M 1,5 L 7,10 L 12,1 L 17,10 L 23,5 L 20,18 L 4,18 Z M 4,22 L 20,22</Geometry>
+    <Geometry x:Key="Furina.WaveGeometry">M 0,12 C 12,0 20,24 32,12 C 44,0 52,24 64,12</Geometry>
+
+    <Style x:Key="Furina.PanelStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource Furina.PanelBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="{StaticResource Furina.PanelCornerRadius}"/>
+        <Setter Property="Padding" Value="{StaticResource Furina.PanelPadding}"/>
+        <Setter Property="SnapsToDevicePixels" Value="True"/>
+    </Style>
+    <Style x:Key="Furina.MessageBubbleStyle" TargetType="Border" BasedOn="{StaticResource Furina.PanelStyle}">
+        <Setter Property="Background" Value="{StaticResource Furina.InputBrush}"/>
+        <Setter Property="Padding" Value="14,10"/>
+        <Setter Property="CornerRadius" Value="4,16,16,16"/>
+    </Style>
+    <Style x:Key="Furina.ErrorPanelStyle" TargetType="Border" BasedOn="{StaticResource Furina.PanelStyle}">
+        <Setter Property="Background" Value="{StaticResource Furina.ErrorSurfaceBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.DangerBrush}"/>
+    </Style>
+    <Style x:Key="Furina.SecondaryButtonStyle" TargetType="Button">
+        <Setter Property="Background" Value="{StaticResource Furina.SoftBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource Furina.TextBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="{StaticResource Furina.ControlPadding}"/>
+        <Setter Property="MinHeight" Value="42"/>
+        <Setter Property="FontSize" Value="{StaticResource Furina.BodyFontSize}"/>
+        <Setter Property="FontFamily" Value="{StaticResource Furina.BodyFontFamily}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Grid SnapsToDevicePixels="True">
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{StaticResource Furina.ControlCornerRadius}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter RecognizesAccessKey="True" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                        </Border>
+                        <Border x:Name="Hover" Background="#18FFFFFF" CornerRadius="{StaticResource Furina.ControlCornerRadius}" IsHitTestVisible="False" Visibility="Collapsed"/>
+                        <Border x:Name="Focus" BorderBrush="{StaticResource Furina.FocusBrush}" BorderThickness="2" Margin="-3"
+                                CornerRadius="13" IsHitTestVisible="False" Visibility="Collapsed"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Hover" Property="Visibility" Value="Visible"/><Setter Property="Cursor" Value="Hand"/></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Hover" Property="Visibility" Value="Visible"/><Setter TargetName="Hover" Property="Background" Value="#24000000"/></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Focus" Property="Visibility" Value="Visible"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.48"/><Setter TargetName="Hover" Property="Visibility" Value="Collapsed"/><Setter Property="Cursor" Value="Arrow"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="Furina.PrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource Furina.SecondaryButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource Furina.PrimaryBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource Furina.OnAccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.GoldBrush}"/>
+        <Setter Property="Padding" Value="24,12"/>
+    </Style>
+    <Style x:Key="Furina.DangerButtonStyle" TargetType="Button" BasedOn="{StaticResource Furina.SecondaryButtonStyle}">
+        <Setter Property="Background" Value="{StaticResource Furina.DangerBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource Furina.OnAccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.DangerBrush}"/>
+    </Style>
+    <Style x:Key="Furina.InputStyle" TargetType="TextBox">
+        <Setter Property="Background" Value="{StaticResource Furina.InputBrush}"/>
+        <Setter Property="Foreground" Value="{StaticResource Furina.TextBrush}"/>
+        <Setter Property="CaretBrush" Value="{StaticResource Furina.TextBrush}"/>
+        <Setter Property="SelectionBrush" Value="{StaticResource Furina.AccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="FontFamily" Value="{StaticResource Furina.BodyFontFamily}"/>
+        <Setter Property="FontSize" Value="{StaticResource Furina.BodyFontSize}"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="MinHeight" Value="42"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Grid>
+                        <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="{StaticResource Furina.ControlCornerRadius}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" Focusable="False"/>
+                        </Border>
+                        <Border x:Name="Focus" BorderBrush="{StaticResource Furina.FocusBrush}" BorderThickness="2"
+                                CornerRadius="{StaticResource Furina.ControlCornerRadius}" IsHitTestVisible="False" Visibility="Collapsed"/>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Furina.AccentBrush}"/></Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Focus" Property="Visibility" Value="Visible"/></Trigger>
+                        <Trigger Property="IsReadOnly" Value="True"><Setter TargetName="Chrome" Property="Background" Value="{StaticResource Furina.SoftBrush}"/></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.48"/></Trigger>
+                        <Trigger Property="Validation.HasError" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Furina.DangerBrush}"/></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- Keep the platform template: it owns indeterminate animation, orientation and range semantics. -->
+    <Style x:Key="Furina.ProgressStyle" TargetType="ProgressBar">
+        <Setter Property="Foreground" Value="{StaticResource Furina.AccentBrush}"/>
+        <Setter Property="Background" Value="{StaticResource Furina.SoftBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource Furina.BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="MinHeight" Value="8"/>
+    </Style>
+</ResourceDictionary>

@@ -291,6 +291,18 @@ public sealed partial class LocalDatabase
         tx.Commit();
     }
 
+    /// <summary>Exact request lookup; absence is unknown, never a reason to substitute a recent batch.</summary>
+    public async Task<AccountBatch?> LoadBatchAsync(Guid batchId, CancellationToken ct = default)
+    {
+        if (batchId == Guid.Empty) throw new ArgumentException("运行计划标识无效。", nameof(batchId));
+        await using var c = await OpenAsync(ct);
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = "SELECT id,game,started_at,updated_at,state,current_account_id,detail,mode FROM batch_execution_records WHERE id=$id;";
+        cmd.Parameters.AddWithValue("$id", batchId.ToString("D"));
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadBatch(reader) : null;
+    }
+
     public async Task<IReadOnlyList<AccountBatch>> LoadRecentBatchesAsync(int limit = 20, CancellationToken ct = default, GameId? game = null)
     {
         if (limit is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(limit));
@@ -305,16 +317,19 @@ public sealed partial class LocalDatabase
         var result = new List<AccountBatch>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
-        {
-            var accountText = reader.IsDBNull(5) ? null : reader.GetString(5);
-            var accountId = accountText is null ? (Guid?)null : Guid.TryParse(accountText, out var parsed)
-                ? parsed : accountText switch { "legacy-genshin" => LegacyId(GameId.Genshin),
-                    "legacy-star-rail" => LegacyId(GameId.StarRail), "legacy-zenless" => LegacyId(GameId.ZenlessZoneZero), _ => null };
-            result.Add(new(Guid.Parse(reader.GetString(0)), (GameId)reader.GetInt32(1),
-                DateTimeOffset.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
-                reader.GetString(4), accountId, reader.GetString(6), reader.GetString(7)));
-        }
+            result.Add(ReadBatch(reader));
         return result;
+    }
+
+    private static AccountBatch ReadBatch(SqliteDataReader reader)
+    {
+        var accountText = reader.IsDBNull(5) ? null : reader.GetString(5);
+        var accountId = accountText is null ? (Guid?)null : Guid.TryParse(accountText, out var parsed)
+            ? parsed : accountText switch { "legacy-genshin" => LegacyId(GameId.Genshin),
+                "legacy-star-rail" => LegacyId(GameId.StarRail), "legacy-zenless" => LegacyId(GameId.ZenlessZoneZero), _ => null };
+        return new(Guid.Parse(reader.GetString(0)), (GameId)reader.GetInt32(1),
+            DateTimeOffset.Parse(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(3)),
+            reader.GetString(4), accountId, reader.GetString(6), reader.GetString(7));
     }
 
     public async Task<IReadOnlyList<AccountExecutionRecord>> LoadBatchResultsAsync(Guid batchId, CancellationToken ct = default,

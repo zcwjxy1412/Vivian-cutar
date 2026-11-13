@@ -4,7 +4,7 @@
 - 工作树：`C:\Users\胡桃\.codex\worktrees\furina-vnext-ai\Vivian-source`；分支 `feat/furina-ai-agent`。
 - SOURCE_BASE_SHA：`ce3ebeea79c507825e66a9e97097a6f80ede33cc`；依赖公共 T0 / 分支 BASE：`8f857cf2cd16515d81f4c65f8e50b693374dccd4`。
 - 产品 HEAD：`70661de3d10d7437a595b4a9d37e0a881c6ce6c2`；本状态文件为其后的文档提交，无后续产品变更。
-- 独立审查：**blocked / 0 轮**。本聊天工具目录没有 `deepseek_review`，没有调用替代模型冒充 DeepSeek。
+- 独立审查：C 本聊天 **blocked / 0 轮**。总控随后通知正在接通真实 DeepSeek 审查，由总控独占处理；C 不重复发起，不接收凭据，最终审查结果以总控证据为准。
 
 ## 审计事实与裁定
 
@@ -50,3 +50,48 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release --logger 'trx;LogF
 - 未提供用于本分支的有效模型配置；真实端点聊天、鉴权、工具往返和真人确认 UI 未联调，模拟 HTTP 不能替代此验收。
 - 未运行 WPF 冒烟/焦点/DPI 实测、未启动游戏、未部署。总控需串行安排：空闲时真实连接测试与取消/改字段；隔离账号提案确认后通过工具回读；游戏占用桌面时打开聊天必须先通过安全输入契约；真实 PlanId→RunId→终态/清理回执。
 - 本首批为协议可靠性增量与现有配置闭环审计，不标记整个 AI 工作项或三游闭环完成。等待 I 发布公共契约 v2 后消费，DeepSeek 工具恢复后用实际脱敏 diff 首审。
+
+## 追加只读审计：ActionId、确认调用链与 v2 最小接入
+
+核对版本为产品 `70661de` / 状态提交 `0bf73e6`；本次仅更新本文档，不修改待审产品代码，也不假定集成分支已有任何新接口。草稿 PR：#69。
+
+### 可直接复用的链路
+
+- `AssistantCore.ProposeRunAsync` 创建 `AssistantRunPlan.Id`，工具输出 `action_id`；同一卡片确认使用同一个对象和 ID。模型重新生成计划会产生新 ID，因此当前保证不覆盖“不同计划 ID 的语义重复请求”。
+- `AssistantViewModel.ConfirmRunAsync` 检查过期、账号准入、人工确认与 confirmation revision，禁用卡片，再调用 `_submitPlan(plan)`；构造器仍是 `Func<AssistantRunPlan, Task<string>>`。`CancelRequest()` 仅取消聊天请求，与该委托无关。保留这条隔离关系。
+- `MainViewModel` 构造 Assistant 时传入 `SubmitAssistantPlanAsync`；该方法通过 `RunAsync` 等待 `RunAccountBatchAsync(GameId.StarRail, plan)`，最后返回 `BatchStatus` 文案，**不是立即接受回执，也不返回 QueueId**。
+- `RunStarRailBatchAsync` 在桌面租约内再次读取配置和账号任务版本，核对开关、选中账号、有效期、安装路径和分解策略，冻结账号设置，然后把 `approved?.Id` 传给 `MultiAccountOrchestrator.ExecuteAsync(... actionId)`。这些准入和设置快照应保留，不能用 C 的卡片检查替代。
+- `MultiAccountOrchestrator.ExecuteAsync` 先校验同游戏、非空且不重复账号，再 `BeginBatchAsync`，之后才 `_host.BeginBatch()` 和桌面动作。`LocalDatabase.Accounts.cs` 的 `BeginBatchAsync` 令 `batch.Id = actionId ?? Guid.NewGuid()`；有 actionId 时 `INSERT ... ON CONFLICT(id) DO NOTHING`，受主键保护，插入数不是 1 就抛异常。它是持久化“最多创建一次”，不是“重复提交返回同一结果”。
+- 无单独 action_id 列或载荷摘要；普通 `SaveBatchAsync` 是更新入口，不可当作提交去重入口。现有 `AssistantTests.StarRailRunPlansAreOptInReadOnlyAndHaveASingleDurableActionId` 验证串行重复 ID 被拒绝；没有证明跨进程并发、同 ID 异载荷或接收后断连的回执恢复。
+- `RecordAccountResultAsync` 保存 batch_id/account_id/run_id；但调用发生在 runner 返回后。`RunStore.ReadBoundRunsAsync` 依赖这条历史关联筛选账号，不能用于尚未结束的实时账号关联。`batch_execution_records.game` 是单游戏；不能直接用同一个父 PlanId 为三个游戏各建批次。
+
+### 分两步落地，缩小公共变更
+
+**第一步：单星铁结构化查回，无数据库迁移也能取得增量。** I 增加按精确 BatchId 读取批次的方法与按 BatchId 读取结果的类型化投影，C 用已有 plan.Id 精确查回。明确区分“已记录批次/已中断/尚未找到”，不能以查不到等于未提交，也不能查询最近 20 条后猜测。现有批次结果可提供结束后的 RunId。这个步骤不宣称支持同 ID 异载荷验证、立即接受、运行中 RunId 或多游计划；最小情况下确认委托继续等到结束，只把返回 string 换为类型化结果即可，不需要新建后台任务。
+
+**第二步：多游与可重放接受回执，需要最小新增持久化。** 建议 I 在现有 v7 之后分配迁移编号（C 不预占 v8），增加父计划表与有序计划项表，不改造旧 batch 的单游戏含义：
+
+- 父表 `execution_plans`：PlanId 主键、规范化载荷摘要、版本化的已确认计划 JSON、确认版本、接受时间、状态。保存用于核验和展示的内部 ID/策略，不保存凭据或登录资料；规范化摘要须覆盖项目顺序、游戏/账号/任务、两类 revision、资源策略、失败策略和有效期，不能散列原始 JSON 文本。
+- 子表 `execution_plan_items`：父 PlanId + ordinal 联合主键、预先分配并持久化的唯一 ChildBatchId。目标和冻结配置来自父表不可变计划 JSON，避免两处重复存同一计划。首版可一项一个原有单游戏批次，保持原顺序，不为合并相同游戏而重排。
+- **启动前运行关联**：若一项可能产生多个 RunId，增加 `execution_plan_runs(PlanId, ordinal, RunId UNIQUE)`；F/I 必须在分配 RunId 后、调用适配器/输入前写入关联。若 I 选择在 runs 上加可空 PlanId/ordinal，则这张关联表可省，二者不要同时建。账号与 revision 可由计划快照投影给 C，首批不必给所有 RunEvent 重复加字段。已有 run_events.id 可作为持久化游标投影，避免另建一套事件表。
+- 原 `batch_execution_records`、`account_execution_history` 和 `runs` 继续承载执行与清理事实；旧记录不回填猜测关联，旧 schema 数据必须保持可读。父计划只是编排/接受状态，不复制或覆盖引擎成功结论。
+
+**提交事务与恢复顺序：** 宿主验证确认与冻结载荷 → 同一事务插入父计划和 ChildBatchId → 返回接受回执 → 宿主持有独立于聊天的执行生命周期顺序启动子批次。相同 PlanId/相同摘要返回已存回执；不同摘要返回冲突；插入竞争后读取胜者并比较摘要。不要仅捕获 BeginBatchAsync 的任意 InvalidOperationException 当作重复接受。原 BeginBatchAsync 的 create-only 保护仍是每个子批次开始前的第二道保护。
+
+提交取消/崩溃后，C 仅用同 PlanId 查询，不自动换 ID 重试。已经存在的子批次不能因“无账号结果”而再次启动；结合既有 `ReconcileInterruptedBatchesAsync` 和运行恢复，把状态保守显示为中断/待核对。父计划已接受但子批次未创建时，是否允许继续由宿主重新检查确认、有效期和准入；不得因数据库有记录就跳过授权检查。失败或清理/配置恢复未确认时停止后续项；安全清理门槛优先于任何继续策略。
+
+### 建议 v2 的最小调用面与 C 下一批
+
+以下为待 I 冻结的签名意图，不是本分支已定义的 DTO：
+
+1. `SubmitConfirmedPlanAsync(ConfirmedPlan, CancellationToken) -> PlanSubmission`：至少 PlanId、接受状态、原因码及子项 BatchId。父计划先于各账号队列存在，不强求一个全局 QueueId；每个实际 RunId 的 QueueId 直接读现有 runs。
+2. `ReadPlanAsync(PlanId, CancellationToken) -> PlanReceipt?`：返回不可变目标、子项/批次、真实 RunId/QueueId、阶段、Outcome、Cleanup、恢复状态；未启动 RunId 为 null，旧库无关联不推断。C 不解析 BatchStatus 字符串判断成功。
+3. 确认/提交后的只读订阅或轮询必须属于宿主生命周期；关聊天只停止聊天/界面刷新，不能取消已接受计划。若采用立即接受，I/F 必须先提供受管理任务和异常处理，C 不自行 `Task.Run` 启动游戏。
+
+待 v2 发布后，C 可独立实现的顺序：
+
+- C1：用现有 ProposalCard 的 Id/Target/State/ConfirmCommand 消费类型化单账号回执；保留现有 B 绑定，提交成功仅显示“已接受”，RunOutcome/清理来自精确查询。新增模拟宿主测试：重复点击、接收后断连、未知计划、关闭聊天不中止执行、旧成功不得冒充本次。
+- C2：在 `get_run_status` 增加严格验证的可选 plan_id/run_id，未知 ID 返回明确错误，不退回最近记录。只从 v2 投影读取账号/revision，模拟验证错账号、缺关联、运行中、终态但清理未确认。
+- C3：公共有序计划 DTO 和准入提供者就绪后再扩展 `propose_run` 的参数和 LastRunPlans；模型仍只能生成待确认计划。先保持现有可执行任务白名单，缺能力的游戏返回不可用。多项卡片展示新增绑定先登记给 B，不假装现有单目标 TargetText 可完整表达混合计划。
+
+仅文档追加的验证：源码调用链/SQL/现有测试逐项只读核对；不运行数据库迁移、不读取正式库、不重复运行上批 1121 项测试。不声称上述拟议接口已实现或已经过并发恢复测试。

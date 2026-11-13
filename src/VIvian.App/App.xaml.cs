@@ -45,6 +45,7 @@ public partial class App : Application
         _smoke = e.Args.Contains("--smoke-test");
         _startupCheck = e.Args.Contains("--startup-check");
         var preparingProfile = e.Args.FirstOrDefault() == "--prepare-unified-profile";
+        var preparingAcceptance = e.Args.FirstOrDefault() == VnextAcceptanceProfile.PrepareArgument;
         DispatcherUnhandledException += (_, args) =>
         {
             Log.Fatal("Unhandled UI error: {ErrorType}; {Stack}", args.Exception.GetType().Name,
@@ -79,6 +80,20 @@ public partial class App : Application
             var threeEnginePreview = File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4-ThreeEngine-Preview.marker"));
             if (threeEnginePreview && RealExecutionPolicy.BuildPermitsRealExecution)
                 throw new InvalidOperationException("三引擎预览包不允许真实执行许可。");
+            var acceptanceProfile = VnextAcceptanceProfile.ParseOpen(e.Args);
+            var acceptancePreparation = VnextAcceptanceProfile.ParsePrepare(e.Args);
+            if (acceptanceProfile is not null || acceptancePreparation is not null)
+            {
+                if (!unified || !RealExecutionPolicy.IsM5DailyTest || _smoke || reward is not null || e.Args.Length != 2)
+                    throw new InvalidOperationException("隔离实机验收需要合流实测候选及专用参数。");
+                if (acceptancePreparation is not null)
+                {
+                    _stage = "创建隔离验收副本";
+                    await VnextAcceptanceProfile.PrepareAsync(acceptancePreparation, CancellationToken.None);
+                    Shutdown(0);
+                    return;
+                }
+            }
             if (reward is not null)
             {
                 _stage = "核对原神领奖验收权限";
@@ -112,14 +127,14 @@ public partial class App : Application
             }
             var preview = e.Args.Contains("--m4-preview")
                 || File.Exists(Path.Combine(AppContext.BaseDirectory, "VIvian-M4A-Preview.marker"));
-            var root = reward is not null ? reward.ProfileDirectory : _smoke
+            var root = acceptanceProfile ?? (reward is not null ? reward.ProfileDirectory : _smoke
                 ? SmokeDataDirectory(e.Args)
                 : unified ? UnifiedProfilePreparation.InstalledDirectory
                 : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     RealExecutionPolicy.IsM5DailyTest ? "VIvian-M6-StarRailTest"
                     : RealExecutionPolicy.IsReusableManualTest ? "VIvian-M6-ManualTest"
                     : screenTest ? "VIvian-M6-ScreenTest" : threeEnginePreview ? "VIvian-M6-ThreeEngine-Preview"
-                    : preview ? "VIvian-M6-Preview" : "VIvian-M6-Development");
+                    : preview ? "VIvian-M6-Preview" : "VIvian-M6-Development"));
             var usePreparedProfile = unified && (!_smoke || _startupCheck);
             _stage = "创建数据目录";
             if (!usePreparedProfile) Directory.CreateDirectory(root);
@@ -248,12 +263,12 @@ public partial class App : Application
                 Log.Warning("Reconciled {Count} runs interrupted by an unexpected exit", reconciled.Count);
             _stage = "加载界面数据";
             var vm = _host.Services.GetRequiredService<MainViewModel>();
-            if (unified && !_smoke && reward is null && _instance is { IsOwner: true })
+            if (unified && !_smoke && reward is null && acceptanceProfile is null && _instance is { IsOwner: true })
                 vm.ConfigureHomeGenshinReward(new GenshinHomeReward(root, database,
                     BetterGiAccountBatch.VerifySavedDailyAsync));
             try
             {
-                await vm.InitializeAsync(autoPrepare: !_smoke && reward is null);
+                await vm.InitializeAsync(autoPrepare: !_smoke && reward is null && acceptanceProfile is null);
             }
             catch (Exception ex) when (!_smoke && reward is null && !DatabaseVersionTooNew.TryRead(ex, out _, out _))
             {
@@ -330,7 +345,7 @@ public partial class App : Application
             Log.Error("Startup failed at {Stage}: {ErrorType}; {Stack}", _stage, ex.GetType().Name,
                 Redactor.ForCurrentUser().Redact(ex.ToString()));
             var report = StartupDiagnostics.Write(ex, _dataRoot, _stage);
-            if (!_smoke && !_startupCheck && !preparingProfile && !rewardCommand && !rewardCandidate)
+            if (!_smoke && !_startupCheck && !preparingProfile && !preparingAcceptance && !rewardCommand && !rewardCandidate)
                 MessageBox.Show($"VIvian 启动失败（阶段：{_stage}）。\n\n{StartupDiagnostics.Explain(ex)}\n\n" +
                     (report is null ? "无法写入诊断报告。" : $"诊断报告：{report}") + "\n原数据不会被删除或修改。", "VIvian");
             Shutdown(1);

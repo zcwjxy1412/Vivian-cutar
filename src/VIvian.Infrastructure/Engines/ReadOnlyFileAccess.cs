@@ -55,6 +55,10 @@ public static class ReadOnlyFileAccess
     public static FileStream OpenForStableRead(string path) =>
         new(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
 
+    internal static SafeFileHandle OpenDirectoryForRead(string path, FileShare share) =>
+        OperatingSystem.IsWindows() ? Native.CreateFileW(path, Native.FileListDirectory, share, IntPtr.Zero, FileMode.Open,
+            Native.FileFlagBackupSemantics, IntPtr.Zero) : throw new PlatformNotSupportedException();
+
     /// <summary>
     /// Volume serial number and file index of an open file (Windows), or null where unavailable. Two handles with the
     /// same identity refer to the same file, whatever path was used to open them.
@@ -94,6 +98,13 @@ public static class ReadOnlyFileAccess
     [SupportedOSPlatform("windows")]
     private static class Native
     {
+        public const uint FileFlagBackupSemantics = 0x02000000;
+        public const uint FileListDirectory = 1;
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true, CharSet = CharSet.Unicode)]
+        public static extern SafeFileHandle CreateFileW(string path, uint access, FileShare share, IntPtr security,
+            FileMode disposition, uint flags, IntPtr template);
+
         // FILETIME members are two DWORDs (4-byte aligned). Pack = 4 keeps the managed layout identical to the native
         // 52-byte structure; with default packing every field after FileAttributes was read 4 bytes too late.
         [StructLayout(LayoutKind.Sequential, Pack = 4)]

@@ -25,6 +25,9 @@ public static class BetterGiContract
     /// <summary>The log markers below have been observed, for a run VIvian started, on the real release. False.</summary>
     public static bool CompletionSignalsVerified => false;
 
+    // 0.66.0 can reach the original-resin path without entering its explicit-budget branch.
+    public static bool DomainSpendLimitVerified => false;
+
     /// <summary>
     /// Exit code of a non-elevated BetterGI that restarted itself through the shell "runas" verb:
     /// <c>Environment.Exit(exitCode ?? 'r' + 'u' + 'n' + 'a' + 's')</c> = 553 (level B, Helpers/RuntimeHelper.cs).

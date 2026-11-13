@@ -9,8 +9,10 @@ public abstract class ObservableObject : INotifyPropertyChanged
     protected void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
     { if (EqualityComparer<T>.Default.Equals(field, value)) return; field = value; Raise(name); }
 }
-public sealed class AsyncCommand(Func<Task> execute, Action<Exception> onError) : ICommand
+public sealed class AsyncCommand(Func<object?, Task> execute, Action<Exception> onError) : ICommand
 {
+    public AsyncCommand(Func<Task> execute, Action<Exception> onError) : this(_ => execute(), onError) { }
+
     private bool _running;
     public event EventHandler? CanExecuteChanged;
     public bool CanExecute(object? parameter) => !_running;
@@ -18,7 +20,7 @@ public sealed class AsyncCommand(Func<Task> execute, Action<Exception> onError) 
     {
         if (_running) return;
         _running = true; CanExecuteChanged?.Invoke(this, EventArgs.Empty);
-        try { await execute(); }
+        try { await execute(parameter); }
         catch (Exception ex) { onError(ex); }
         finally { _running = false; CanExecuteChanged?.Invoke(this, EventArgs.Empty); }
     }

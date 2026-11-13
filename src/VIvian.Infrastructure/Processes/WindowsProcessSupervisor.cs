@@ -18,6 +18,13 @@ namespace VIvian.Infrastructure.Processes;
 [SupportedOSPlatform("windows")]
 public sealed class WindowsProcessSupervisor : IProcessSupervisor
 {
+    private readonly bool _startMinimizedWithoutActivation;
+
+    public WindowsProcessSupervisor() : this(false) { }
+
+    internal WindowsProcessSupervisor(bool startMinimizedWithoutActivation) =>
+        _startMinimizedWithoutActivation = startMinimizedWithoutActivation;
+
     /// <summary>
     /// Opens an engine's own window for the user (e.g. March7th Launcher.exe), exactly as a double-click would:
     /// through the shell, so Windows shows its UAC prompt when the program asks for administrator rights and the user
@@ -32,6 +39,17 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
         if (!File.Exists(exe)) throw new FileNotFoundException("安装目录里没有找到 " + fileName + "。", exe);
         using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe)
         { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(exe)! });
+    }
+
+    /// <summary>Reveals an existing executable in Explorer so an elevated caller does not start it as a child.</summary>
+    public static void RevealExecutable(string executable)
+    {
+        if (!Path.IsPathFullyQualified(executable) || executable.Contains('"') ||
+            !executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(executable))
+            throw new ArgumentException("请选择已存在的程序。", nameof(executable));
+        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        using var started = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(explorer,
+            $"/select,\"{executable}\""));
     }
 
     /// <summary>Starts a user-facing game through the shell and returns its process, if the shell exposes one.</summary>
@@ -195,7 +213,8 @@ public sealed class WindowsProcessSupervisor : IProcessSupervisor
                 StartupInfo = new STARTUPINFO
                 {
                     cb = Marshal.SizeOf<STARTUPINFOEX>(),
-                    dwFlags = STARTF_USESTDHANDLES,
+                    dwFlags = STARTF_USESTDHANDLES | (_startMinimizedWithoutActivation ? STARTF_USESHOWWINDOW : 0),
+                    wShowWindow = _startMinimizedWithoutActivation ? SW_SHOWMINNOACTIVE : (short)0,
                     hStdInput = stdinRead.DangerousGetHandle(),
                     hStdOutput = stdoutWrite.DangerousGetHandle(),
                     hStdError = stdoutWrite.DangerousGetHandle(),

@@ -64,12 +64,35 @@ public sealed class AccountStoreTests
             {
                 await c.OpenAsync();
                 using var cmd = c.CreateCommand();
-                cmd.CommandText = "DROP TABLE account_scan_sessions; DROP TABLE account_login_profiles; ALTER TABLE batch_execution_records DROP COLUMN mode; ALTER TABLE game_accounts DROP COLUMN install_path; PRAGMA user_version=4;";
+                cmd.CommandText = "DROP TABLE account_configuration_audit; DROP TABLE account_scan_sessions; DROP TABLE account_login_profiles; ALTER TABLE batch_execution_records DROP COLUMN mode; ALTER TABLE game_accounts DROP COLUMN install_path; PRAGMA user_version=4;";
                 await cmd.ExecuteNonQueryAsync();
             }
             await db.InitializeAsync();
             Assert.True(File.Exists(path + ".pre-v5.bak"));
             Assert.Equal("", (await db.LoadAccountsAsync(GameId.StarRail)).Single().InstallPath);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            foreach (var file in Directory.GetFiles(Path.GetDirectoryName(path)!, Path.GetFileName(path) + "*")) File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public async Task RecentBatchesAreFilteredByGameBeforeTheLimit()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "vivian-batch-filter-" + Guid.NewGuid().ToString("N") + ".db");
+        try
+        {
+            var db = new LocalDatabase(path);
+            await db.InitializeAsync();
+            var starRail = await db.BeginBatchAsync(GameId.StarRail);
+            await db.BeginBatchAsync(GameId.Genshin);
+            await db.BeginBatchAsync(GameId.ZenlessZoneZero);
+
+            var selected = await db.LoadRecentBatchesAsync(limit: 1, game: GameId.StarRail);
+            Assert.Equal(starRail.Id, Assert.Single(selected).Id);
+            Assert.Equal(3, (await db.LoadRecentBatchesAsync()).Count);
         }
         finally
         {

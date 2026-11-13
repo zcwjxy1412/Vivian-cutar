@@ -26,8 +26,28 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public IReadOnlyList<string> Chips => Profile.Tasks.Where(t => t.Frequency != TaskFrequency.OnDemand)
         .Select(t => t.Title.Split('（')[0]).Distinct().Take(3).ToList();
     /// <summary>True only when this build may run the engine for real and its installation is verified.</summary>
-    public bool CanRunForReal => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified;
-    public string RunHint => CanRunForReal ? "可以执行" : Id == GameId.StarRail ? "待安装核验" : "接入中";
+    internal bool GenshinDailyWired { get; set; }
+    internal bool HomeRewardWired { get; set; }
+    internal bool CanOperateWorkspace { get; set; } = true;
+    public bool CanRunForReal => CanOperateWorkspace && (Id switch
+    {
+        GameId.StarRail => RealExecutionPolicy.IsM5DailyTest && Report?.Compatibility == CompatibilityClass.IdentityVerified,
+        GameId.Genshin => GenshinDailyWired && InstallPath == SavedInstallPath &&
+            Report?.Compatibility is CompatibilityClass.PendingValidation or CompatibilityClass.IdentityVerified,
+        GameId.ZenlessZoneZero => RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall
+            && InstallPath == SavedInstallPath && Report is { Compatibility: CompatibilityClass.IdentityVerified } zenless
+            && !zenless.Checks.Any(check => check.State == CheckState.Failed && check.Id != "od:instances"),
+        _ => false,
+    });
+    public bool CanPlayFromHome => CanRunForReal || (CanOperateWorkspace && HomeRewardWired &&
+        InstallPath == SavedInstallPath && Report?.Compatibility == CompatibilityClass.PendingValidation);
+    public string HomePlayHint => HomeRewardWired ? "原神日常 · 按勾选顺序执行已保存计划"
+        : Id == GameId.ZenlessZoneZero && !CanRunForReal ? Evidence : "运行";
+    public string RunHint => !CanOperateWorkspace ? "隔离验收 · 只读"
+        : HomeRewardWired ? (CanPlayFromHome ? "按顺序执行保存计划" : "日常 · 待安装核验")
+        : CanRunForReal ? "可以执行"
+        : Id == GameId.ZenlessZoneZero && RealExecutionPolicy.IsUnifiedInstall ? Compatibility
+        : Id == GameId.StarRail || GenshinDailyWired ? "待安装核验" : "接入中";
     /// <summary>Banner gradient when the user supplied no banner image (white text stays above 5.9:1).</summary>
     public string BannerFrom => Id switch { GameId.Genshin => "#1F6F86", GameId.StarRail => "#4B3BA8", _ => "#7A4F00" };
     public string BannerTo => Id switch { GameId.Genshin => "#2B4C9A", GameId.StarRail => "#2A2F7A", _ => "#3A2A10" };
@@ -47,13 +67,25 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
             Set(ref _installPath, value);
             Report = null;
             Compatibility = "路径已改变，请重新检查";
+            Raise(nameof(CanRunForReal));
+            Raise(nameof(CanPlayFromHome));
+            Raise(nameof(RunHint));
+            Raise(nameof(Execution));
         }
     }
     private string _compatibility = "尚未检查";
     /// <summary>Short state shown on the card.</summary>
-    public string Compatibility { get => _compatibility; set => Set(ref _compatibility, value); }
+    public string Compatibility
+    {
+        get => _compatibility;
+        set { Set(ref _compatibility, value); Raise(nameof(RunHint)); }
+    }
     private string _evidence = "保存安装目录后，VIvian 会只读检查引擎文件。";
-    public string Evidence { get => _evidence; set => Set(ref _evidence, value); }
+    public string Evidence
+    {
+        get => _evidence;
+        set { Set(ref _evidence, value); Raise(nameof(HomePlayHint)); }
+    }
     private string _stateBrush = StateColors.Neutral;
     public string StateBrush { get => _stateBrush; set => Set(ref _stateBrush, value); }
     private string _detectedVersion = "检测到的版本：—";
@@ -66,8 +98,16 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public IReadOnlyList<CapabilityRow> Capabilities { get; } = EngineCatalog.For(id).Capabilities.Select(ToRow).ToList();
     public EngineReadinessReport? Report { get; private set; }
 
-    /// <summary>What this build lets the user do with the engine for real. Only March7th screen_test can ever run.</summary>
-    public string Execution => Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
+    /// <summary>What this build lets the user do with the engine for real.</summary>
+    public string Execution => !CanOperateWorkspace ? "隔离验收中，此游戏卡片仅供查看。"
+        : HomeRewardWired ? "按账号管理的勾选顺序执行已保存的任务和消耗设置；启用合成时先合成树脂，再领取每日奖励。"
+        : GenshinDailyWired
+        ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
+        : Id == GameId.ZenlessZoneZero && RealExecutionPolicy.IsUnifiedInstall
+        ? (CanRunForReal
+            ? "导入登录截图并勾选账号后，Vivian 会在登录界面核对账号，再由 OneDragon 执行源档案中的任务。"
+            : "真实任务未开放。请先保存 OneDragon 安装目录并完成核验。")
+        : Id == GameId.StarRail && RealExecutionPolicy.IsM5DailyTest
         ? "可以执行：日常（清体力 + 每日实训 + 领奖），每次由你确认后启动；其他任务未开放。"
         : Id == GameId.StarRail && RealExecutionPolicy.IsReusableManualTest
         ? "真实任务：仅 screen_test，可在“真实任务测试”页逐次由本人确认启动；其他任务未开放。"
@@ -85,7 +125,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public void Show(EngineReadinessReport report)
     {
         Report = report;
-        foreach (var name in new[] { nameof(CanRunForReal), nameof(RunHint) }) Raise(name);
+        foreach (var name in new[] { nameof(CanRunForReal), nameof(CanPlayFromHome), nameof(RunHint), nameof(HomePlayHint), nameof(Execution) }) Raise(name);
         var (state, brush) = report.Compatibility switch
         {
             CompatibilityClass.NotConfigured => ("未设置路径", StateColors.Neutral),

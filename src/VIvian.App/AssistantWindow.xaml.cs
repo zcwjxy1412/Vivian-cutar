@@ -16,6 +16,13 @@ public partial class AssistantWindow : Window
             if (e.Action == NotifyCollectionChangedAction.Add) Dispatcher.BeginInvoke(ChatScroll.ScrollToEnd);
         };
         Loaded += (_, _) => InputBox.Focus();
+        IsVisibleChanged += (_, _) => { if (!IsVisible) model.CancelRequest(); };
+        Closed += (_, _) => model.CancelRequest();
+        model.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(model.NewApiKey) && model.NewApiKey.Length == 0)
+                KeyBox.Clear();
+        };
     }
 
     private void DragHeader(object sender, MouseButtonEventArgs e)

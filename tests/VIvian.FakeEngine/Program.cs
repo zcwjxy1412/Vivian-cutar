@@ -100,6 +100,12 @@ switch (scenario)
         Emit("evidence", "completion");
         return 0;
 
+    case "probe-startup-window":
+        if (!OperatingSystem.IsWindows()) return 64;
+        StartupProbe.GetStartupInfo(out var startup);
+        Emit("info", $"use-show-window={(startup.Flags & 1) != 0};show-window={startup.ShowWindow}");
+        return 0;
+
     case "probe-identity":
     case "probe-identity-wait":
     {
@@ -160,6 +166,22 @@ internal static class HandleProbe
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool GetHandleInformation(IntPtr handle, out uint flags);
+}
+
+internal static class StartupProbe
+{
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Info
+    {
+        public int Size;
+        public IntPtr Reserved, Desktop, Title;
+        public int X, Y, Width, Height, Columns, Rows, FillAttribute, Flags;
+        public short ShowWindow, ReservedLength;
+        public IntPtr ReservedBytes, StdInput, StdOutput, StdError;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "GetStartupInfoW")]
+    public static extern void GetStartupInfo(out Info info);
 }
 
 internal static class JobProbe

@@ -61,12 +61,14 @@ public sealed class ProcessSafetyGuardTests
     [Fact]
     public void ProcessLookupByNameIsUsedOnlyForDetection()
     {
-        // GetProcessesByName may only feed the foreign-process preflight check, which never acts on the result.
+        // Discovery by name is read-only. Game window input separately requires a verified path, PID and start time.
         var hits = Lines().Where(l => l.Text.Contains("GetProcessesByName", StringComparison.Ordinal)).ToList();
         Assert.All(hits, h => Assert.Contains(h.File, new[]
         {
             "VIvian.Infrastructure/Simulation/FakeEngineAdapter.cs",
             "VIvian.Infrastructure/Accounts/StarRailWindow.cs",
+            "VIvian.Infrastructure/Engines/BetterGi/GenshinWindowsLoginDesktop.cs",
+            "VIvian.Infrastructure/Engines/BetterGi/BetterGiDailyAcceptance.cs",
         }));
     }
 

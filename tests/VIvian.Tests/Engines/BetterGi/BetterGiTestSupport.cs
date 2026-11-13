@@ -103,7 +103,7 @@ internal sealed class ScriptedLogSource : IBetterGiLogSource
 internal sealed class FakeProbe(int running = 0) : IBetterGiProcessProbe
 {
     public int Running { get; set; } = running;
-    public int CountRunning(string programPath) => Running;
+    public bool IsBusy(string programPath) => Running > 0;
 }
 
 /// <summary>Synthetic BetterGI log records in the pinned file template. No real log content is used.</summary>
@@ -148,6 +148,12 @@ internal sealed class BetterGiFixture : IAsyncDisposable
             File.WriteAllBytes(Path.Combine(Root, "BetterGI.exe"), [0x4D, 0x5A]);
             Directory.CreateDirectory(Path.Combine(Root, "Assets"));
             Directory.CreateDirectory(Path.Combine(Root, "GameTask"));
+            var oneDragon = Directory.CreateDirectory(Path.Combine(Root, "User", "OneDragon")).FullName;
+            File.WriteAllText(Path.Combine(Root, "User", "config.json"), """{ "selectedOneDragonFlowConfigName": "默认配置" }""");
+            File.WriteAllText(Path.Combine(oneDragon, "默认配置.json"), """{ "Name": "默认配置", "CompletionAction": "关闭软件" }""");
+            File.WriteAllText(Path.Combine(oneDragon, "日常.json"), """{ "Name": "日常", "CompletionAction": "关闭软件" }""");
+            var scriptGroups = Directory.CreateDirectory(Path.Combine(Root, "User", "ScriptGroup")).FullName;
+            File.WriteAllText(Path.Combine(scriptGroups, "采集.json"), """{ "name": "采集", "projects": [] }""");
         }
         Supervisor = new FakeSupervisor(id => new FakeGroup(id, Pid), () => LogOpenedBeforeLaunch = Logs.Opens > 0);
     }

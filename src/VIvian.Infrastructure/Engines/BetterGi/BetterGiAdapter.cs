@@ -1,50 +1,82 @@
-using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using System.Text.Json;
 using VIvian.Core;
 using VIvian.Core.Engines;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure.Simulation;
 
+[assembly: InternalsVisibleTo("VIvian.BetterGiProbe")]
+
 namespace VIvian.Infrastructure.Engines.BetterGi;
 
 /// <summary>
-/// Keeps at most one BetterGI run per installation inside this VIvian process. A slot whose cleanup was not confirmed
-/// stays taken for the rest of the session: what that run left behind is unknown.
+/// BetterGI's IPC root is per user, so all installations share one run slot inside VIvian.
+/// Unconfirmed cleanup keeps that slot occupied for the rest of the session.
 /// </summary>
 public sealed class BetterGiRunRegistry
 {
     public static BetterGiRunRegistry Shared { get; } = new();
 
-    private readonly ConcurrentDictionary<string, Guid> _active = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Lock _gate = new();
+    private Guid? _active;
 
-    public bool IsBusy(string installRoot) => _active.ContainsKey(Normalize(installRoot));
-
-    internal bool TryAcquire(string installRoot, Guid runId) => _active.TryAdd(Normalize(installRoot), runId);
-
-    internal void Release(string installRoot, Guid runId, CleanupState cleanup)
+    public bool IsBusy
     {
-        if (cleanup is CleanupState.Confirmed or CleanupState.NotRequired)
-            _active.TryRemove(new KeyValuePair<string, Guid>(Normalize(installRoot), runId));
+        get { lock (_gate) return _active is not null; }
     }
 
-    private static string Normalize(string path) => Path.GetFullPath(path).TrimEnd('\\', '/');
+    internal bool TryAcquire(Guid runId)
+    {
+        lock (_gate)
+        {
+            if (_active is not null) return false;
+            _active = runId;
+            return true;
+        }
+    }
+
+    internal void Release(Guid runId, CleanupState cleanup)
+    {
+        lock (_gate)
+        {
+            if (_active == runId && cleanup is (CleanupState.Confirmed or CleanupState.NotRequired))
+                _active = null;
+        }
+    }
 }
 
 /// <summary>Detects (never touches) running BetterGI processes. Detection only blocks; it never grants ownership.</summary>
 public interface IBetterGiProcessProbe
 {
-    /// <summary>Number of running processes of this BetterGI program (or whose path cannot be read).</summary>
-    int CountRunning(string programPath);
+    /// <summary>Whether a BetterGI root can already receive forwarded commands.</summary>
+    bool IsBusy(string programPath);
 }
 
 /// <summary>
-/// Reuses the repository's single detection-only lookup (<see cref="FakeEngineAdapter.ForeignProcessIds"/>, the only
-/// place the process-safety guard allows a by-name lookup). A process whose path cannot be read — for example an
-/// elevated BetterGI seen from a non-elevated VIvian — counts as running. A BetterGI copy at another path is not
-/// counted; BetterGI's own single-instance check then makes the new process exit with 0xFFFF without running a task.
+/// Checks the same-path process and BetterGI 0.66.0's per-user IPC pipe. The pipe can belong to another installation.
 /// </summary>
 public sealed class BetterGiProcessProbe : IBetterGiProcessProbe
 {
-    public int CountRunning(string programPath) => FakeEngineAdapter.ForeignProcessIds(programPath).Count;
+    public bool IsBusy(string programPath)
+    {
+        if (FakeEngineAdapter.ForeignProcessIds(programPath).Count > 0) return true;
+
+        using var identity = WindowsIdentity.GetCurrent();
+        return identity.User is not { } user || RootPipeMayExist($"BetterGI.v2.user-{user.Value}.root");
+    }
+
+    internal static bool RootPipeMayExist(string pipeName)
+    {
+        const int errorFileNotFound = 2;
+        // No connection or message is sent. Busy, access denied and other ambiguous errors block startup.
+        return WaitNamedPipe($@"\\.\pipe\{pipeName}", 1) || Marshal.GetLastPInvokeError() != errorFileNotFound;
+    }
+
+    [DllImport("kernel32.dll", EntryPoint = "WaitNamedPipeW", ExactSpelling = true, SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WaitNamedPipe(string pipeName, uint timeout);
 }
 
 /// <summary>
@@ -61,7 +93,8 @@ public sealed class BetterGiProcessProbe : IBetterGiProcessProbe
 /// </summary>
 public sealed class BetterGiAdapter : IGameAdapter
 {
-    public const string RuleVersionValue = "bgi-v0.66.0-m4-r1";
+    internal bool DelegateNativeTasks { get; init; }
+    public const string RuleVersionValue = "bgi-v0.66.0-m6-r1";
 
     private readonly Func<string?> _installRoot;
     private readonly BetterGiTaskRequest _request;
@@ -113,11 +146,19 @@ public sealed class BetterGiAdapter : IGameAdapter
             return PreflightResult.Block(reason, failed?.Message ?? $"BetterGI 安装检查未通过（{report.Compatibility}）。", blocksQueue: false);
         }
         var directory = Path.GetDirectoryName(report.ProgramPath!)!;
-        if (_registry.IsBusy(directory))
-            return PreflightResult.Block(ReasonCodes.ForeignProcess, "该 BetterGI 安装仍有一次运行未结束或未确认清理，不能重复启动。");
-        if (_probe.CountRunning(report.ProgramPath!) > 0)
+        if (_registry.IsBusy)
+            return PreflightResult.Block(ReasonCodes.ForeignProcess, "仍有一次 BetterGI 运行未结束或未确认清理，不能重复启动。");
+        if (_probe.IsBusy(report.ProgramPath!))
             return PreflightResult.Block(ReasonCodes.ForeignProcess,
                 "发现已在运行的 BetterGI（单实例程序，可能来自用户或之前的运行）。VIvian 不会关闭它，已停止队列。");
+        try
+        {
+            await CheckLaunchPlanAsync(directory, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsConfigurationError(ex))
+        {
+            return PreflightResult.Block(ReasonCodes.PreflightError, ConfigurationError(ex), blocksQueue: false);
+        }
         if (!ExecutionGateOpen)
             return PreflightResult.Block(ReasonCodes.RealAdapterUnverified,
                 $"BetterGI {BetterGiContract.PinnedTag} 的启动、进程归属与完成证据尚未在 Windows 桌面验证，真实执行保持关闭。", blocksQueue: false);
@@ -133,11 +174,12 @@ public sealed class BetterGiAdapter : IGameAdapter
     }
 
     /// <summary>
-    /// The lifecycle behind the gate. Builds the allowlisted launch, takes the per-installation run slot, takes the
+    /// The lifecycle behind the gate. Builds the allowlisted launch, takes the BetterGI run slot, takes the
     /// log baseline, then starts BetterGI through the run's supervisor. Every failure before the supervisor call is
     /// reported as "nothing started"; a supervisor failure keeps its own certainty.
     /// </summary>
-    internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct)
+    internal async Task<IEngineRun> LaunchAsync(RunContext context, IProcessSupervisor supervisor, CancellationToken ct,
+        Func<CancellationToken, Task>? confirmHandoff = null)
     {
         ArgumentNullException.ThrowIfNull(supervisor);
         var root = _installRoot();
@@ -152,8 +194,20 @@ public sealed class BetterGiAdapter : IGameAdapter
         if (link is not null) throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: true, "BetterGI.exe 路径中含有链接，拒绝启动。");
         if (program.Contains('"')) throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: true, "安装路径包含引号，拒绝启动。");
 
-        if (!_registry.TryAcquire(directory, context.RunId))
-            throw new EngineStartException(ReasonCodes.ForeignProcess, nothingStarted: true, "该 BetterGI 安装已有一次运行，不能重复启动。");
+        BetterGiTaskRequest resolved;
+        try
+        {
+            resolved = await CheckLaunchPlanAsync(directory, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsConfigurationError(ex))
+        {
+            throw new EngineStartException(ReasonCodes.PreflightError, nothingStarted: true, ConfigurationError(ex));
+        }
+        if (_probe.IsBusy(program))
+            throw new EngineStartException(ReasonCodes.ForeignProcess, nothingStarted: true, "发现已有 BetterGI 进程或根管道，拒绝转发本次任务。");
+
+        if (!_registry.TryAcquire(context.RunId))
+            throw new EngineStartException(ReasonCodes.ForeignProcess, nothingStarted: true, "已存在一次 BetterGI 运行，不能重复启动。");
 
         IBetterGiLogSubscription log;
         try
@@ -162,20 +216,39 @@ public sealed class BetterGiAdapter : IGameAdapter
         }
         catch (Exception ex)
         {
-            _registry.Release(directory, context.RunId, CleanupState.NotRequired);
+            _registry.Release(context.RunId, CleanupState.NotRequired);
             throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: true, $"无法建立 BetterGI 日志读取基线（{ex.GetType().Name}），未启动。");
         }
 
-        var spec = new ProcessLaunchSpec(program, _request.ToArguments(), directory);
+        var spec = new ProcessLaunchSpec(program, resolved.ToArguments(), directory);
         ISupervisedProcessGroup group;
         try
         {
+            if (_probe.IsBusy(program))
+                throw new EngineStartException(ReasonCodes.ForeignProcess, nothingStarted: true, "BetterGI 在启动前出现已有实例，拒绝转发任务。");
+            if (confirmHandoff is not null)
+            {
+                try
+                {
+                    await confirmHandoff(ct).ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested();
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw new EngineStartException(ReasonCodes.UserStop, nothingStarted: true, "已停止原神交接。");
+                }
+                catch (Exception ex)
+                {
+                    var detail = ex is InvalidOperationException ? ex.Message : "未能重新核对原神大门。";
+                    throw new EngineStartException(ReasonCodes.PreflightError, nothingStarted: true, detail);
+                }
+            }
             group = await supervisor.StartAsync(spec, context.RunId, ct).ConfigureAwait(false);
         }
         catch (EngineStartException ex)
         {
             await log.DisposeAsync().ConfigureAwait(false);
-            if (ex.NothingStarted) _registry.Release(directory, context.RunId, CleanupState.NotRequired);
+            if (ex.NothingStarted) _registry.Release(context.RunId, CleanupState.NotRequired);
             throw;
         }
         catch (Exception)
@@ -188,7 +261,30 @@ public sealed class BetterGiAdapter : IGameAdapter
             await log.DisposeAsync().ConfigureAwait(false);
             throw new EngineStartException(ReasonCodes.StartFailed, nothingStarted: false, "进程组的 RunId 与本次运行不一致。");
         }
-        return new BetterGiRun(context.RunId, group, log, _request, _options, _time,
-            cleanup => _registry.Release(directory, context.RunId, cleanup));
+        return new BetterGiRun(context.RunId, group, log, resolved, _options, _time,
+            cleanup => _registry.Release(context.RunId, cleanup));
     }
+
+    private async Task<BetterGiTaskRequest> CheckLaunchPlanAsync(string directory, CancellationToken ct)
+    {
+        var resolved = await BetterGiConfiguration.ResolveAsync(directory, _request, ct).ConfigureAwait(false);
+        if (!DelegateNativeTasks && resolved.OneDragonPlan?.EnabledTasks.Contains("自动秘境") == true)
+        {
+            var domain = await BetterGiConfiguration.InspectDomainResinAsync(directory, ct).ConfigureAwait(false);
+            if (domain.AutoArtifactSalvage)
+                throw new InvalidDataException("BetterGI 自动秘境启用了分解圣遗物，已阻止启动。");
+            if (!domain.HasExplicitBudget)
+                throw new InvalidDataException("BetterGI 自动秘境未指定树脂使用次数，已阻止启动。");
+            if (!BetterGiContract.DomainSpendLimitVerified)
+                throw new InvalidDataException("当前 BetterGI 版本无法在所有领奖界面保证树脂次数，秘境仅可保存和预览。");
+            return resolved with { DomainResinPlan = domain };
+        }
+        return resolved;
+    }
+
+    private static bool IsConfigurationError(Exception ex) =>
+        ex is InvalidDataException or IOException or UnauthorizedAccessException or InvalidOperationException or JsonException or TimeoutException;
+
+    private static string ConfigurationError(Exception ex) =>
+        ex is InvalidDataException ? ex.Message : $"无法确认 BetterGI 配置（{ex.GetType().Name}），已阻止启动。";
 }

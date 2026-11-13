@@ -10,5 +10,6 @@
     <DefineConstants Condition="'$(M4ScreenTestBuild)' == 'true'">$(DefineConstants);M4_SCREEN_TEST</DefineConstants>
     <DefineConstants Condition="'$(M4ManualTestBuild)' == 'true'">$(DefineConstants);M4_MANUAL_TEST</DefineConstants>
     <DefineConstants Condition="'$(M5DailyTestBuild)' == 'true'">$(DefineConstants);M5_DAILY_TEST</DefineConstants>
+    <DefineConstants Condition="'$(UnifiedInstallBuild)' == 'true'">$(DefineConstants);VIvian_UNIFIED_INSTALL</DefineConstants>
   </PropertyGroup>
 </Project>

@@ -14,6 +14,8 @@ internal static class NativeMethods
     public const uint EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     public const int PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002;
     public const int STARTF_USESTDHANDLES = 0x00000100;
+    public const int STARTF_USESHOWWINDOW = 0x00000001;
+    public const short SW_SHOWMINNOACTIVE = 7;
     public const uint HANDLE_FLAG_INHERIT = 0x00000001;
     public const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
     public const int JobObjectBasicAccountingInformation = 1;

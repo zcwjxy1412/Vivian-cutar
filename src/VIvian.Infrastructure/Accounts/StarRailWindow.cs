@@ -67,9 +67,11 @@ public static class StarRailWindow
     /// <summary>
     /// Detection only. A starting or exiting client may have no top-level window at all.
     /// </summary>
-    public static bool IsProcessRunning()
+    public static bool IsProcessRunning() => IsProcessRunning(ProcessName);
+
+    internal static bool IsProcessRunning(string processName)
     {
-        var processes = Process.GetProcessesByName(ProcessName);
+        var processes = Process.GetProcessesByName(processName);
         try
         {
             return processes.Length > 0;

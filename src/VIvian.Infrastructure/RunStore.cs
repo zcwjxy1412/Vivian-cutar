@@ -90,6 +90,24 @@ public sealed partial class LocalDatabase : IRunJournal, IRunHistory
             cmd => cmd.Parameters.AddWithValue("$limit", limit), ct);
     }
 
+    public Task<IReadOnlyList<RunRecord>> ReadBoundRunsAsync(GameId game, Guid? accountId, int limit, CancellationToken ct = default)
+    {
+        if (limit is < 1 or > 20) throw new ArgumentOutOfRangeException(nameof(limit));
+        return QueryRunsAsync($"""
+            SELECT {RunColumns} FROM runs
+            WHERE game=$game AND ($account IS NULL OR EXISTS (
+                SELECT 1 FROM account_execution_history h
+                JOIN batch_execution_records b ON b.id=h.batch_id AND b.game=runs.game
+                WHERE h.account_id=$account AND h.run_id=runs.run_id))
+            ORDER BY created_at DESC, run_id DESC LIMIT $limit;
+            """, cmd =>
+            {
+                cmd.Parameters.AddWithValue("$game", (int)game);
+                cmd.Parameters.AddWithValue("$account", accountId is { } id ? DatabaseId(id) : (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("$limit", limit);
+            }, ct);
+    }
+
     public Task<IReadOnlyList<RunRecord>> ReadUnresolvedAsync(CancellationToken ct = default) =>
         QueryRunsAsync($"SELECT {RunColumns} FROM runs WHERE {UnresolvedCondition} ORDER BY created_at;",
             _ => { }, ct);

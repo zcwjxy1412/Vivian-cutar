@@ -87,6 +87,12 @@ public enum BetterGiMarkerKind
     Progress,
     /// <summary>"一条龙和配置组任务结束" — the only completion line of the one-dragon flow.</summary>
     Completed,
+    DailyRewardVerified,
+    DailyRewardUnverified,
+    CraftStarted,
+    CraftAttempt,
+    CraftSkipped,
+    CraftEnded,
     /// <summary>"任务被取消，退出执行", "一条龙在启动阶段被取消" or a TaskRunner interruption by cancellation.</summary>
     Cancelled,
     /// <summary>"没有配置,退出执行!" or "没有配置组任务,退出执行!" — nothing (more) was run.</summary>
@@ -95,6 +101,13 @@ public enum BetterGiMarkerKind
     Failure,
     /// <summary>"UnHandle Exception [FATAL]" or an FTL-level record.</summary>
     Fatal,
+    DomainStarted,
+    DomainTarget,
+    DomainRewardAttempt,
+    DomainResinProgress,
+    DomainRewardVerified,
+    DomainRewardUnverified,
+    DomainEnded,
 }
 
 public sealed record BetterGiMarker(BetterGiMarkerKind Kind, string? Value = null, int? Done = null, int? Total = null);
@@ -106,6 +119,14 @@ public sealed record BetterGiMarker(BetterGiMarkerKind Kind, string? Value = nul
 /// </summary>
 public static partial class BetterGiMarkers
 {
+    public const string DailyRewardTask = "领取每日奖励";
+    internal const string CraftResinTask = "合成树脂";
+    internal const string DomainTask = "自动秘境";
+    internal const string FlowSource = "BetterGenshinImpact.ViewModel.Pages.OneDragonFlowViewModel";
+    internal const string BuiltInProgressPrefix = "一条龙任务执行: ";
+    private const string TaskControlSource = "BetterGenshinImpact.GameTask.Common.TaskControl";
+    private const string DomainTargetPrefix = "自动秘境：传送到秘境\"";
+
     public const string CompletedLine = "一条龙和配置组任务结束";
     public const string ActivatedPrefix = "启用一条龙配置：";
     public const string ArgumentConfigPrefix = "参数指定的一条龙配置：";
@@ -123,12 +144,53 @@ public static partial class BetterGiMarkers
     [GeneratedRegex(@"^(?:一条龙任务执行|配置组任务执行): (\d{1,4})/(\d{1,4})$", RegexOptions.CultureInvariant)]
     private static partial Regex ProgressLine();
 
+    [GeneratedRegex("""^自动秘境："(浓缩树脂|原粹树脂40|原粹树脂20|原粹树脂|须臾树脂|脆弱树脂)" 刷取 ([1-9][0-9]{0,9})/([1-9][0-9]{0,9})$""",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex DomainResinProgressLine();
+
+    [GeneratedRegex("""^自动秘境：本轮奖励识别结果 "\S.* x[1-9][0-9]*"$""", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
+    private static partial Regex DomainRewardResultLine();
+
     public static BetterGiMarker Classify(BetterGiLogRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
         var message = record.Message;
         if (record.Level == "FTL" || message.StartsWith(FatalPrefix, StringComparison.Ordinal))
             return new(BetterGiMarkerKind.Fatal);
+        if (record.SourceContext == TaskControlSource)
+        {
+            // CheckRewardsTask and AutoDomainTask use TaskControl.Logger. The file template uses {Message},
+            // so Serilog puts quotes around structured string values.
+            if (record.Level == "INF")
+            {
+                if (message == "检查每日奖励结果：\"今日奖励已领取\"") return new(BetterGiMarkerKind.DailyRewardVerified);
+                if (message == "→ \"前往合成台\" 开始") return new(BetterGiMarkerKind.CraftStarted);
+                if (message == "合成\"浓缩树脂\"") return new(BetterGiMarkerKind.CraftAttempt);
+                if (message == "无需合成浓缩树脂") return new(BetterGiMarkerKind.CraftSkipped);
+                if (message == "→ \"前往合成台\" 结束") return new(BetterGiMarkerKind.CraftEnded);
+                if (message == "自动秘境任务：执行") return new(BetterGiMarkerKind.DomainStarted);
+                if (message.StartsWith(DomainTargetPrefix, StringComparison.Ordinal) && message.Length > DomainTargetPrefix.Length
+                    && message.EndsWith('"'))
+                    return new(BetterGiMarkerKind.DomainTarget, message[DomainTargetPrefix.Length..^1]);
+                if (message == "自动秘境：\"5. 领取奖励\"") return new(BetterGiMarkerKind.DomainRewardAttempt);
+                if (DomainResinProgressLine().Match(message) is { Success: true } resin
+                    && int.TryParse(resin.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var done)
+                    && int.TryParse(resin.Groups[3].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var total))
+                    return new(BetterGiMarkerKind.DomainResinProgress, resin.Groups[1].Value, done, total);
+                if (DomainRewardResultLine().IsMatch(message)) return new(BetterGiMarkerKind.DomainRewardVerified);
+                if (message == "体力耗尽或者设置轮次已达标，结束自动秘境") return new(BetterGiMarkerKind.DomainEnded);
+                if (message == "自动秘境：原粹树脂已用尽，退出秘境") return new(BetterGiMarkerKind.DomainRewardUnverified);
+            }
+            if (record.Level == "WRN" && message == "检查每日奖励结果：\"未领取\"，请手动检查！")
+                return new(BetterGiMarkerKind.DailyRewardUnverified);
+            if (record.Level == "WRN" && (message is "树脂不足" or "自动秘境：本轮奖励识别结果为空"
+                or "自动秘境：奖励结果页未检测到退出按钮，已跳过本轮奖励识别"
+                or "自动秘境：奖励识别失败，已跳过本轮奖励汇总"
+                or "自动秘境：指定树脂领取次数时，当前可用树脂选项无法满足配置。你可能设置的刷取次数过多！退出秘境。"
+                || message.StartsWith("自动秘境：检测到树脂不足提示：", StringComparison.Ordinal)
+                || message.StartsWith("自动秘境：未找到可用的树脂，", StringComparison.Ordinal)))
+                return new(BetterGiMarkerKind.DomainRewardUnverified);
+        }
         if (message == CompletedLine) return record.Level == "INF" ? new(BetterGiMarkerKind.Completed) : new(BetterGiMarkerKind.Failure);
         if (message.StartsWith(ActivatedPrefix, StringComparison.Ordinal))
             return new(BetterGiMarkerKind.Activated, message[ActivatedPrefix.Length..]);
@@ -142,7 +204,7 @@ public static partial class BetterGiMarkers
         if (message == GroupTaskFailedLine || message.StartsWith(TaskStartFailedPrefix, StringComparison.Ordinal)
             || message == UnhandledLine)
             return new(BetterGiMarkerKind.Failure);
-        if (ProgressLine().Match(message) is { Success: true } p)
+        if (record.Level == "INF" && ProgressLine().Match(message) is { Success: true } p)
             return new(BetterGiMarkerKind.Progress, null,
                 int.Parse(p.Groups[1].Value, CultureInfo.InvariantCulture), int.Parse(p.Groups[2].Value, CultureInfo.InvariantCulture));
         // TaskRunner logs exceptions swallowed inside a sub-task at ERR and the flow then continues to its completion

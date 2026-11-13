@@ -1,0 +1,165 @@
+# VIvian OneDragon v2.6.0 desktop handoff
+# The packaged launcher imports this module. Ordinary OneDragon launches use its original entry.
+import os as _vivian_os
+
+
+def _vivian_handoff(self, args):
+    run_id = _vivian_os.environ.get("VIVIAN_ZZZ_RUN")
+    if not run_id:
+        return ApplicationLauncher.run_application(self, args)
+
+    import ctypes
+    import time
+    import re
+    import unicodedata
+    from one_dragon.base.operation.application.application_run_context import RunFinishReason
+    from one_dragon.base.operation.application.group_application import GroupApplication
+    from one_dragon.base.operation.operation_base import OperationResult
+    from zzz_od.application.one_dragon_app.zzz_one_dragon_app import ZOneDragonApp
+    from zzz_od.operation.enter_game.enter_game import EnterGame
+
+    instance = int(args.instance)
+    pid = int(_vivian_os.environ["VIVIAN_ZZZ_GAME_PID"])
+    expected = _vivian_os.environ["VIVIAN_ZZZ_APPS"].split(",")
+    masked = _vivian_os.environ["VIVIAN_ZZZ_MASK"]
+    ctx = self.ctx
+    outcome = "failed"
+    results = {}
+    original_execute = ZOneDragonApp.execute
+    run_app_node = GroupApplication.run_app.operation_node_annotation
+    original_run_app = run_app_node.op_method
+    get_app = ctx.run_context.get_application
+
+    def emit(*fields):
+        print("|".join(("VIVIAN-ZZZ", run_id, *map(str, fields))), flush=True)
+
+    def owns_window():
+        hwnd = ctx.controller.game_win.get_hwnd()
+        if not hwnd:
+            return False
+        owner = ctypes.c_ulong()
+        ctypes.windll.user32.GetWindowThreadProcessId(ctypes.c_void_p(hwnd), ctypes.byref(owner))
+        return owner.value == pid
+
+    def read_masks(texts):
+        return [
+            prefix + "****" + suffix
+            for text in texts
+            for prefix, suffix in re.findall(
+                r"(?<!\d)(\d{3})\s*[*•·]{3,}\s*(\d{2,4})(?!\d)", unicodedata.normalize("NFKC", text)
+            )
+        ]
+
+    def run_from_login(app):
+        if not owns_window():
+            return OperationResult(success=False, status="Vivian game window unavailable or changed")
+
+        class EnterSavedAccount(EnterGame):
+            confirmed = False
+
+            def check_enter_click_status_text(self, screen, include_enter_click=False):
+                if not self.confirmed:
+                    return None, None
+                return super().check_enter_click_status_text(screen, include_enter_click)
+
+            def check_login_related(self, screen):
+                if not owns_window():
+                    emit("detail", "login_changed")
+                    return self.round_fail("游戏窗口不再属于本轮客户端")
+                if not self.confirmed:
+                    identities = read_masks(self.ctx.ocr.run_ocr(screen[444:535, 610:1195]))
+                    if not identities:
+                        identities = read_masks([self.ctx.ocr.run_ocr_single_line(screen[477:523, 721:1015])])
+                    if identities != [masked]:
+                        emit("detail", "login_changed")
+                        return self.round_fail("登录确认卡片的脱敏账号发生变化")
+                    button = self.round_by_find_area(screen, "打开游戏", "账号确认-进入游戏")
+                    if not button.is_success:
+                        label = self.ctx.ocr.run_ocr_single_line(screen[603:648, 897:1025])
+                        if "".join(label.split()) not in ("进入游戏", "入游戏"):
+                            emit("detail", "confirmation_missing")
+                            return self.round_fail("未找到已保存账号确认按钮")
+                    if not owns_window():
+                        emit("detail", "login_changed")
+                        return self.round_fail("游戏窗口不再属于本轮客户端")
+                    result = self.round_by_click_area("打开游戏", "账号确认-进入游戏")
+                    if result.is_success:
+                        self.confirmed = True
+                        return self.round_wait("账号已确认", wait=1)
+                    emit("detail", "confirmation_missing")
+                    return self.round_fail("无法点击已保存账号确认按钮")
+                if self.round_by_find_area(screen, "打开游戏", "点击进入游戏").is_success:
+                    return self.round_success("点击进入游戏", wait=1)
+                return self.round_retry("等待账号确认后进入游戏", wait=1)
+
+        enter = EnterSavedAccount(ctx)
+        enter.force_login = False
+        if not enter.execute().success:
+            emit("detail", "entry_failed")
+            return OperationResult(success=False, status="Vivian saved account entry failed")
+        emit("entered")
+        return original_execute(app)
+
+    try:
+        emit("start", _vivian_os.getpid(), instance)
+        deadline = time.monotonic() + 120
+        while not ctx.ready_for_application:
+            if time.monotonic() >= deadline:
+                return
+            time.sleep(0.2)
+        if [row.idx for row in ctx.one_dragon_config.instance_list_in_od] != [instance]:
+            return
+        if ctx.current_instance_idx != instance:
+            ctx.switch_instance(instance)
+        config = ctx.app_group_manager.get_one_dragon_group_config(instance)
+        if [row.app_id for row in config.app_list if row.enabled] != expected:
+            return
+
+        def track_app(app_id, instance_idx, group_id):
+            app = get_app(app_id, instance_idx, group_id)
+            if app_id in expected and instance_idx == instance and group_id == "one_dragon" and app is not None:
+                execute = app.execute
+
+                def track_execution():
+                    emit("task_start", app_id)
+                    result = execute()
+                    status = "success" if result.success else "failed"
+                    results[app_id] = status
+                    emit("task", app_id, status)
+                    return result
+
+                app.execute = track_execution
+            return app
+
+        def track_group_step(group):
+            # Observe the pinned group's real skip decision after it refreshes the task record.
+            # The operation graph calls the callable stored on the node annotation.
+            index = group._current_app_idx
+            items = group._group_config.app_list
+            item = items[index] if 0 <= index < len(items) else None
+            result = original_run_app(group)
+            if (group._group_id == "one_dragon" and ctx.current_instance_idx == instance
+                    and item is not None and item.enabled and item.app_id in expected
+                    and item.app_id not in results and result.is_success
+                    and (result.status or "").startswith("应用已完成 ")):
+                results[item.app_id] = "already_done"
+                emit("task", item.app_id, "already_done")
+            return result
+
+        ctx.run_context.get_application = track_app
+        run_app_node.op_method = track_group_step
+        ZOneDragonApp.execute = run_from_login
+        result = ctx.run_context.run_application("one_dragon", instance, "one_dragon")
+        if result.finish_reason == RunFinishReason.STOPPED:
+            outcome = "cancelled"
+        elif result.finish_reason == RunFinishReason.COMPLETED and "failed" not in results.values():
+            outcome = "success" if all(app in results for app in expected) else "incomplete"
+    finally:
+        ctx.run_context.get_application = get_app
+        run_app_node.op_method = original_run_app
+        ZOneDragonApp.execute = original_execute
+        ctx.after_app_shutdown()
+        emit("end", outcome)
+
+
+ZApplicationLauncher.run_application = _vivian_handoff

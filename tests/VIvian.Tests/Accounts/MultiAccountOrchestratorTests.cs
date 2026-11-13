@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using VIvian.Core;
 using VIvian.Core.Accounts;
+using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Accounts;
 using Xunit;
@@ -10,6 +11,22 @@ namespace VIvian.Tests.Accounts;
 public sealed class MultiAccountOrchestratorTests
 {
     private static readonly AccountConfigurationMode Unified = AccountConfigurationMode.Unified;
+
+    [Fact]
+    public async Task CancellationWhileReadingSettingsDoesNotTouchTheDesktop()
+    {
+        await using var fixture = await Fixture.CreateAsync("A");
+        var driver = new FakeLoginDriver();
+        var touches = 0;
+        var result = await new MultiAccountOrchestrator(fixture.Database, driver).ExecuteAsync(GameId.StarRail,
+            fixture.Accounts, Unified, (_, _) => throw new OperationCanceledException(),
+            (_, _, _) => throw new InvalidOperationException("must not run"), null, CancellationToken.None,
+            beforeDesktopMutation: () => touches++);
+        Assert.False(result.Completed);
+        Assert.Equal(0, touches);
+        Assert.Equal(0, driver.Stops);
+        Assert.Equal("stopped", Assert.Single(await fixture.Database.LoadRecentBatchesAsync()).State);
+    }
 
     [Fact]
     public async Task UnexpectedDriverFailureStillFinalizesBatch()
@@ -74,6 +91,25 @@ public sealed class MultiAccountOrchestratorTests
         Assert.Equal(1, outcome.Succeeded);
         Assert.Equal(1, outcome.Failed);
         Assert.Equal(2, driver.Switches.Count);
+    }
+
+    [Theory]
+    [InlineData(RunOutcome.Indeterminate, "indeterminate")]
+    [InlineData(RunOutcome.Cancelled, "cancelled")]
+    public async Task UnknownOrCancelledTaskStopsTheBatchAndCleansTheGame(RunOutcome verdict, string result)
+    {
+        await using var fixture = await Fixture.CreateAsync("A", "B");
+        var driver = new FakeLoginDriver();
+        var outcome = await new MultiAccountOrchestrator(fixture.Database, driver).ExecuteAsync(GameId.StarRail,
+            fixture.Accounts, Unified, fixture.LoadSettingsAsync,
+            (_, _, _) => Task.FromResult(new BatchTaskResult(null, false, true, true, "模拟", verdict)),
+            null, CancellationToken.None);
+
+        Assert.False(outcome.Completed);
+        Assert.Single(driver.Switches);
+        Assert.Equal(1, driver.Stops);
+        Assert.True(outcome.GameCleanupConfirmed);
+        Assert.Equal(result, Assert.Single(await fixture.Database.LoadBatchResultsAsync(outcome.BatchId)).Result);
     }
 
     [Fact]

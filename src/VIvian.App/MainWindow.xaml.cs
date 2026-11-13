@@ -6,6 +6,14 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         DataContext = viewModel;
+        viewModel.RunWithHomeRewardStopKey = RunWithRewardAcceptanceStopKeyAsync;
+        Activated += (_, _) =>
+        {
+            if (viewModel.CanEditWorkspace &&
+                ((Navigation.SelectedItem == AccountManagementTab && AccountTabs.SelectedIndex == 2) ||
+                 (Navigation.SelectedIndex == 1 && GameTabs.SelectedIndex == 2)))
+                _ = viewModel.Accounts.RefreshZenlessSourceAsync(keepDraft: true);
+        };
         var area = SystemParameters.WorkArea;
         MinWidth = Math.Min(MinWidth, area.Width);
         MinHeight = Math.Min(MinHeight, area.Height);
@@ -21,18 +29,22 @@ public partial class MainWindow : Window
             _stopping = true;
             try
             {
-                if (viewModel.BatchRunning)
+                if (viewModel.BatchRunning || viewModel.GenshinConfiguration.IsVerifyingLogin)
                 {
-                    if (!await viewModel.WaitForBatchShutdownAsync(ShutdownStopTimeout)) return;
+                    if (!await viewModel.WaitForDesktopOperationShutdownAsync(ShutdownStopTimeout)) return;
                 }
                 else await viewModel.Queue.StopForShutdownAsync(ShutdownStopTimeout);
             }
-            catch (Exception ex) { Serilog.Log.Error("Shutdown stop failed: {ErrorType}", ex.GetType().Name); }
+            catch (Exception ex)
+            {
+                Serilog.Log.Error("Shutdown stop failed: {ErrorType}", ex.GetType().Name);
+                return;
+            }
             finally { _stopping = false; }
             _closeAfterStop = true;
             Close();
         };
-        // F10 stops a running queue from anywhere, even while the game is full-screen.
+        // F10 cancels the active operation even while the game is full-screen.
         SourceInitialized += (_, _) =>
         {
             _hotkey = new StopHotkey(this, () =>
@@ -41,7 +53,6 @@ public partial class MainWindow : Window
                 Serilog.Log.Information("Emergency stop requested by F10");
                 viewModel.StopAll();
             });
-            // Held for a single run and for a whole multi-account batch (including the switching between accounts).
             void Update()
             {
                 if (_hotkey is null) return;
@@ -53,28 +64,51 @@ public partial class MainWindow : Window
                     ? "游戏全屏时也可以按 F10 立即停止。"
                     : "F10 已被其他程序占用（例如星铁助手窗口开着），请用 VIvian 里的“紧急停止”按钮。";
             }
-            viewModel.Queue.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(QueueViewModel.IsRunning)) Update(); };
-            viewModel.BatchRunningChanged += () => Dispatcher.BeginInvoke(Update);
+            viewModel.PropertyChanged += (_, e) =>
+            {
+                if (e.PropertyName == nameof(MainViewModel.CanStopAll)) Dispatcher.BeginInvoke(Update);
+            };
         };
-        Closed += (_, _) => _hotkey?.Dispose();
+        Closed += (_, _) =>
+        {
+            _hotkey?.Dispose();
+            viewModel.GenshinConfiguration.Close();
+        };
     }
 
     private StopHotkey? _hotkey;
 
+    internal async Task<int?> RunWithRewardAcceptanceStopKeyAsync(Func<Task<int?>> run)
+    {
+        if (DataContext is not MainViewModel viewModel || viewModel.CanStopAll) return null;
+        var alreadyRegistered = _hotkey?.IsRegistered == true;
+        if (_hotkey?.Register() != true)
+        {
+            viewModel.StopKeyText = "无法注册 F10 停止键，本次验收未启动。";
+            Serilog.Log.Warning("Genshin reward acceptance did not start because F10 could not be registered");
+            return null;
+        }
+        viewModel.StopKeyText = "游戏全屏时也可以按 F10 立即停止。";
+        try { return await run(); }
+        finally { if (!alreadyRegistered && !viewModel.CanStopAll) _hotkey.Unregister(); }
+    }
+
     private void BrowseReleaseArchive(object sender, RoutedEventArgs e)
     {
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
             Title = "选择官方 March7thAssistant 发行包",
             Filter = "官方发行包 (*.zip;*.7z)|*.zip;*.7z|所有文件 (*.*)|*.*",
             CheckFileExists = true,
         };
-        if (dialog.ShowDialog(this) == true && DataContext is MainViewModel vm) vm.ReleaseArchivePath = dialog.FileName;
+        if (dialog.ShowDialog(this) == true) vm.ReleaseArchivePath = dialog.FileName;
     }
 
     private void BrowseEngineFolder(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is not EngineCard card) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } ||
+            (sender as FrameworkElement)?.Tag is not EngineCard card) return;
         var dialog = new Microsoft.Win32.OpenFolderDialog { Title = $"选择 {card.Engine} 的安装目录", Multiselect = false };
         if (dialog.ShowDialog(this) == true) card.InstallPath = dialog.FolderName;
     }
@@ -84,7 +118,7 @@ public partial class MainWindow : Window
     /// <summary>Clicking the character opens the floating assistant (one window, kept between clicks).</summary>
     private void OpenAssistant(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         if (_assistant is null)
         {
             _assistant = new AssistantWindow(vm.Assistant) { Owner = this };
@@ -105,10 +139,91 @@ public partial class MainWindow : Window
         };
     }
 
+    private void GenshinSourceVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel vm)
+            vm.GenshinConfiguration.Source.SetVisible(vm.CanOperateWorkspace && e.NewValue is true);
+    }
+
+    private async void OpenZenlessAccounts(object sender, RoutedEventArgs e)
+    {
+        Navigation.SelectedItem = AccountManagementTab;
+        AccountTabs.SelectedIndex = 2;
+        if (DataContext is MainViewModel vm) await vm.Accounts.ReloadZenlessAsync();
+    }
+
+    private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem = EngineEnvironmentTab;
+
+    private void OpenStatusAction(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsIdle: true } vm) return;
+        FrameworkElement target;
+        switch (vm.StatusAction)
+        {
+            case HomeStatusAction.RecoverDesktop:
+                Navigation.SelectedItem = HomeTab;
+                target = RecoverDesktopButton;
+                break;
+            case HomeStatusAction.RestoreConfiguration:
+                Navigation.SelectedItem = HomeTab;
+                target = RestoreTemporaryConfigurationButton;
+                break;
+            case HomeStatusAction.ReviewRuns:
+                Navigation.SelectedItem = RunLogTab;
+                target = vm.Queue.HasUnresolved && vm.Queue.CanAcknowledge ? ConfirmRunCleanupButton : RunHistoryList;
+                break;
+            case HomeStatusAction.SelectAccounts:
+            case HomeStatusAction.SelectGenshinAccounts:
+            case HomeStatusAction.SelectStarRailAccounts:
+            case HomeStatusAction.SelectZenlessAccounts:
+                Navigation.SelectedItem = AccountManagementTab;
+                if (vm.StatusAction == HomeStatusAction.SelectGenshinAccounts) AccountTabs.SelectedIndex = 1;
+                if (vm.StatusAction == HomeStatusAction.SelectStarRailAccounts) AccountTabs.SelectedIndex = 0;
+                if (vm.StatusAction == HomeStatusAction.SelectZenlessAccounts) AccountTabs.SelectedIndex = 2;
+                target = AccountTabs.SelectedIndex switch
+                {
+                    0 => vm.Accounts.Rows.Count > 0 ? StarRailAccountList : ScanStarRailAccountsButton,
+                    1 => vm.GenshinConfiguration.Accounts.Count > 0 ? GenshinAccountList : ImportGenshinButton,
+                    _ => vm.Accounts.ZenlessRows.Count > 0 ? ZenlessAccountList : ImportZenlessScreenshotButton,
+                };
+                break;
+            case HomeStatusAction.ConfigureBetterGi:
+                Navigation.SelectedItem = EngineEnvironmentTab;
+                UpdateLayout();
+                var engine = vm.Engines.Single(card => card.Id == VIvian.Core.GameId.Genshin);
+                var card = EngineSettingsList.ItemContainerGenerator.ContainerFromItem(engine) as System.Windows.Controls.ContentPresenter;
+                target = card?.ContentTemplate?.FindName("BrowseEngineFolderButton", card) as FrameworkElement ?? EngineSettingsList;
+                break;
+            default:
+                return;
+        }
+        UpdateLayout();
+        target.BringIntoView();
+        target.Focus();
+    }
+
+    private async void GenshinLoginVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true && DataContext is MainViewModel { CanOperateWorkspace: true } vm)
+            await vm.GenshinConfiguration.DiscoverGameExecutableAsync();
+    }
+
+    private void BrowseGenshinExecutable(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "选择原神国服 YuanShen.exe",
+            Filter = "原神国服程序 (YuanShen.exe)|YuanShen.exe",
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) == true) vm.GenshinConfiguration.GameExecutable = dialog.FileName;
+    }
+
     /// <summary>Creates the assets folder and copies its path (VIvian starts no external processes outside the supervisor).</summary>
     private void CopyThemeFolder(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not MainViewModel vm) return;
+        if (DataContext is not MainViewModel { CanOperateWorkspace: true } vm) return;
         try { System.IO.Directory.CreateDirectory(vm.Theme.Folder); Clipboard.SetText(vm.Theme.Folder); vm.ReportCopied(vm.Theme.Folder); }
         catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or System.Runtime.InteropServices.ExternalException) { }
     }

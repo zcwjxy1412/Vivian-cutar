@@ -53,10 +53,11 @@ public sealed class QueueViewModel : ObservableObject
     private CancellationTokenSource? _stop;
     private readonly DispatcherTimer _autoCheck;
 
-    public QueueViewModel(QueueScheduler scheduler, IRunHistory history)
+    public QueueViewModel(QueueScheduler scheduler, IRunHistory history, AppPaths? paths = null)
     {
         _scheduler = scheduler;
         _history = history;
+        CanOperateWorkspace = paths?.RewardAcceptanceScope is null;
         _dispatcher = Application.Current?.Dispatcher ?? Dispatcher.CurrentDispatcher;
         _scheduler.RunChanged += update => Post(() => OnRunChanged(update));
         _scheduler.HazardsChanged += () => Post(() => _ = RefreshSafeAsync());
@@ -75,6 +76,7 @@ public sealed class QueueViewModel : ObservableObject
     public ObservableCollection<string> LogLines { get; } = [];
     public ObservableCollection<RunRow> Runs { get; } = [];
     public ObservableCollection<RunRow> Unresolved { get; } = [];
+    public bool CanOperateWorkspace { get; }
     public AsyncCommand StartCommand { get; }
     public RelayCommand StopCommand { get; }
     public AsyncCommand PauseCommand { get; }
@@ -91,8 +93,28 @@ public sealed class QueueViewModel : ObservableObject
     public RunLimits Limits { get; set; } = new(TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(8));
 
     private bool _isRunning;
-    public bool IsRunning { get => _isRunning; private set { Set(ref _isRunning, value); Raise(nameof(IsIdle)); Raise(nameof(CanPause)); } }
-    public bool IsIdle => !IsRunning;
+    public bool IsRunning { get => _isRunning; private set { Set(ref _isRunning, value); Raise(nameof(IsIdle)); Raise(nameof(CanPause)); Raise(nameof(CanAcknowledge)); } }
+    private bool _homeRewardRunning;
+    internal bool HomeRewardRunning
+    {
+        get => _homeRewardRunning;
+        set
+        {
+            if (_homeRewardRunning == value) return;
+            _homeRewardRunning = value;
+            Raise(nameof(IsIdle));
+            Raise(nameof(CanAcknowledge));
+        }
+    }
+    public bool IsIdle => !IsRunning && !HomeRewardRunning;
+    internal Func<int, Task<IReadOnlyList<RunRecord>>>? HomeRewardHistory { get; set; }
+    public bool CanAcknowledge => CanOperateWorkspace && IsIdle;
+    public string HomeCleanupHint => CanOperateWorkspace
+        ? "VIvian 每 5 秒自动核实一次：星铁助手的任务进程一退出，这里会自己消失，不用你操作。只有一直无法核实时，才需要你确认星铁助手窗口和命令行窗口都已关闭后点下面的按钮。原判定结果不会被改写。"
+        : "隔离验收的待清理记录需通过首页「核对桌面交接」恢复。";
+    public string LogCleanupHint => CanOperateWorkspace
+        ? "请先确认相关引擎和游戏都已关闭。你的确认会单独记录，不会改写原判定。"
+        : HomeCleanupHint;
     public bool HasUnresolved => Unresolved.Count > 0;
 
     private string _current = "空闲";
@@ -116,7 +138,7 @@ public sealed class QueueViewModel : ObservableObject
 
     private async Task<QueueResult?> RunItemsAsync(IReadOnlyList<QueueItem> items, bool simulation)
     {
-        if (IsRunning) return null;
+        if (!CanOperateWorkspace || !IsIdle) return null;
         if (items.Count == 0)
         {
             Status = "请至少选择一款游戏。";
@@ -209,6 +231,7 @@ public sealed class QueueViewModel : ObservableObject
 
     public async Task AcknowledgeAllAsync()
     {
+        if (!CanOperateWorkspace || HomeRewardRunning) return;
         // Goes through the scheduler: it refuses while an abandoned adapter call is still running, and only releases
         // its in-session barrier after the acknowledgement has been stored.
         var refused = 0;
@@ -233,8 +256,20 @@ public sealed class QueueViewModel : ObservableObject
     {
         var recent = await Task.Run(() => _history.ReadRecentRunsAsync(30));
         var unresolved = await Task.Run(() => _history.ReadUnresolvedAsync());
+        IReadOnlyList<RunRecord> isolated = [];
+        if (HomeRewardHistory is { } readHomeReward)
+        {
+            try { isolated = await Task.Run(() => readHomeReward(30)); }
+            catch (Exception ex) when (ex is System.IO.IOException or System.IO.InvalidDataException or InvalidOperationException
+                or UnauthorizedAccessException or Microsoft.Data.Sqlite.SqliteException)
+            { Serilog.Log.Warning("Could not read isolated Genshin acceptance history: {ErrorType}", ex.GetType().Name); }
+        }
         Runs.Clear();
-        foreach (var r in recent) Runs.Add(ToRow(r));
+        foreach (var r in recent.Concat(isolated).OrderByDescending(r => r.CreatedAt).Take(30))
+        {
+            var row = ToRow(r);
+            Runs.Add(isolated.Contains(r) ? row with { Summary = "隔离首跑 · " + row.Summary } : row);
+        }
         Unresolved.Clear();
         foreach (var r in unresolved) Unresolved.Add(ToRow(r));
         // In-session hazards the database may not know about (failed write, adapter call still running).
@@ -245,6 +280,20 @@ public sealed class QueueViewModel : ObservableObject
                     + (h.TerminalPersisted ? "" : " · 记录尚未写入数据库"),
                 "本次会话", h.LastKnown?.IsSimulation ?? false, true, h.Game));
         Raise(nameof(HasUnresolved));
+    }
+
+    internal async Task<bool> AcknowledgeGenshinRecoveryAsync(Guid runId)
+    {
+        await RefreshAsync();
+        if (!Unresolved.Any(row => row.Game == GameId.Genshin && row.RunId == runId)) return true;
+        try
+        {
+            await Task.Run(() => _scheduler.AcknowledgeAsync(runId,
+                "VIvian 核对了本次原神运行的桌面交接和 BetterGI 协议恢复。", _history, DateTimeOffset.UtcNow));
+        }
+        catch (InvalidOperationException) { return false; }
+        await RefreshAsync();
+        return !Unresolved.Any(row => row.Game == GameId.Genshin && row.RunId == runId);
     }
 
     private async Task RefreshSafeAsync()
@@ -270,7 +319,8 @@ public sealed class QueueViewModel : ObservableObject
     public async Task<bool> TryAutoResolveAsync()
     {
         if (!HasUnresolved) return true;
-        if (IsRunning || _autoResolving || StarRailInstallPath?.Invoke() is not { Length: > 0 } install) return false;
+        if (!CanOperateWorkspace || IsRunning || _autoResolving ||
+            StarRailInstallPath?.Invoke() is not { Length: > 0 } install) return false;
         var real = Unresolved.Where(r => !r.IsSimulation && r.Game == GameId.StarRail).ToList();
         if (real.Count == 0 || real.Count != Unresolved.Count) return false;
         _autoResolving = true;

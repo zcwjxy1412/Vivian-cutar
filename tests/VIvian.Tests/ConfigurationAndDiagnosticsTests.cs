@@ -115,7 +115,7 @@ public sealed class ConfigurationStoreTests : IDisposable
         {
             await c.OpenAsync();
             using var cmd = c.CreateCommand();
-            cmd.CommandText = "DROP TABLE account_configuration_audit; DROP TABLE account_scan_sessions; DROP TABLE account_login_profiles; DROP TABLE batch_execution_records; DROP TABLE account_switch_history; DROP TABLE account_execution_history; DROP TABLE account_task_plans; DROP TABLE account_settings; DROP TABLE game_accounts; DROP TABLE task_plans; DROP TABLE app_preferences; PRAGMA user_version=2;";
+            cmd.CommandText = "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; DROP TABLE account_scan_sessions; DROP TABLE account_login_profiles; DROP TABLE batch_execution_records; DROP TABLE account_switch_history; DROP TABLE account_execution_history; DROP TABLE account_task_plans; DROP TABLE account_settings; DROP TABLE game_accounts; DROP TABLE task_plans; DROP TABLE app_preferences; PRAGMA user_version=2;";
             await cmd.ExecuteNonQueryAsync();
         }
         var upgraded = await CreateAsync();

@@ -21,7 +21,7 @@ public sealed record ExecutionPlanItemResult(RunOutcome Outcome, CleanupState Cl
     bool ConfigurationRestored, string ReasonCode)
 {
     public bool AllowsNext => Outcome == RunOutcome.Success &&
-        Cleanup is CleanupState.Confirmed or CleanupState.NotRequired && ConfigurationRestored;
+        (Cleanup is CleanupState.Confirmed or CleanupState.NotRequired) && ConfigurationRestored;
 }
 
 public sealed record ExecutionPlanItemReceipt(ExecutionPlanItem Item, Guid ChildBatchId,

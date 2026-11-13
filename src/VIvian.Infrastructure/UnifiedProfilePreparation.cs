@@ -73,11 +73,12 @@ public static class UnifiedProfilePreparation
     }
 
     internal static Task CopyPreparedProfileAsync(string sourceDirectory, string destination, CancellationToken ct) =>
-        PublishAsync(destination, (target, _) =>
+        PublishAsync(destination, async (target, _) =>
         {
             CopySnapshot(Path.Combine(sourceDirectory, DatabaseName), target, LocalDatabase.CurrentSchemaVersion,
                 requirePrepared: true);
-            return Task.CompletedTask;
+            await new LocalDatabase(target, requirePreparedProfile: false, requirePhysicalPath: true)
+                .InitializeAsync(ct).ConfigureAwait(false);
         }, ct);
 
     public static Task PrepareAsync(string officialDatabase, string genshinDatabase, string destination, CancellationToken ct) =>
@@ -151,7 +152,7 @@ public static class UnifiedProfilePreparation
                 using var remaining = ReadOnlyFileAccess.OpenDirectoryForRead(staging, FileShare.ReadWrite);
                 if (ReadOnlyFileAccess.Identity(remaining) == stagedIdentity)
                 {
-                    foreach (var name in new[] { DatabaseName, DatabaseName + ".pre-v7.bak", "incoming.db" })
+                    foreach (var name in new[] { DatabaseName, DatabaseName + ".pre-v7.bak", DatabaseName + ".pre-v8.bak", "incoming.db" })
                         foreach (var suffix in new[] { "", "-wal", "-shm", "-journal" })
                             File.Delete(Path.Combine(staging, name + suffix));
                     remaining.Dispose();
@@ -169,9 +170,10 @@ public static class UnifiedProfilePreparation
         RequirePhysicalWrites(directory);
     }
 
-    internal static void RequirePreparedDatabase(SqliteConnection database)
+    internal static void RequirePreparedDatabase(SqliteConnection database, bool allowPrevious = false)
     {
-        if (Number(database, "PRAGMA user_version;") != LocalDatabase.CurrentSchemaVersion ||
+        var version = Number(database, "PRAGMA user_version;");
+        if ((version != LocalDatabase.CurrentSchemaVersion && !(allowPrevious && version == 7)) ||
             Number(database, "PRAGMA application_id;") != PreparedApplicationId)
             throw new InvalidDataException("需要已验证的 VIvian 合流库。请先完成数据准备。");
     }
@@ -179,15 +181,19 @@ public static class UnifiedProfilePreparation
     private static void CopySnapshot(string originalPath, string snapshotPath, int expectedVersion, bool requirePrepared = false)
     {
         using var original = OpenExisting(originalPath, SqliteOpenMode.ReadOnly);
-        if (requirePrepared) RequirePreparedDatabase(original);
-        if (Number(original, "PRAGMA user_version;") != expectedVersion)
+        if (requirePrepared) RequirePreparedDatabase(original, allowPrevious: true);
+        var sourceVersion = Number(original, "PRAGMA user_version;");
+        if (sourceVersion != expectedVersion && !(expectedVersion == LocalDatabase.CurrentSchemaVersion && sourceVersion == 7))
             throw new InvalidDataException("来源数据库版本与合流方案不符。");
         using var snapshot = Connect(snapshotPath, SqliteOpenMode.ReadWriteCreate);
         original.BackupDatabase(snapshot);
         RequirePhysicalCompanions(originalPath);
-        if (Number(snapshot, "PRAGMA user_version;") != expectedVersion)
+        if (Number(snapshot, "PRAGMA user_version;") != sourceVersion)
             throw new InvalidDataException("来源版本在生成快照期间变化，合流库未发布。");
         VerifyIntegrity(snapshot, transaction: null);
+        if (sourceVersion >= 8 && Number(snapshot,
+                "SELECT EXISTS(SELECT 1 FROM execution_plans WHERE state IN ('Accepted','Running'));") != 0)
+            throw new InvalidOperationException("来源档案存在未完成的持久计划，不能复制为另一执行入口。");
         if (Number(snapshot, """
             SELECT EXISTS(SELECT 1 FROM runs WHERE cleanup='Pending' OR (cleanup='Unconfirmed' AND acknowledged_at IS NULL)
                 OR phase NOT IN ('Finished','Blocked'))

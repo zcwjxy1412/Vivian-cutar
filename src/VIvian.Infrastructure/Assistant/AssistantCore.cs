@@ -30,7 +30,7 @@ public sealed record AssistantRunPlan(Guid Id, AccountConfigurationTarget Target
 /// </summary>
 public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines,
     Func<CancellationToken, Task<IReadOnlyList<RunRecord>>> history, LocalDatabase? accountDatabase = null,
-    IEnumerable<IAccountConfigurationProvider>? configurationProviders = null)
+    IEnumerable<IAccountConfigurationProvider>? configurationProviders = null, IExecutionPlanService? executionPlans = null)
 {
     private readonly Dictionary<GameId, IAccountConfigurationProvider> _configuration =
         (configurationProviders ?? []).ToDictionary(provider => provider.Game);
@@ -38,7 +38,8 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
     private readonly Dictionary<Guid, PendingProposal> _proposals = [];
 
     internal sealed record PendingProposal(ProposalView View, AccountConfigurationProposal Proposal, DateTimeOffset Expires);
-    internal sealed record ToolResult(string Content, PendingProposal? Proposal = null, AssistantRunPlan? RunPlan = null);
+    internal sealed record ToolResult(string Content, PendingProposal? Proposal = null, AssistantRunPlan? RunPlan = null,
+        PreparedExecutionPlan? ExecutionPlan = null);
     private volatile bool _scheduleProposalsEnabled;
     public bool ScheduleProposalsEnabled
     {
@@ -79,6 +80,23 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
                 "resource_policy":{"type":"string","enum":["saved_account_settings"]}},
                 "required":["game","account_id","revision","task_id","resource_policy"],"additionalProperties":false}}}
                 """));
+        var progress = definitions.Single(d => d!["function"]!["name"]!.GetValue<string>() == "get_batch_progress")!["function"]!;
+        progress["parameters"]!["properties"]!["plan_id"] = new JsonObject { ["type"] = "string" };
+        progress["description"] = "精确查询 plan_id 持久计划或 batch_id 旧批次，二者不能同时提供。未知不能自动重发。省略两者仅返回最近批次概览。";
+        if (ScheduleProposalsEnabled && executionPlans is not null)
+        {
+            var function = definitions.Single(d => d!["function"]!["name"]!.GetValue<string>() == "propose_run")!["function"]!;
+            function["description"] = "准备待确认计划。新计划使用有序 items，只给游戏和内部账号 ID，任务/资源/版本由宿主核对。旧单星铁五字段仍支持，不能混用。固定失败即停，不直接执行。";
+            var schema = function["parameters"]!.AsObject();
+            schema["properties"]!["items"] = JsonNode.Parse("""
+                {"type":"array","minItems":1,"maxItems":32,"items":{"type":"object",
+                "properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"}},
+                "required":["game","account_id"],"additionalProperties":false}}
+                """);
+            schema["oneOf"] = new JsonArray(new JsonObject { ["required"] = schema["required"]!.DeepClone() },
+                new JsonObject { ["required"] = new JsonArray("items") });
+            schema.Remove("required");
+        }
         return definitions;
     }
 
@@ -109,7 +127,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
                 "list_games" => Serialize(engines().Select(e => new
                 { game = Key(e.Game), e.Name, e.Engine, e.Version, e.State, can_run_for_real = e.CanRunForReal,
                     account_configuration = _configuration.ContainsKey(e.Game),
-                    ai_run_proposals = e.Game == GameId.StarRail && e.CanRunForReal && ScheduleProposalsEnabled })),
+                    ai_run_proposals = (executionPlans is not null || e.Game == GameId.StarRail) && e.CanRunForReal && ScheduleProposalsEnabled })),
                 "list_tasks" => ListTasks(ParseGame(args)),
                 "read_configuration" => await ReadConfigurationAsync(ParseTarget(args), ct).ConfigureAwait(false),
                 "get_run_status" => await RunStatusAsync(args, ct).ConfigureAwait(false),
@@ -131,7 +149,12 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
             && (schema["enum"] is not JsonArray choices || choices.Any(c => c!.GetValue<string>() == s)),
         "integer" => value is JsonValue number && number.TryGetValue<int>(out var n)
             && n >= schema["minimum"]!.GetValue<int>() && n <= schema["maximum"]!.GetValue<int>(),
-        "object" => value is JsonObject obj && obj.All(p => ChatCompletionsClient.StringValue(p.Value) is not null),
+        "object" => value is JsonObject obj && (schema["properties"] is JsonObject properties
+            ? obj.All(p => properties.ContainsKey(p.Key) && MatchesType(p.Value, properties[p.Key]!))
+                && (schema["required"] is not JsonArray required || required.All(p => obj.ContainsKey(p!.GetValue<string>())))
+            : obj.All(p => ChatCompletionsClient.StringValue(p.Value) is not null)),
+        "array" => value is JsonArray array && array.Count >= schema["minItems"]!.GetValue<int>()
+            && array.Count <= schema["maxItems"]!.GetValue<int>() && array.All(v => MatchesType(v, schema["items"]!)),
         _ => false,
     };
 
@@ -215,6 +238,9 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
 
     private async Task<ToolResult> ProposeRunAsync(JsonObject args, CancellationToken ct)
     {
+        if (args.ContainsKey("items")) return await PrepareExecutionPlanAsync(args, ct).ConfigureAwait(false);
+        if (args.Count != 5 || new[] { "game", "account_id", "revision", "task_id", "resource_policy" }.Any(k => !args.ContainsKey(k)))
+            return new(Error("单星铁计划需要完整五字段，不能与 items 混用。"));
         if (!ScheduleProposalsEnabled || accountDatabase is null || !_configuration.TryGetValue(GameId.StarRail, out var provider)
             || !engines().Any(e => e.Game == GameId.StarRail && e.CanRunForReal))
             return new(Error("本机未开放星铁运行计划。"));
@@ -246,6 +272,28 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
             use_reserved_trailblaze_power = reserve == "true",
             note = "计划尚未执行。用户必须查看目标、任务和资源策略，并在本机确认后才能提交。",
         }), RunPlan: run);
+    }
+
+    private async Task<ToolResult> PrepareExecutionPlanAsync(JsonObject args, CancellationToken ct)
+    {
+        if (!ScheduleProposalsEnabled || executionPlans is null || args.Count != 1 || args["items"] is not JsonArray items)
+            return new(Error("有序计划不可用或混用了旧计划字段。"));
+        var requests = items.Select(i => ParseTarget(i!.AsObject()))
+            .Select(t => new ExecutionPlanRequestItem(t.Game, t.AccountId)).ToArray();
+        if (requests.Distinct().Count() != requests.Length) return new(Error("同一游戏账号不能重复。"));
+        var prepared = await executionPlans.PrepareAsync(requests, ct).ConfigureAwait(false);
+        if (prepared.Plan is not { } plan) return new(Serialize(new { error = "宿主未允许此计划。", reason_code = prepared.ReasonCode }));
+        if (plan.PlanId == Guid.Empty || plan.ExpiresAt <= DateTimeOffset.UtcNow || plan.Items.Count != requests.Length
+            || plan.Items.Where((item, index) => item.Ordinal != index || item.Game != requests[index].Game || item.AccountId != requests[index].AccountId
+                || item.TaskId != "routine" || item.ResourcePolicy != "saved_account_settings" || string.IsNullOrWhiteSpace(item.ConfigurationRevision)
+                || string.IsNullOrWhiteSpace(item.AccountName) || string.IsNullOrWhiteSpace(item.ResourceSummary)).Any())
+            return new(Error("宿主准备结果与请求目标或受支持策略不匹配。"));
+        // Detach the displayed/confirmed snapshot from mutable service collections.
+        plan = plan with { Items = plan.Items.ToArray() };
+        return new(Serialize(new { plan_id = plan.PlanId, expires_at = plan.ExpiresAt, failure_policy = "stop_on_failure",
+            items = plan.Items.Select(i => new { ordinal = i.Ordinal, game = Key(i.Game), account_id = i.AccountId, task_id = i.TaskId,
+                revision = i.ConfigurationRevision, task_plan_revision = i.TaskPlanRevision, resource_policy = i.ResourcePolicy, resource_summary = i.ResourceSummary }),
+            note = "尚未执行；需用户按顺序核对并确认。" }), ExecutionPlan: plan);
     }
 
     private async Task<string> RunStatusAsync(JsonObject args, CancellationToken ct)
@@ -282,6 +330,20 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
 
     private async Task<string> BatchProgressAsync(JsonObject args, CancellationToken ct)
     {
+        if (args.ContainsKey("plan_id"))
+        {
+            if (args.ContainsKey("batch_id") || !Guid.TryParseExact(ChatCompletionsClient.StringValue(args["plan_id"]), "D", out var id) || id == Guid.Empty)
+                return Error("计划 ID 无效，且不能与批次 ID 同时查询。");
+            if (executionPlans is null) return Error("持久计划查询尚未接入。");
+            var receipt = await executionPlans.ReadAsync(id, ct).ConfigureAwait(false);
+            if (receipt is null) return Error("未找到该计划；不能据此自动重新提交。");
+            if (receipt.Plan.PlanId != id) return Error("回执标识不匹配，拒绝显示其他计划。");
+            return Serialize(new { plan_id = id, state = receipt.State.ToString(), receipt.AcceptedAt, receipt.UpdatedAt, reason_code = receipt.ReasonCode,
+                items = receipt.Items.Select(i => new { ordinal = i.Item.Ordinal, game = Key(i.Item.Game), account_id = i.Item.AccountId,
+                    task_id = i.Item.TaskId, revision = i.Item.ConfigurationRevision, batch_id = i.ChildBatchId, run_ids = i.RunIds,
+                    state = i.State.ToString(), outcome = i.Result?.Outcome.ToString(), cleanup = i.Result?.Cleanup.ToString(),
+                    configuration_restored = i.Result?.ConfigurationRestored, reason_code = i.Result?.ReasonCode }) });
+        }
         if (accountDatabase is null) return Error("账号数据尚未连接。");
         IReadOnlyList<AccountBatch> batches;
         if (args["batch_id"] is { } batchNode)

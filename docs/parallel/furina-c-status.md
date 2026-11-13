@@ -1,11 +1,32 @@
 # C / AI 助手首批交付
 
-## 第四批：多游持久回执消费（进行中，等待 I 冻结契约）
+## 第四批：多游持久回执消费（进行中，v3 已接入）
 
 - 已 fast-forward 到 `85977de4b8e0742e232574501dff96abddc5903c`。用户要求先补齐持久回执，再串行实机。本批仅 C 工具/卡片与专属测试；Core/迁移/宿主属于 I，协调器属于 F。
 - 已向总控聊天发送最小准备/提交/精确读取需求及回执字段；发现旧 `_canApply` 仅接受所选单星铁账号，必须保留给旧路径，新多游完整准入由宿主服务负责。类型名、旧 action_id 与新 PlanId 映射以 I 公共提交为准，不自行创建冲突类型。
 - 新增 `docs/parallel/furina-c-plan-consumption.md`：最小 DTO/签名意图、八工具兼容策略、确认卡字段复用、错误语义和 17 项合成消费测试规格。现在是规格，不声称可执行测试通过。
 - 接口提交到达后按 RED→GREEN 实现；现阶段无产品修改、无新模型请求/审查、无游戏或正式设置操作。新实现最多 DeepSeek 首审+修复后复审各一轮，新增 PR 以 integration/furina-vnext 为 base。
+
+### v3 实现进展
+
+- 已合入公共提交 `30aa4b5`；I 确认 ordinal=0..N-1，M5 开关继续原策略，不放宽默认版准入。消费现有 `IExecutionPlanService`，未改 Core/数据库/宿主。
+- `AssistantTools` 和 `AssistantViewModel` 公开构造尾部增加可选 `IExecutionPlanService? executionPlans = null`，旧调用不变；I 注入同一服务。旧单星铁 `AssistantRunPlan` / LastRunPlans / action_id / batch_id 语义保留；新 Session.LastExecutionPlans 独立保存待确认有序计划。
+- propose_run 新形态 `{items:[{game,account_id},...]}`，1–32 项、不可重复同游戏账号、不可混用旧五字段。服务读取真实冻结配置/任务/资源，C 校验返回 ID/顺序/目标/白名单与有效期后复制 Items；只有完整模型轮次才发布卡片，不因准备调用就提交。
+- get_batch_progress 支持严格 plan_id，和 batch_id 互斥；未知/服务未接入/错误 ID 不回退。类型化回执包含各项真实状态、RunIds、Outcome/Cleanup/配置恢复，Interrupted 仅查询不重试。
+- 新 ProposalCard 构造接受 PreparedExecutionPlan，复用原 XAML 属性；Target 为 null，TargetText 表示整个有序计划，Lines 明列每项目标/资源/配置版本/任务版本及失败即停。旧单目标构造和确认路径保留。新确认不调用旧仅星铁 _canApply，宿主负责全计划准入。
+- 确认前后检查本地 revision/有效期/开关，触发同步释放事件后仍复查；Submit 使用 CancellationToken.None，与聊天 _request 隔离。只消费 Accepted/Existing/Rejected/Conflict；提交异常保留 PlanId 并提示精确查回，禁用再次确认，不自动生成新 ID 重试。
+- 验证：新 API 缺失时测试编译 RED；新增测试覆盖请求顺序、非法/重复/混合/超限请求、服务缺失/开关关闭、完整轮次发布、精确未知/中断查询、确认失效/取消、事件期间失效、双击、Existing/Conflict/Rejected、异常查回与聊天取消。助手定向 **77/77 通过**，`artifacts/tests-c-v3/green.trx`。首次定向运行 1 项因测试使用 record 集合引用相等失败，改为 ID 和 Items 内容断言后通过；产品使用复制快照行为保留。
+- 默认全量运行中；真实 DeepSeek 本批首审已提交实际 diff/新增测试/v3 上下文，结果待返回。没有请求真实模型执行业务或运行游戏。
+
+### 第四批验证与审查记录
+
+- 首轮默认全量 1194/1194；首审后追加用例与修复，最终默认全量 **1200/1200，失败 0/跳过 0，退出码 0**，`artifacts/tests-c-v3/full-reviewed.trx`。本次基于 30aa4b5 公共契约和合成 IExecutionPlanService，不把尚未合入的 I/F 实现或实机当作已验收。
+- DeepSeek 首审：意见 1（嵌套 game/account_id 未类型校验）不成立，MatchesType 对每个属性递归检查，显式 null/数字新增用例无需产品改动即拒绝；意见 2 改为按名称 Single 定位 propose_run，不依赖工具列表尾部；意见 4 空账号名称/资源摘要经两条 RED 确认，增加非空校验。
+- 自查发现 list_games 的 ai_run_proposals 原投影仍只认星铁；新增 RED 后改为有宿主服务时支持多游准备，但仍要求 e.CanRunForReal 和显式开关，不代表绕过 Prepare/Submit 实际准入。
+- 首审意见 3 建议绑定 VM 生命周期不采用：VM 没有 Dispose API，已有注释明确提交独立于聊天；按建议绑定将违反关闭聊天不中止已接受任务。测试明确断言提交 token 不可取消。其他低优先级/信息项：当前受控 schema 的数组边界必有；DateTimeOffset 比较本来按绝对时间；新卡明确接新确认委托，旧 handler 对 null Target 保守返回；InvokeAsync 已有取消检查。无据扩展通用 schema 或改变旧入口。
+- DeepSeek **首审+复审共 2 轮完成，复审结论无 release blocker**，`artifacts/tests-c-v3/review-response-2.json`。复审又称嵌套额外字段未拒绝，经核实不成立：对象递归明确要求 `properties.ContainsKey(p.Key)`，测试含顶层仅 items、内层额外 task_id=shell，实际拒绝且 Prepare 调用数为零；不新增重复校验或第三轮审查。
+- 复审其余非阻断项处置：同账号 ID 不同游戏仍交宿主核对归属，去重按契约的 (Game,AccountId)，不自行收紧公共规则；oneOf 由工具协议描述、运行时显式互斥与字段数检查执行，现有范围保留；Target nullable 仅新多目标卡使用，旧确认已守卫，当前 XAML 不消费 Target；通用异常以“状态待查回”保守显示，不输出原始错误。接受后真实宿主存活语义仍须 F/I 集成确认，C 测试仅证明未传入聊天取消 token。
+- 本次未重复请求供应商实际业务、未改正式配置、未运行游戏。I/F/宿主实际接线、隔离 M5 混合队列和实机待总控串行验收。
 
 ## 第三批真实供应商验收：三阶段通过，C 已核实证据
 

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using VIvian.Core.Execution;
 
 namespace VIvian.Infrastructure.Assistant;
 
@@ -14,6 +15,7 @@ public sealed class AssistantSession(ChatCompletionsClient client, AssistantTool
 
     public IReadOnlyList<ProposalView> LastProposals { get; private set; } = [];
     public IReadOnlyList<AssistantRunPlan> LastRunPlans { get; private set; } = [];
+    public IReadOnlyList<PreparedExecutionPlan> LastExecutionPlans { get; private set; } = [];
 
     public async Task<string> AskAsync(AssistantEndpoint endpoint, string userText, CancellationToken ct)
     {
@@ -23,6 +25,7 @@ public sealed class AssistantSession(ChatCompletionsClient client, AssistantTool
         deadline.CancelAfter(turnTimeout ?? TimeSpan.FromSeconds(90));
         LastProposals = [];
         LastRunPlans = [];
+        LastExecutionPlans = [];
         try
         {
             return await RunTurnAsync(endpoint, userText, deadline.Token).ConfigureAwait(false);
@@ -55,6 +58,7 @@ public sealed class AssistantSession(ChatCompletionsClient client, AssistantTool
         var ids = new HashSet<string>(StringComparer.Ordinal);
         var pending = new List<AssistantTools.PendingProposal>();
         var planned = new List<AssistantRunPlan>();
+        var executionPlans = new List<PreparedExecutionPlan>();
         for (var round = 0; round <= MaxToolRounds; round++)
         {
             ct.ThrowIfCancellationRequested();
@@ -72,6 +76,7 @@ public sealed class AssistantSession(ChatCompletionsClient client, AssistantTool
                     throw new AssistantException("模型未返回文字回复，可以重试。");
                 LastProposals = tools.Publish(pending);
                 LastRunPlans = planned;
+                LastExecutionPlans = executionPlans;
                 _history.Enqueue(new JsonArray(messages.Skip(turnStart).Select(m => m!.DeepClone()).ToArray()));
                 while (_history.Count > RetainedTurns) _history.Dequeue();
                 return answer;
@@ -88,6 +93,7 @@ public sealed class AssistantSession(ChatCompletionsClient client, AssistantTool
                 var result = await RunToolAsync(name, arguments, ct).ConfigureAwait(false);
                 if (result.Proposal is { } proposal) pending.Add(proposal);
                 if (result.RunPlan is { } plan) planned.Add(plan);
+                if (result.ExecutionPlan is { } executionPlan) executionPlans.Add(executionPlan);
                 messages.Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = id, ["content"] = result.Content });
             }
         }

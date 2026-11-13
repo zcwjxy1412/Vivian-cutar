@@ -28,6 +28,62 @@ public sealed class AssistantTests : IDisposable
         File.WriteAllText(Config, "power_enable: true\ninstance_type: 拟造花萼（金）\ninstance_names:\n  拟造花萼（金）: 回忆之蕾\n  饰品提取: 永恒笑剧\n");
     }
 
+    [Theory]
+    [InlineData(GameId.Genshin, "genshin")]
+    [InlineData(GameId.StarRail, "starrail")]
+    [InlineData(GameId.ZenlessZoneZero, "zzz")]
+    public async Task AccountDiscoveryUsesSafeSlotsAndSavedSelectionWithoutConfigurationProvider(GameId game, string key)
+    {
+        var db = new LocalDatabase(DbPath);
+        await db.InitializeAsync();
+        var account = await db.AddAccountAsync(game, "秘密名称 138****2468", "秘密区服", "987654321");
+        var otherGame = game == GameId.Genshin ? GameId.StarRail : GameId.Genshin;
+        var other = await db.AddAccountAsync(otherGame, "不应出现的账号", "", null);
+        var tools = new AssistantTools(() => [], _ => Task.FromResult<IReadOnlyList<RunRecord>>([]), db);
+        foreach (var selected in new[] { false, true })
+        {
+            account = await db.SaveAccountAsync(account with { AutoRun = selected, LoginState = "13812342468" });
+            var output = (await tools.InvokeAsync("list_accounts", new JsonObject { ["game"] = key }.ToJsonString(), Ct)).Content;
+            var rows = JsonNode.Parse(output)!.AsArray();
+            var row = Assert.Single(rows, r => r!["account_id"]!.GetValue<Guid>() == account.Id)!;
+            Assert.All(rows, r => Assert.Equal(key, r!["game"]!.GetValue<string>()));
+            Assert.DoesNotContain(other.Id.ToString(), output);
+            Assert.Equal(account.Order + 1, row["slot"]!.GetValue<int>());
+            Assert.Equal(selected, row["saved_auto_run"]!.GetValue<bool>());
+            Assert.Equal(selected, row["AutoRun"]!.GetValue<bool>());
+            Assert.Equal(new[] { "AutoRun", "Enabled", "account_id", "game", "last_result", "saved_auto_run", "slot", "verification" },
+                row.AsObject().Select(p => p.Key).OrderBy(k => k, StringComparer.Ordinal).ToArray());
+        }
+        using var handler = new AccountDiscoveryModel(key);
+        using var http = new HttpClient(handler);
+        var session = new AssistantSession(new ChatCompletionsClient(http), tools, "测试助手");
+        Assert.Equal("请选择游戏和账号序号。", await session.AskAsync(Endpoint, "查看账号", Ct));
+        Assert.Equal(3, handler.Requests);
+    }
+
+    private sealed class AccountDiscoveryModel(string game) : HttpMessageHandler
+    {
+        public int Requests { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            var body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(ct))!;
+            var messages = body["messages"]!.ToJsonString(new System.Text.Json.JsonSerializerOptions
+            { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+            foreach (var secret in new[] { "秘密名称", "138****2468", "13812342468", "987654321", "秘密区服" })
+                Assert.DoesNotContain(secret, messages);
+            var call = ++Requests == 1 ? "list_games" : "list_accounts";
+            var reply = Requests == 3
+                ? new JsonObject { ["role"] = "assistant", ["content"] = "请选择游戏和账号序号。" }
+                : new JsonObject { ["role"] = "assistant", ["tool_calls"] = new JsonArray(new JsonObject
+                {
+                    ["id"] = call, ["type"] = "function", ["function"] = new JsonObject
+                    { ["name"] = call, ["arguments"] = Requests == 1 ? "{}" : new JsonObject { ["game"] = game }.ToJsonString() }
+                }) };
+            return new(HttpStatusCode.OK) { Content = new StringContent(new JsonObject
+            { ["choices"] = new JsonArray(new JsonObject { ["message"] = reply, ["finish_reason"] = Requests == 3 ? "stop" : "tool_calls" }) }.ToJsonString()) };
+        }
+    }
+
     [Fact]
     public async Task ScriptedModelRoundTripProposesThenUserConfirmsOneAccountWithAuditAndReadback()
     {

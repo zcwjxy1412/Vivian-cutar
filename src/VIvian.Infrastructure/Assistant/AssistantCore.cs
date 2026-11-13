@@ -63,12 +63,12 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
     {
         var definitions = JsonNode.Parse("""
     [
-     {"type":"function","function":{"name":"list_games","description":"列出三款游戏、对应引擎、固定版本、安装状态，以及是否能真实执行。","parameters":{"type":"object","properties":{}}}},
+     {"type":"function","function":{"name":"list_games","description":"先查询三款游戏、对应引擎、固定版本、安装状态和执行能力，再用 list_accounts(game) 发现各游戏的内部账号 ID。","parameters":{"type":"object","properties":{}}}},
      {"type":"function","function":{"name":"list_tasks","description":"列出某款游戏的任务目录（每日/每周/按需）及当前能否真实执行。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"]}}},
-     {"type":"function","function":{"name":"read_configuration","description":"读取指定游戏和内部账号的登记配置、版本和取值规则。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"}},"required":["game","account_id"],"additionalProperties":false}}},
+     {"type":"function","function":{"name":"read_configuration","description":"读取支持配置查询的游戏和内部账号的登记配置、版本和取值规则。配置修改及旧单星铁计划需要此步骤；新 items 计划不要求先调用此工具。账号 ID 由 list_accounts 获取。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"}},"required":["game","account_id"],"additionalProperties":false}}},
      {"type":"function","function":{"name":"propose_changes","description":"用刚读取的同一游戏、账号和 revision 生成提案。只能使用 read_configuration 登记的参数路径和字符串值，写入需本机确认。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"revision":{"type":"string"},"changes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["game","account_id","revision","changes"],"additionalProperties":false}}},
      {"type":"function","function":{"name":"get_run_status","description":"读取真实记录或有标记的模拟结果。按账号查询时同时提供 game 和 account_id，尚未关联的运行不会猜测归属。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}},"additionalProperties":false}}}
-     ,{"type":"function","function":{"name":"list_accounts","description":"列出指定游戏的内部账号 ID、顺序和核对状态。目标不明确时先询问用户。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"],"additionalProperties":false}}}
+     ,{"type":"function","function":{"name":"list_accounts","description":"列出指定游戏的内部账号 ID、slot 序号和核对状态，不依赖配置提供者。用游戏+slot作为安全账号称呼；目标不明确时先询问用户，不猜测姓名或登录身份。saved_auto_run 是已保存的日常勾选状态，旧键 AutoRun 与其相同，均不代表界面未保存的当前选择。列出不代表可执行。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"],"additionalProperties":false}}}
      ,{"type":"function","function":{"name":"get_batch_progress","description":"读取批次进度。提供 batch_id 时只查该批次（星铁运行计划的 action_id 即 batch_id）；未知不回退，不代表可重新提交。省略时读取最近批次。","parameters":{"type":"object","properties":{"batch_id":{"type":"string"}},"additionalProperties":false}}}
     ]
     """)!.AsArray();
@@ -86,7 +86,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
         if (ScheduleProposalsEnabled && executionPlans is not null)
         {
             var function = definitions.Single(d => d!["function"]!["name"]!.GetValue<string>() == "propose_run")!["function"]!;
-            function["description"] = "准备待确认计划。新计划使用有序 items，只给游戏和内部账号 ID，任务/资源/版本由宿主核对。旧单星铁五字段仍支持，不能混用。固定失败即停，不直接执行。";
+            function["description"] = "准备待确认计划。先 list_games，再 list_accounts(game)，让用户按游戏+slot辨认，歧义时先询问。新计划使用有序 items，只给游戏和内部账号 ID，不要求先 read_configuration，任务/资源/版本由宿主核对。旧单星铁五字段仍须先读取配置和 revision，不能混用。固定失败即停，不直接执行。";
             var schema = function["parameters"]!.AsObject();
             schema["properties"]!["items"] = JsonNode.Parse("""
                 {"type":"array","minItems":1,"maxItems":32,"items":{"type":"object",
@@ -322,7 +322,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
         var accounts = await accountDatabase.LoadAccountsAsync(game, ct).ConfigureAwait(false);
         return Serialize(accounts.Take(100).Select(a => new
         {
-            account_id = a.Id, game = Key(a.Game), slot = a.Order + 1, a.Enabled, a.AutoRun,
+            account_id = a.Id, game = Key(a.Game), slot = a.Order + 1, a.Enabled, a.AutoRun, saved_auto_run = a.AutoRun,
             verification = a.VerificationState is "verified" or "manual_verified" ? "verified" : "unverified",
             last_result = ResultCode(a.LastResult),
         }));

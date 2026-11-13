@@ -17,7 +17,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="Margin" Value="0,0,0,6"/></Style>
 <Style x:Key="Lead" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Margin" Value="0,6,0,20"/><Setter Property="MaxWidth" Value="780"/><Setter Property="HorizontalAlignment" Value="Left"/></Style>
 <Style x:Key="Small" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="LineHeight" Value="20"/></Style>
-<Style x:Key="Panel" TargetType="Border" BasedOn="{StaticResource Furina.PanelStyle}"><Setter Property="Background" Value="#E7EEFF"/><Setter Property="BorderBrush" Value="#9EB6F3"/><Setter Property="BorderThickness" Value="1.5"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
+<Style x:Key="Panel" TargetType="Border" BasedOn="{StaticResource Furina.PanelStyle}"><Setter Property="Background" Value="#D7E9FF"/><Setter Property="BorderBrush" Value="#9EB6F3"/><Setter Property="BorderThickness" Value="1.5"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
 <Style x:Key="AccountChoiceList" TargetType="ListBox">
 <Setter Property="MinHeight" Value="140"/><Setter Property="MaxHeight" Value="360"/>
 <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="BorderThickness" Value="0"/>
@@ -56,7 +56,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBlock x:Name="Label" Text="{TemplateBinding Header}" Foreground="{StaticResource OnNavy}" FontSize="15" VerticalAlignment="Center"/></StackPanel></Border>
 <ControlTemplate.Triggers>
 <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Row" Property="BorderBrush" Value="#5A75C8"/></Trigger>
-<Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#D8E4FF"/><Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource Gold}"/>
+<Trigger Property="IsSelected" Value="True"><Setter TargetName="Row" Property="Background" Value="#D8E4FF"/><Setter TargetName="Row" Property="Effect"><Setter.Value><DropShadowEffect Color="#90BFFF" BlurRadius="14" ShadowDepth="0" Opacity="0.8"/></Setter.Value></Setter><Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource Gold}"/>
 <Setter TargetName="Label" Property="Foreground" Value="{StaticResource Text}"/><Setter TargetName="Label" Property="FontWeight" Value="Bold"/><Setter TargetName="Glyph" Property="Foreground" Value="{StaticResource Sakura}"/></Trigger>
 <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Row" Property="BorderBrush" Value="White"/></Trigger><DataTrigger Binding="{Binding IsCompactLayout, RelativeSource={RelativeSource AncestorType=Window}}" Value="True">
 <Setter TargetName="Label" Property="Visibility" Value="Collapsed"/><Setter TargetName="Glyph" Property="Margin" Value="0"/><Setter TargetName="Row" Property="Padding" Value="12,11"/>
@@ -174,7 +174,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <StackPanel Grid.Column="1" Margin="10,6,6,6" VerticalAlignment="Center">
 <DockPanel><Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
 <TextBlock DockPanel.Dock="Right" Text="{Binding RunHint}" Style="{StaticResource Small}" FontSize="12" TextWrapping="NoWrap" Margin="8,0,0,0"/>
-<TextBlock Text="{Binding ShortVersion}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Version}"/></DockPanel>
+<TextBlock Text="{Binding ShortVersion}" Foreground="{StaticResource Muted}" FontWeight="Normal" FontSize="12" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" ToolTip="{Binding Version}"/></DockPanel>
 <ItemsControl ItemsSource="{Binding Chips}" Margin="0,5,0,0"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="8" Padding="6,1" Margin="0,0,4,2"><TextBlock Text="{Binding}" FontSize="12"/></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
@@ -635,11 +635,11 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </TabControl>
 
 <!-- Decorative water never covers the persistent footer controls. -->
-<Rectangle Grid.Row="1" Height="40" VerticalAlignment="Bottom" IsHitTestVisible="False"><Rectangle.Fill>
-<ImageBrush ImageSource="{Binding Theme.WaterForeground}" Viewbox="0,0.45,1,0.55" ViewboxUnits="RelativeToBoundingBox" Stretch="UniformToFill"/>
+<Rectangle Grid.Row="1" Height="78" VerticalAlignment="Bottom" IsHitTestVisible="False"><Rectangle.Fill>
+<ImageBrush ImageSource="{Binding Theme.WaterForeground}" Viewbox="0,0.25,1,0.75" ViewboxUnits="RelativeToBoundingBox" Stretch="UniformToFill"/>
 </Rectangle.Fill></Rectangle>
 <!-- Persistent local actions stay reachable even when the page scrolls. -->
-<Border Grid.Row="2" Background="{StaticResource Furina.StageBrush}" Padding="14,6">
+<Border Grid.Row="2" Background="#183477" BorderBrush="#8BB8E4" BorderThickness="0,1,0,0" Padding="14,6">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <TextBlock x:Name="PersistentStatusText" Text="{Binding Status}" ToolTip="{Binding VersionText}" Foreground="#D6E5FF" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0"/>
 <StackPanel Grid.Column="1" Orientation="Horizontal">

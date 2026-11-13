@@ -77,3 +77,6 @@ A 没有修改 App.xaml 或项目文件。
 覆盖 1600×900、960×500 DIP；各导出 100/125/150/200% 像素密度，共八张。小尺寸演示使用可滚动容器；它验证样式可布局，不代表最终产品在最小尺寸已经通过验收。像素密度导出也不等于真实系统 DPI 切换、多屏恢复或焦点测试。普通/禁用/错误/输入/消息/进度例子带明确演示标记，不能作为任务执行成功证据。
 
 
+
+## Reference fidelity increment (2026-11-13)
+Replaced only three bundled game banners with separate native-generated, text-free character artwork: Paimon / March 7th / Belle-inspired portraits on the right, dark text-safe area on the left, 2172x724. No reference screenshot was edited, cropped into controls or flattened into a UI. Existing canonical filenames and external/GIF lookup untouched. Original art remains in prior git revision. These fan-art illustrations are not official game assets; visual identity/fidelity still requires Q assessment. Source files reside under .codex/generated_images/01a1d4c3-6067-7b22-8179-e9fde0fb2f69; hashes in manifest version2. Code/compatibility review travels with the B reference-fidelity task; visual scores are not self-certified.

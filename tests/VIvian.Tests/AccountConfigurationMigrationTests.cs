@@ -22,12 +22,12 @@ public sealed class AccountConfigurationMigrationTests : IDisposable
         {
             await connection.OpenAsync();
             using var command = connection.CreateCommand();
-            command.CommandText = "DROP TABLE account_configuration_audit; PRAGMA user_version=6;";
+            command.CommandText = "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;";
             await command.ExecuteNonQueryAsync();
         }
 
         await db.InitializeAsync();
-        Assert.Equal(7, await VersionAsync(path));
+        Assert.Equal(LocalDatabase.CurrentSchemaVersion, await VersionAsync(path));
         var backup = path + ".pre-v7.bak";
         Assert.Equal(6, await VersionAsync(backup));
 

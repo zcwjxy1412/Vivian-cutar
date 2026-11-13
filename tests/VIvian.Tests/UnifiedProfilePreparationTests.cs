@@ -90,7 +90,7 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
             var v7 = Path.Combine(_root, "v7.db");
             await new LocalDatabase(v6).InitializeAsync();
             using (var old = Open(v6))
-                Execute(old, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+                Execute(old, "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
             await new LocalDatabase(v7).InitializeAsync();
 
             var output = Path.Combine(profile, "prepared");
@@ -129,7 +129,7 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
         await starRail.InitializeAsync();
         await genshin.InitializeAsync();
         using var keepWal = Open(official);
-        Execute(keepWal, "PRAGMA wal_autocheckpoint=0; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+        Execute(keepWal, "PRAGMA wal_autocheckpoint=0; DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
         var starAccount = await starRail.AddAccountAsync(GameId.StarRail, "星铁正式档案", "", null);
         var starPlan = await starRail.LoadAccountTaskPlanAsync(starAccount.Id);
         starPlan = await starRail.SaveAccountTaskPlanAsync(starPlan with { DailyEnabled = false });
@@ -175,7 +175,7 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
         await source.InitializeAsync();
         var owner = await AddGenshinAsync(target, "已存在档案", "131****01");
         using (var connection = Open(official))
-            Execute(connection, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+            Execute(connection, "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
         await AddGenshinAsync(source, "无冲突档案", "130****00");
         await AddGenshinAsync(source, "冲突档案", "131****01");
 
@@ -200,7 +200,7 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
         var destination = Path.Combine(_root, "prepared");
         await new LocalDatabase(official).InitializeAsync();
         using (var old = Open(official))
-            Execute(old, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+            Execute(old, "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
         await new LocalDatabase(incoming).InitializeAsync();
         using (var preview = Open(incoming))
             Execute(preview, """
@@ -227,7 +227,7 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
         using (var preview = Open(incoming))
         {
             old.BackupDatabase(preview);
-            Execute(old, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+            Execute(old, "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
             Execute(preview, $"UPDATE account_settings SET settings_json='{{}}', revision=revision+1 WHERE account_id='{existing.Id:D}';");
         }
         await AddGenshinAsync(new LocalDatabase(incoming), "新档案", "131****01");
@@ -249,7 +249,7 @@ public sealed class UnifiedProfilePreparationTests(ITestOutputHelper testOutput)
         var destination = Path.Combine(_root, "prepared");
         await new LocalDatabase(official).InitializeAsync();
         using (var old = Open(official))
-            Execute(old, "DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
+            Execute(old, "DROP TABLE execution_plan_runs; DROP TABLE execution_plans; DROP TABLE account_configuration_audit; PRAGMA user_version=6;");
         await new LocalDatabase(incoming).InitializeAsync();
         await UnifiedProfilePreparation.PrepareAsync(official, incoming, destination, CancellationToken.None);
         UnifiedProfilePreparation.VerifyPrepared(destination);

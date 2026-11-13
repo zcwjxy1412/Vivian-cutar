@@ -42,7 +42,7 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         catch { await connection.DisposeAsync(); throw; }
     }
 
-    public const int CurrentSchemaVersion = 7;
+    public const int CurrentSchemaVersion = 8;
 
     // M1 schema, kept verbatim so that fresh databases and upgraded ones end up identical.
     private const string SchemaV1 = """
@@ -169,7 +169,8 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
             versionCommand.CommandText = "PRAGMA user_version;";
             var oldVersion = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(ct));
             var backupPath = _databasePath + (oldVersion == 4 ? ".pre-v5.bak"
-                : oldVersion == 5 ? ".pre-v6.bak" : oldVersion == 6 ? ".pre-v7.bak" : ".pre-m5.1.bak");
+                : oldVersion == 5 ? ".pre-v6.bak" : oldVersion == 6 ? ".pre-v7.bak"
+                : oldVersion == 7 ? ".pre-v8.bak" : ".pre-m5.1.bak");
             if (oldVersion is > 0 and < CurrentSchemaVersion && !File.Exists(backupPath))
             {
                 await using var backup = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -223,6 +224,11 @@ public sealed partial class LocalDatabase : ISettingsStore, IDiagnosticStore
         if (version <= 6)
         {
             command.CommandText = SchemaV7;
+            await command.ExecuteNonQueryAsync(ct);
+        }
+        if (version <= 7)
+        {
+            command.CommandText = SchemaV8;
             await command.ExecuteNonQueryAsync(ct);
         }
         tx.Commit();

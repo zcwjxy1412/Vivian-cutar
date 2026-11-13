@@ -37,7 +37,7 @@ public sealed class ExactBatchLookupTests : IDisposable
         Assert.Equal("running", (await reopened.LoadBatchAsync(target.Id))!.State);
         await reopened.ReconcileInterruptedBatchesAsync();
         Assert.Equal("interrupted", (await reopened.LoadBatchAsync(target.Id))!.State);
-        Assert.Equal(7, LocalDatabase.CurrentSchemaVersion);
+        Assert.Equal(8, LocalDatabase.CurrentSchemaVersion);
     }
 
     public void Dispose() => Directory.Delete(root, true);

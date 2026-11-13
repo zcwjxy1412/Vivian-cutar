@@ -48,7 +48,7 @@ public sealed class GamePathProvider
     public string Get() => Resolve?.Invoke() ?? "";
 }
 
-public sealed class MainViewModel : ObservableObject
+public sealed partial class MainViewModel : ObservableObject, IExecutionPlanService
 {
     private readonly ISettingsStore _settings;
     private readonly IDiagnosticStore _history;
@@ -165,6 +165,8 @@ public sealed class MainViewModel : ObservableObject
 
     public void StopAll()
     {
+        try { _persistentPlans?.StopAll(); }
+        catch (Exception ex) { Log.Warning(ex, "Persistent plan stop callback failed; continuing local stop channels"); }
         GenshinConfiguration.CancelLogin();
         if (BatchRunning)
         {
@@ -450,6 +452,7 @@ public sealed class MainViewModel : ObservableObject
         accounts.ExecutionSelectionChanged += () => Raise(nameof(SelectedAccountsText));
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
+        InitializePersistentPlans();
         AssistantInputGate = new AssistantInputGate(paths.DataDirectory,
             () => AssistantInputBlocked);
         Configuration = new ConfigurationViewModel(_control,
@@ -527,10 +530,10 @@ public sealed class MainViewModel : ObservableObject
             new VIvian.Infrastructure.Assistant.AssistantTools(
                 () => Engines.Select(e => new VIvian.Infrastructure.Assistant.EngineStatusView(e.Id, e.Name, e.Engine, e.Version,
                     e.Report?.Compatibility.ToString() ?? "not_checked", e.CanRunForReal)).ToList(),
-                ct => _runs.ReadRecentRunsAsync(20, ct), accounts.Database, [starRailConfiguration]),
+                ct => _runs.ReadRecentRunsAsync(20, ct), accounts.Database, [starRailConfiguration], executionPlans: this),
             target => target.Game == GameId.StarRail && accounts.SelectedStarRail?.Id == target.AccountId
                 && !ConfigurationBlocked() && Configuration.PendingCount == 0,
-            paths.DataDirectory, Configuration.ReadAsync, SubmitAssistantPlanAsync);
+            paths.DataDirectory, Configuration.ReadAsync, SubmitAssistantPlanAsync, executionPlans: this);
         accounts.SelectionChanged += Assistant.InvalidateProposals;
         Configuration.PropertyChanged += (_, e) =>
         {
@@ -645,7 +648,7 @@ public sealed class MainViewModel : ObservableObject
     public string RunnableText => $"{Engines.Count(e => e.CanRunForReal)} / {Engines.Count}";
     public string SelectedAccountsText => (Accounts.SelectedRows.Count + GenshinConfiguration.SelectedForDaily.Count + Accounts.SelectedZenlessForDaily.Count).ToString();
     public string InstalledText => $"已发现 {Engines.Count(e => !string.IsNullOrWhiteSpace(e.InstallPath))} / {Engines.Count}";
-    public string RunStateText => BatchRunning || Queue.IsRunning ? "运行中" : Queue.HasUnresolved ? "待确认" : "就绪";
+    public string RunStateText => BatchRunning || Queue.IsRunning ? "运行中" : Queue.HasUnresolved || _persistentPlanFault ? "待确认" : "就绪";
     public string ConfigSyncText => !CanOperateWorkspace ? "只读"
         : Configuration.PendingCount > 0 ? $"{Configuration.PendingCount} 项待写入" : "已同步";
     private void RaiseHome()
@@ -917,6 +920,9 @@ public sealed class MainViewModel : ObservableObject
         if (!WindowsProcessSupervisor.IsCurrentProcessElevated())
         { BatchStatus = "请以管理员身份打开程序并完成启动授权，再开始批次。"; return null; }
 
+        if (approved is null && acceptance is null && verify is null && homeReward is null)
+            return await RunPersistentHomePlanAsync([.. starRail, .. genshin, .. zenless]);
+
         using var cancellation = new CancellationTokenSource();
         var token = cancellation.Token;
         _batchCts = cancellation;
@@ -1088,18 +1094,28 @@ public sealed class MainViewModel : ObservableObject
     }
 
     private async Task<MultiAccountOutcome> RunStarRailBatchAsync(GameAccount[] accounts, AssistantRunPlan? approved,
-        Action<BatchAccountProgress> progress, CancellationToken token)
+        Action<BatchAccountProgress> progress, CancellationToken token, ExecutionPlanItemReceipt? persistent = null,
+        Func<Guid, CancellationToken, Task>? beforeRun = null)
     {
         var card = Engines.Single(e => e.Id == GameId.StarRail);
         var evidence = _march7thEvidence;
         if (evidence is null || card.Report?.Compatibility != CompatibilityClass.IdentityVerified)
             throw new InvalidOperationException("请先在引擎与环境核对星铁官方发行包与安装身份。");
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory);
-        if (approved is null ? !Configuration.TryApplyPending(interactive: false, desktop) : Configuration.PendingCount > 0)
+        if (approved is null && persistent is null ? !Configuration.TryApplyPending(interactive: false, desktop) : Configuration.PendingCount > 0)
             throw new InvalidOperationException("请先在游戏管理保存尚未写入的星铁设置。");
 
         var installPath = card.InstallPath;
         IReadOnlyDictionary<string, string>? approvedSettings = null;
+        if (persistent is not null)
+        {
+            await ValidatePersistentItemAsync(persistent.Item, token);
+            var current = await new StarRailAccountConfigurationProvider(Accounts.Database, _control, () => installPath,
+                () => Queue.IsRunning || Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
+                .ReadAsync(new(GameId.StarRail, persistent.Item.AccountId), token);
+            approvedSettings = current.Values.Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
+                .ToDictionary(v => v.Schema.Path, v => v.Value!, StringComparer.Ordinal);
+        }
         if (approved is not null)
         {
             var provider = new StarRailAccountConfigurationProvider(Accounts.Database, _control, () => installPath,
@@ -1118,7 +1134,7 @@ public sealed class MainViewModel : ObservableObject
         token.ThrowIfCancellationRequested();
         BatchRunning = true;
         BatchStatus = $"星铁 · 已完成 0/{accounts.Length} · 正在读取游戏设置";
-        if (approved is null) await Accounts.SaveSelectionsAsync(token);
+        if (approved is null && persistent is null) await Accounts.SaveSelectionsAsync(token);
         var upstream = _control.ReadConfiguration(GameId.StarRail, installPath);
         var defaults = upstream.Values
             .Where(v => v.Schema.Access == ParameterAccess.VerifiedReadWrite && v.Value is not null)
@@ -1147,8 +1163,8 @@ public sealed class MainViewModel : ObservableObject
 
         var outcome = await _orchestrator.ExecuteAsync(GameId.StarRail, accounts, AccountConfigurationMode.Independent,
             (account, _) => Task.FromResult(snapshots[account.Id]),
-            (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, desktop, ct),
-            progress, token, approved?.Id, desktop.MarkDirty);
+            (_, settings, ct) => RunAccountTasksAsync(installPath, evidence, settings, desktop, ct, beforeRun),
+            progress, token, persistent?.ChildBatchId ?? approved?.Id, desktop.MarkDirty, stopOnFailure: persistent is not null);
         if (Queue.HasUnresolved || _control.HasPendingConfigurationRestore)
             return outcome with { Completed = false, Detail = outcome.Detail + " 清理或配置恢复待确认，已阻断后续执行。" };
         if (outcome.GameCleanupConfirmed && outcome.HostCleanupConfirmed) desktop.ConfirmClean();
@@ -1158,13 +1174,15 @@ public sealed class MainViewModel : ObservableObject
     private static readonly Guid LegacyStarRail = Guid.Parse("00000000-0000-4000-8000-000000000002");
 
     private async Task<BatchTaskResult> RunAccountTasksAsync(string installPath, March7thReleaseEvidence evidence,
-        IReadOnlyDictionary<string, string> settings, DesktopOperationLease desktop, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, string> settings, DesktopOperationLease desktop, CancellationToken cancellationToken,
+        Func<Guid, CancellationToken, Task>? beforeRun = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var taskPlan = _control.CreateTaskPlan(GameId.StarRail, [RealExecutionPolicy.M5RealTask]);
         var result = await _control.ExecuteTaskPlan(taskPlan,
             new RealTaskAuthorization(installPath, evidence, () => !cancellationToken.IsCancellationRequested,
-                true, AllowTemporaryConfiguration: true, AccountSettings: settings), desktop);
+                true, AllowTemporaryConfiguration: true, AccountSettings: settings,
+                BeforeRun: beforeRun is null ? null : id => beforeRun(id, cancellationToken)), desktop);
         if (result.Restore is not null) ShowRestore(result.Restore);
         var run = result.Queue?.Runs.LastOrDefault();
         var cleaned = run?.Cleanup == CleanupState.Confirmed;

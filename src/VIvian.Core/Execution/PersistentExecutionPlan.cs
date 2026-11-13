@@ -24,6 +24,7 @@ public sealed record ExecutionPlanItemResult(RunOutcome Outcome, CleanupState Cl
         (Cleanup is CleanupState.Confirmed or CleanupState.NotRequired) && ConfigurationRestored;
 }
 
+/// <summary>RunIds are durable pre-launch reservations; association alone never proves an engine started.</summary>
 public sealed record ExecutionPlanItemReceipt(ExecutionPlanItem Item, Guid ChildBatchId,
     ExecutionPlanItemState State, IReadOnlyList<Guid> RunIds, ExecutionPlanItemResult? Result);
 

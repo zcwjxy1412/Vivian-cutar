@@ -13,7 +13,8 @@ public delegate Task<BatchTaskResult> BatchTaskRunner(GameAccount account,
 /// <param name="HostLaunches">How many times the elevated host was started (= UAC prompts) in this batch.</param>
 /// <param name="HostCleanupConfirmed">False when the elevated host exit could not be proven at batch end.</param>
 public sealed record MultiAccountOutcome(Guid BatchId, bool Completed, int Succeeded, int Failed,
-    string Detail, int HostLaunches = 0, bool HostCleanupConfirmed = true, bool GameCleanupConfirmed = false);
+    string Detail, int HostLaunches = 0, bool HostCleanupConfirmed = true, bool GameCleanupConfirmed = false,
+    RunOutcome? Outcome = null, bool EngineCleanupConfirmed = false, bool ConfigurationRestored = false);
 
 /// <summary>
 /// Serialises real account work: reach the saved-account list, select and verify the target account, start one
@@ -46,7 +47,7 @@ public sealed class MultiAccountOrchestrator
     public async Task<MultiAccountOutcome> ExecuteAsync(GameId game, IReadOnlyList<GameAccount> accounts,
         AccountConfigurationMode mode, Func<GameAccount, CancellationToken, Task<IReadOnlyDictionary<string, string>>> settings,
         BatchTaskRunner runner, Action<BatchAccountProgress>? progress, CancellationToken cancellationToken,
-        Guid? actionId = null, Action? beforeDesktopMutation = null)
+        Guid? actionId = null, Action? beforeDesktopMutation = null, bool stopOnFailure = false)
     {
         if (accounts.Count == 0) throw new ArgumentException("至少选择一个账号。", nameof(accounts));
         if (accounts.Select(a => a.Id).Distinct().Count() != accounts.Count)
@@ -63,6 +64,9 @@ public sealed class MultiAccountOrchestrator
         var cancelled = false;
         var gameClean = false;
         var desktopTouched = false;
+        var engineClean = true;
+        var configurationRestored = true;
+        RunOutcome? taskOutcome = null;
         string? stopReason = null;
         GameAccount? previous = null;
         string? previousUid = null;
@@ -110,6 +114,7 @@ public sealed class MultiAccountOrchestrator
                     await RecordAsync(batch, account, "login_profile_missing",
                         "此账号尚未绑定登录界面上的已保存账号；请先扫描登录账号。", cancellationToken);
                     progress?.Invoke(P(account, BatchRunState.Failed, "尚未绑定登录界面"));
+                    if (stopOnFailure) { aborted = true; stopReason = "账号缺少登录档案。"; break; }
                     continue;
                 }
 
@@ -131,7 +136,7 @@ public sealed class MultiAccountOrchestrator
                         Combine(switched.Detail, evidenceJson), cancellationToken);
                     progress?.Invoke(P(account, switched.NeedsUser ? BatchRunState.ReauthorizationRequired
                         : BatchRunState.Failed, switched.Detail));
-                    if (switched.Fatal)
+                    if (switched.Fatal || stopOnFailure)
                     {
                         aborted = true;
                         stopReason = switched.Detail;
@@ -153,9 +158,14 @@ public sealed class MultiAccountOrchestrator
                     switched.Stage == LoginSwitchStage.ReadyAtGate ? (game == GameId.ZenlessZoneZero ? "已确认登录账号，正在交接 OneDragon" : "已确认大门，正在交接 BetterGI")
                         : game == GameId.Genshin ? "正在执行原神日常" : "正在执行星铁日常", progress, cancellationToken);
                 BatchTaskResult result;
+                engineClean = false;
+                configurationRestored = false;
                 try
                 {
                     result = await runner(account, resolved, cancellationToken);
+                    engineClean = result.CleanupConfirmed;
+                    configurationRestored = result.ConfigurationRestored;
+                    taskOutcome = result.Outcome;
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
@@ -197,7 +207,8 @@ public sealed class MultiAccountOrchestrator
                     break;
                 }
 
-                if (result.Outcome == RunOutcome.Cancelled || (game != GameId.ZenlessZoneZero && result.Outcome == RunOutcome.Indeterminate)
+                if ((stopOnFailure && (!result.Success || result.Outcome != RunOutcome.Success)) ||
+                    result.Outcome == RunOutcome.Cancelled || (game != GameId.ZenlessZoneZero && result.Outcome == RunOutcome.Indeterminate)
                     || (game == GameId.Genshin && !result.Success))
                 {
                     cancelled = result.Outcome == RunOutcome.Cancelled;
@@ -256,6 +267,8 @@ public sealed class MultiAccountOrchestrator
             await RecordAsync(batch, current, "batch_exception", stopReason, CancellationToken.None);
         }
 
+        if (stopOnFailure && aborted && desktopTouched && !gameClean)
+            await StopGameAfterInterruptionAsync();
         var completed = !aborted && !cancelled;
         return await FinishAsync(batch with
         {
@@ -264,7 +277,10 @@ public sealed class MultiAccountOrchestrator
                 ? $"完成 {succeeded}，失败 {failed}，未完成 {accounts.Count - succeeded - failed}。"
                 : $"完成 {succeeded}，失败 {failed}。") +
                      (cancelled ? " 用户停止了批次。" : aborted ? " 批次已停止：" + stopReason : "")
-        }, completed, succeeded, failed, CancellationToken.None, gameClean);
+        }, completed, succeeded, failed, CancellationToken.None, gameClean,
+            cancelled ? RunOutcome.Cancelled : completed && failed == 0 ? RunOutcome.Success
+                : taskOutcome is RunOutcome.Failed or RunOutcome.Indeterminate ? taskOutcome : RunOutcome.Failed,
+            engineClean, configurationRestored);
 
         async Task StopGameAfterInterruptionAsync()
         {
@@ -274,7 +290,8 @@ public sealed class MultiAccountOrchestrator
     }
 
     private async Task<MultiAccountOutcome> FinishAsync(AccountBatch batch, bool completed, int succeeded, int failed,
-        CancellationToken cancellationToken, bool gameClean = false)
+        CancellationToken cancellationToken, bool gameClean = false, RunOutcome? outcome = null,
+        bool engineClean = false, bool configurationRestored = false)
     {
         var launches = _host?.LaunchCount ?? 0;
         var hostClean = true;
@@ -297,7 +314,8 @@ public sealed class MultiAccountOrchestrator
         };
         // A user stop has already cancelled the batch token; the final bookkeeping must still be written.
         await _database.SaveBatchAsync(final, cancellationToken);
-        return new(final.Id, completed, succeeded, failed, final.Detail, launches, hostClean, gameClean);
+        return new(final.Id, completed, succeeded, failed, final.Detail, launches, hostClean, gameClean,
+            outcome, engineClean, configurationRestored);
     }
 
     private static string Combine(string detail, string evidence) =>

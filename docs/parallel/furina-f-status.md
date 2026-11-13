@@ -1,5 +1,7 @@
 # F 执行内核首批交付
 
+> 最新：已按总控授权进入 v3 多游持久协调器新批次，见文末。以下 v1“产品零修改”仅描述旧 F 证据提交，不代表当前实现。
+
 - 日期：2026-11-13（America/New_York）；总任务 #59，F #66。
 - 计划：`docs/parallel/furina-vnext/FURINA_UI_AI_BRANCH_PLAN.md` §F；按已批准计划执行，无新设计确认。
 - SOURCE_BASE_SHA：`ce3ebeea79c507825e66a9e97097a6f80ede33cc`。
@@ -94,3 +96,39 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M5DailyTestBuil
 - 接收公共 v2 前保持 F-I-1/2/3 未完成；尤其聊天输入不能因本次离线暂停测试通过就放行。
 - E 下一步：总控完成 F 合流安排后，在已分配 `feat/furina-zzz` 核验当前任务结果/skip/RunId 归属、实例配置与清理恢复，保留 ce3ebee 修复；先离线再预约实机。
 - D 下一步：E 首批完成并由总控安排后，在 `feat/furina-genshin` 核验接管/归还、原生配置恢复与完整日常证据；不在 F 分支重写 BetterGI/OneDragon。
+
+## F v3 持久协调器新批次（2026-11-13）
+
+- 原 F 证据提交之后依次快进 `85977de`、契约 `30aa4b5`、I 存储 `071e29e`。本次实际增量以 `071e29e` 为基线；没有修改 I 所有 Core/数据库/App 文件，也没有修改 C/B 文件。
+- 对接说明 `docs/parallel/furina-f-plan-api.md`；前置审计 `furina-f-persistent-plan-seams.md`。采用已冻结 v3 契约，不另造执行器；宿主按 Game 分派既有 batch 委托，协调器自身不嵌套占用桌面锁。
+- 实现 `PersistentExecutionPlanCoordinator`：原子接受后才串行执行；Existing/Conflict 不重放；接受 token 不支配执行；本地 StopAll 与宿主 token 停止已接受工作；失败/取消/清理或恢复不确认停止后续。所有持久失败使任务 fault，保留状态供宿主启动中断对账，绝不假写成功或继续。
+- D/E 透传 childBatchId、启动前 await RunId 登记、stopOnFailure 与持桌面锁后的 validateConfirmed。原神保留原方法组重载；原神日志 QueueId 使用子批次；绝区零返回值等最终游戏清理后生成。MultiAccountOutcome 增加明确 Outcome/EngineCleanupConfirmed/ConfigurationRestored；新计划每项单账号，旧调用默认保持兼容。
+- stopOnFailure 模式覆盖缺登录档案、非 fatal 切换失败、任务失败/未确认等旧的继续分支；普通旧入口默认 false。
+- 复审时自查复现并补齐 WhenIdleAsync 等待正在接受的提交：旧行为在持久接受尚未结束时提前返回空闲，失败证据 `idle-red.log`。现在先等待提交串行门，再等待已接受任务。宿主关闭前仍需禁止新提交。
+
+### 验证证据
+
+全部在唯一临时目录和模拟监管组进行，不使用真实桌面共同锁，不启动游戏，不执行显示窗口的 smoke，不迁移正式数据库。
+
+- 编译 RED：缺协调器/Outcome 字段，缺 D/E 接缝参数；分别 `artifacts/tests-f-plan/red.log`、`seams-red.log`。首次绿色前修正 xUnit 分析器规则与旧 Genshin 方法组兼容，非产品 RED。
+- 行为 RED：停止与接受交错仍启动三项；最后一项忽略取消把计划记成功（`stop-race-red.log`）；调用者修改返回回执 Items 数组改变后续账号（`receipt-red.log`）；空闲漏等提交（`idle-red.log`）。分别通过停止代次/结果取消检查、执行项快照和等待提交门修复。
+- 复审 L1 进一步验证：一个取消回调抛异常会中止 StopAll 枚举，后续已接受计划仍执行；真实临时 SQLite 回归原先实际调用 4 次而非 1 次（`callback-red.log`）。现逐个取消并保证调用本地停止，最后统一抛 AggregateException，不吞诊断。
+- 首批针对性 56/56；默认全量曾1194/1194，合入 I store 后1207/1207；最终复审输入之前默认/M5各1208/1208。上述旧计数只证明各阶段代码。
+- 最后两项修正后全量默认/M5各 **1209/1209**，0 失败、0 跳过，日志 `post-review-default.log`、`post-review-m5.log`，TRX 同名。
+- 真实临时 SQLite 验证：RunId 在委托工作前可被新 LocalDatabase 实例精确读回；顺序子批次完成、重开返回已有回执、未知ID不回退、取消回调异常仍停止另一已接受计划。fake store 测试不冒充数据库事务/幂等实现证据。
+
+### 本次独立审查（两轮上限已用完）
+
+模型 deepseek-v4-pro / thinking disabled。首审 `artifacts/deepseek-f-plan/response-1.json` SHA256 `E11ACC6DD3DDBF35365A33A5538F37150E104FFAA240A1C39C4E69048A75DF2B`；复审 `response-2.json` SHA256 `CF09890A53FA788435623096B06DC58859AD2D08859CF0FBE0D2F21C4140F556`。一次准备复审的 shell 退出且请求/响应均未生成，随后保存请求并实际调用获得上述复审；不将无输出当有效审查。
+
+- 首审 High“outcome 在 finally 未赋值返回”驳回：return 在 finally 之外，异常传播时不会走到 return，真实编译全量通过。首审 High“登记失败必须写终态”与 I 明确 fail-closed 约束冲突，拒绝；持久故障保留 Running、由宿主观察 fault，下次启动标 Interrupted，不重放。
+- 首审 Medium 重建协调器会丢失内存阻断：这是宿主集成边界，仍须依赖既有恢复/桌面 dirty lease 与准入检查；新实例不能视为清理证明。I 必须在单实例启动时中断对账，实际 batch 保留原锁；本分支没有也不绕过该锁。
+- 复审 H1 确认 return 控制流安全，转而指出 finally.StopGameAsync 可能覆盖旧异常；该行为存在于本次基线，属于已有 E 诊断一致性限制，本轮不扩范围修改，继续披露。
+- 复审 M1 返回值仍暴露 store 返回数组：生产 LocalDatabase 回执是独立读取/反序列化对象，修改返回数组不会改 SQLite；执行工作已复制数组并有 RED→GREEN。不能采纳把同一个执行快照直接返回的建议，那会重新暴露执行项。无确认的生产存储别名漏洞。
+- 复审 L1 取消回调抛异常：确认其会漏停排队计划，已修复并做真实临时库故障回归；并非“没有注册回调”，宿主 runner 可以注册。
+- 其余参数默认、先登记后 Starting、登记早于恢复标记均是既定契约或保守语义，不改旧 D/E 已交付任务，也不重复审 I 存储任务。
+- **最终状态：两轮已用完，最终 WhenIdle/StopAll 修正仅本地验证，没有第三轮独立复审；不得标记本批次最终代码“独立审查全部通过”。** 没有将本地测试成功等同实机放行。
+
+### 交接约束
+
+I 可按已落地签名连接；validateConfirmed 的持锁调用位置通过源码/编译核查，未启动真实 D/E 公共入口。星铁 RunId 与配置前置登记由 I 修改旧 scheduler/宿主，不在此分支。OneDragon 资源文件与迁移回退建议详见对接说明，未读取正式账号配置、未更改 SourceProfile.Revision 语义。E 旧启动诊断遮蔽/可能悬挂 journal、D-2 Finished 语义残余仍开放。

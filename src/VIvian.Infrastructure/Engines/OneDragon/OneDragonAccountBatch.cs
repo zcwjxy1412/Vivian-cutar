@@ -15,7 +15,9 @@ public static class OneDragonAccountBatch
 
     public static async Task<MultiAccountOutcome> ExecuteAsync(LocalDatabase database, IReadOnlyList<GameAccount> accounts,
         string installRoot, string profileDirectory, IProcessSupervisor supervisor, Action<BatchAccountProgress>? progress,
-        CancellationToken ct)
+        CancellationToken ct, Guid? childBatchId = null,
+        Func<Guid, Guid, CancellationToken, Task>? beforeRun = null, bool stopOnFailure = false,
+        Func<CancellationToken, Task>? validateConfirmed = null)
     {
         if (!RealExecutionPolicy.IsM5DailyTest || !WindowsProcessSupervisor.IsCurrentProcessElevated())
             throw new InvalidOperationException("请从原入口以管理员身份打开支持绝区零实测的 Vivian。");
@@ -23,6 +25,7 @@ public static class OneDragonAccountBatch
             throw new InvalidOperationException("请在绝区零账号管理勾选已经绑定的档案。");
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(installRoot));
         using var lease = DesktopOperationLease.Acquire(profileDirectory);
+        if (validateConfirmed is not null) await validateConfirmed(ct).ConfigureAwait(false);
         await ValidateInstallationAsync(root, ct).ConfigureAwait(false);
         var bindings = new Dictionary<Guid, (OneDragonProfileBinding Binding, OneDragonSourceProfile Profile)>();
         foreach (var account in accounts)
@@ -47,11 +50,13 @@ public static class OneDragonAccountBatch
         using var driver = new ZenlessLoginDriver(gamePaths[0], root, lease.MarkDirty);
         var orchestrator = new MultiAccountOrchestrator(database, driver, host: null,
             policy: new SwitchPolicy(LoginScreenTimeout: TimeSpan.FromMinutes(5)));
-        var batchId = Guid.NewGuid();
+        var batchId = childBatchId ?? Guid.NewGuid();
         var handoffClean = true;
+        var finalGameClean = false;
+        MultiAccountOutcome outcome;
         try
         {
-            return await orchestrator.ExecuteAsync(Game, accounts, AccountConfigurationMode.Independent,
+            outcome = await orchestrator.ExecuteAsync(Game, accounts, AccountConfigurationMode.Independent,
                 (_, _) => Task.FromResult<IReadOnlyDictionary<string, string>>(new Dictionary<string, string>()),
                 async (account, _, token) =>
                 {
@@ -71,17 +76,22 @@ public static class OneDragonAccountBatch
                     var result = await RunAsync(database, new OneDragonAdapter(() => root, request), supervisor,
                         root, batchId, handoff, progress is null ? null : detail =>
                             progress(new(account.Id, account.Name, BatchRunState.RunningTasks, detail, 1, DateTimeOffset.UtcNow)),
-                        token).ConfigureAwait(false);
+                        token, beforeRun is null ? null : (runId, runToken) => beforeRun(account.Id, runId, runToken)).ConfigureAwait(false);
                     handoffClean = result.CleanupConfirmed;
                     return result;
-                }, progress, ct, actionId: batchId).ConfigureAwait(false);
+                }, progress, ct, actionId: batchId, stopOnFailure: stopOnFailure).ConfigureAwait(false);
         }
         finally
         {
             if (handoffClean && !driver.LeavesGameForUser &&
                 (await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false)).Ok)
+            {
+                finalGameClean = true;
                 lease.ConfirmClean();
+            }
         }
+        return outcome with { GameCleanupConfirmed = outcome.GameCleanupConfirmed && finalGameClean,
+            Completed = outcome.Completed && finalGameClean };
     }
 
     public static async Task ValidateInstallationAsync(string root, CancellationToken ct = default)
@@ -103,9 +113,11 @@ public static class OneDragonAccountBatch
     private const string BridgeDigest = "04C1D2D88B85D6E7FF3B14836CC86F788382FB6055D66E5EB40C9E38C9649EC6";
 
     internal static async Task<BatchTaskResult> RunAsync(IRunJournal journal, OneDragonAdapter adapter, IProcessSupervisor supervisor,
-        string root, Guid batchId, OneDragonHandoff handoff, Action<string>? progress, CancellationToken ct)
+        string root, Guid batchId, OneDragonHandoff handoff, Action<string>? progress, CancellationToken ct,
+        Func<Guid, CancellationToken, Task>? beforeRun = null)
     {
         var context = new RunContext(Guid.NewGuid(), batchId, Game, DateTimeOffset.UtcNow);
+        if (beforeRun is not null) await beforeRun(context.RunId, ct).ConfigureAwait(false);
         Task Update(RunPhase phase, RunOutcome? outcome, CleanupState cleanup, string? reason) =>
             journal.PublishAsync(new(context.RunId, batchId, Game, RuleVersion, false, phase, outcome, cleanup,
                 reason, DateTimeOffset.UtcNow), CancellationToken.None);

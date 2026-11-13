@@ -13,6 +13,28 @@ public sealed class MultiAccountOrchestratorTests
     private static readonly AccountConfigurationMode Unified = AccountConfigurationMode.Unified;
 
     [Fact]
+    public async Task PersistentBatchStopsOnCleanFailureAndReturnsExplicitCleanup()
+    {
+        await using var fixture = await Fixture.CreateAsync("A", "B");
+        var driver = new FakeLoginDriver();
+        var calls = 0;
+        var child = Guid.NewGuid();
+        var result = await new MultiAccountOrchestrator(fixture.Database, driver).ExecuteAsync(GameId.StarRail,
+            fixture.Accounts, Unified, fixture.LoadSettingsAsync, (_, _, _) =>
+            {
+                calls++;
+                return Task.FromResult(new BatchTaskResult(Guid.NewGuid(), false, true, true, "failed", RunOutcome.Failed));
+            }, null, default, actionId: child, stopOnFailure: true);
+        Assert.Equal(child, result.BatchId);
+        Assert.Equal(1, calls);
+        Assert.False(result.Completed);
+        Assert.Equal(RunOutcome.Failed, result.Outcome);
+        Assert.True(result.EngineCleanupConfirmed);
+        Assert.True(result.ConfigurationRestored);
+        Assert.True(result.GameCleanupConfirmed);
+    }
+
+    [Fact]
     public async Task CancellationWhileReadingSettingsDoesNotTouchTheDesktop()
     {
         await using var fixture = await Fixture.CreateAsync("A");

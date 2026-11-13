@@ -11,6 +11,28 @@ namespace VIvian.Tests.Engines.BetterGi;
 
 public sealed class BetterGiReleaseBoundaryTests
 {
+    [Fact]
+    public async Task FailedRunRegistrationLeavesConfigurationAndRecoveryUntouched()
+    {
+        await using var fixture = new BetterGiFixture();
+        var account = Guid.NewGuid();
+        var name = BetterGiAccountPlan.SourceProfileName(account);
+        var profilePath = Path.Combine(fixture.Root, "User", "OneDragon", name + ".json");
+        File.WriteAllText(profilePath, System.Text.Json.JsonSerializer.Serialize(new { Name = name,
+            CompletionAction = "无", TaskEnabledList = new Dictionary<string, bool> { ["领取每日奖励"] = true } }));
+        var original = File.ReadAllText(profilePath);
+        var owner = Directory.CreateDirectory(Path.Combine(fixture.Root, "owner")).FullName;
+        var lockPath = Path.Combine(fixture.Root, "desktop.lock");
+        using (var lease = DesktopOperationLease.AcquireAt(lockPath, owner))
+            await Assert.ThrowsAsync<IOException>(() => BetterGiNativeDaily.RunCoreAsync(fixture.Root, account,
+                BetterGiNativeDaily.Profile(fixture.Root, account).Read().Revision, Path.Combine(owner, "reports"), lease,
+                (_, _) => throw new Exception("must not launch"), default, childBatchId: Guid.NewGuid(),
+                beforeRun: (_, _, _) => throw new IOException("registration failed")));
+        Assert.Equal(original, File.ReadAllText(profilePath));
+        Assert.False(File.Exists(Path.Combine(owner, "native-recovery.json")));
+        Assert.False(BetterGiNativeDaily.Profile(fixture.Root, account).HasPending);
+        using (DesktopOperationLease.AcquireAt(lockPath, owner)) { }
+    }
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, false)]
@@ -47,9 +69,13 @@ public sealed class BetterGiReleaseBoundaryTests
                     var name = BetterGiAccountPlan.SourceProfileName(account.Id);
                     var revision = BetterGiNativeDaily.Profile(fixture.Root, account.Id).Read().Revision;
                     using var runCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    var childBatchId = Guid.NewGuid();
+                    Guid? registeredRun = null;
                     var result = await BetterGiNativeDaily.RunCoreAsync(fixture.Root, account.Id, revision,
                         Path.Combine(owner, "reports"), lease, (context, _) =>
                         {
+                            Assert.Equal(childBatchId, context.QueueId);
+                            Assert.Equal(registeredRun, context.RunId);
                             Assert.True(fixture.Registry.TryAcquire(context.RunId));
                             var group = new FakeGroup(context.RunId) { DisposeThrows = failDispose };
                             var logs = new ScriptedLogSource();
@@ -65,9 +91,15 @@ public sealed class BetterGiReleaseBoundaryTests
                             group.Exit(0);
                             if (cancel) runCancellation.Cancel();
                             return Task.FromResult(run);
-                        }, runCancellation.Token);
+                        }, runCancellation.Token, childBatchId: childBatchId, beforeRun: (accountId, runId, _) =>
+                        {
+                            Assert.Equal(account.Id, accountId);
+                            Assert.False(File.Exists(Path.Combine(owner, "native-recovery.json")));
+                            registeredRun = runId;
+                            return Task.CompletedTask;
+                        });
                     results.Add(result);
-                    return await BetterGiAccountBatch.RecordDailyAsync(db, result, false);
+                    return await BetterGiAccountBatch.RecordDailyAsync(db, result, false, childBatchId);
                 }, null, default);
             Assert.Equal(!failDispose && !cancel, outcome.Completed);
             Assert.Equal(failDispose || cancel ? new[] { first.Id } : new[] { first.Id, second.Id }, executed);

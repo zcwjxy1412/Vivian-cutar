@@ -39,7 +39,15 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
     public static Task<MultiAccountOutcome> ExecuteSavedDailyAsync(LocalDatabase database,
         IReadOnlyList<GameAccount> accounts, string betterGiRoot, string archivePath, string profileDirectory,
         Action<BatchAccountProgress>? progress, CancellationToken ct) =>
-        ExecuteSavedAsync(database, accounts, betterGiRoot, archivePath, profileDirectory, progress, ct, acceptance: false, rewardOnly: false);
+        ExecuteSavedDailyAsync(database, accounts, betterGiRoot, archivePath, profileDirectory, progress, ct, null);
+
+    public static Task<MultiAccountOutcome> ExecuteSavedDailyAsync(LocalDatabase database,
+        IReadOnlyList<GameAccount> accounts, string betterGiRoot, string archivePath, string profileDirectory,
+        Action<BatchAccountProgress>? progress, CancellationToken ct, Guid? childBatchId,
+        Func<Guid, Guid, CancellationToken, Task>? beforeRun = null, bool stopOnFailure = false,
+        Func<CancellationToken, Task>? validateConfirmed = null) =>
+        ExecuteSavedAsync(database, accounts, betterGiRoot, archivePath, profileDirectory, progress, ct,
+            acceptance: false, rewardOnly: false, childBatchId, beforeRun, stopOnFailure, validateConfirmed);
 
     /// <summary>Uses the same account pipeline with separately labelled, per-run acceptance evidence.</summary>
     public static Task<MultiAccountOutcome> VerifySavedDailyAsync(LocalDatabase database,
@@ -49,7 +57,9 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
 
     private static async Task<MultiAccountOutcome> ExecuteSavedAsync(LocalDatabase database,
         IReadOnlyList<GameAccount> accounts, string betterGiRoot, string archivePath, string profileDirectory,
-        Action<BatchAccountProgress>? progress, CancellationToken ct, bool acceptance, bool rewardOnly)
+        Action<BatchAccountProgress>? progress, CancellationToken ct, bool acceptance, bool rewardOnly,
+        Guid? childBatchId = null, Func<Guid, Guid, CancellationToken, Task>? beforeRun = null, bool stopOnFailure = false,
+        Func<CancellationToken, Task>? validateConfirmed = null)
     {
         if (!RealExecutionPolicy.IsM5DailyTest || !WindowsProcessSupervisor.IsCurrentProcessElevated())
             throw new InvalidOperationException("此版本或当前 Windows 授权无法运行原神日常。");
@@ -61,6 +71,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             throw new InvalidOperationException("请从正式日常入口执行用户保存的完整任务顺序。");
         await BetterGiNativeDaily.ValidateInstallationAsync(betterGiRoot, ct).ConfigureAwait(false);
         using var lease = DesktopOperationLease.Acquire(RecoveryOwner(profileDirectory));
+        if (validateConfirmed is not null) await validateConfirmed(ct).ConfigureAwait(false);
         BetterGiDailyAcceptance.RemoveInactiveRecoveryJournals(lease, ct);
         var revisions = new Dictionary<Guid, string>();
         var parameters = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
@@ -96,11 +107,11 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
                         var result = await BetterGiNativeDaily.RunAsync(betterGiRoot, account.Id, revisions[account.Id],
                             Path.Combine(profileDirectory, "BetterGi-日常", "reports"), lease,
                             recheckToken => driver.ConfirmGateAsync(profile.NormalizedPhone, recheckToken),
-                            taskToken, parameters[account.Id]).ConfigureAwait(false);
+                            taskToken, parameters[account.Id], childBatchId, beforeRun).ConfigureAwait(false);
                         if (result.ScopedCompletionConfirmed)
                             driver.RestoreGameForeground();
-                        return await RecordDailyAsync(database, result, acceptance).ConfigureAwait(false);
-                    }, progress, token).ConfigureAwait(false);
+                        return await RecordDailyAsync(database, result, acceptance, childBatchId).ConfigureAwait(false);
+                    }, progress, token, actionId: childBatchId, stopOnFailure: stopOnFailure).ConfigureAwait(false);
             }
             catch
             {
@@ -141,7 +152,8 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
         }
     }
 
-    internal static async Task<BatchTaskResult> RecordDailyAsync(LocalDatabase database, BetterGiDailyAcceptanceResult result, bool acceptance)
+    internal static async Task<BatchTaskResult> RecordDailyAsync(LocalDatabase database, BetterGiDailyAcceptanceResult result,
+        bool acceptance, Guid? childBatchId = null)
     {
         var cleanup = result.Restored ? result.Cleanup : CleanupState.Unconfirmed;
         var clean = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;
@@ -167,7 +179,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             detail += " 已保留与本次引擎进程匹配的日志证据。";
         var at = DateTimeOffset.UtcNow;
         var rule = acceptance ? BetterGiContract.PinnedTag + "/acceptance" : BetterGiContract.PinnedTag;
-        await database.PublishAsync(new(result.RunId, result.RunId, GameId.Genshin, rule,
+        await database.PublishAsync(new(result.RunId, childBatchId ?? result.RunId, GameId.Genshin, rule,
             IsSimulation: false, RunPhase.Finished, outcome, cleanup, reason, at), CancellationToken.None).ConfigureAwait(false);
         await database.AppendEventsAsync([new(result.RunId, at, RunEventKind.Progress, detail + " 运行报告 " + result.ReportPath)],
             CancellationToken.None)

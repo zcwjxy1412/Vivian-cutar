@@ -7,6 +7,18 @@ namespace VIvian.Tests.Engines.OneDragon;
 
 public sealed class OneDragonHandoffLifecycleTests
 {
+    [Fact]
+    public async Task FailedRunRegistrationPreventsJournalAndEngineStart()
+    {
+        await using var fixture = new OneDragonFixture();
+        var journal = new InMemoryJournal();
+        await Assert.ThrowsAsync<IOException>(() => OneDragonAccountBatch.RunAsync(journal,
+            fixture.Adapter(OneDragonArguments.OneDragon(instances: [2]).Request), fixture.Supervisor,
+            fixture.Root, Guid.NewGuid(), new(456, 2, ["coffee"], "138****11"), null, default,
+            beforeRun: (_, _) => throw new IOException("registration failed")));
+        Assert.Null(fixture.Supervisor.Group);
+        Assert.Empty(journal.Updates);
+    }
     [Theory]
     [InlineData(true, false, false)]
     [InlineData(true, true, false)]
@@ -42,14 +54,24 @@ public sealed class OneDragonHandoffLifecycleTests
         var journal = new InMemoryJournal();
         using var cancel = new CancellationTokenSource();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var childBatchId = Guid.NewGuid();
+        Guid? registeredRun = null;
         var batch = OneDragonAccountBatch.RunAsync(journal,
             fixture.Adapter(OneDragonArguments.OneDragon(instances: [2]).Request), fixture.Supervisor,
-            fixture.Root, Guid.NewGuid(), new(456, 2, ["coffee"], "138****11"),
-            message => { if (message.Contains("已接管")) entered.TrySetResult(); }, cancel.Token);
+            fixture.Root, childBatchId, new(456, 2, ["coffee"], "138****11"),
+            message => { if (message.Contains("已接管")) entered.TrySetResult(); }, cancel.Token,
+            beforeRun: (runId, _) =>
+            {
+                Assert.Null(fixture.Supervisor.Group);
+                Assert.Empty(journal.Updates);
+                registeredRun = runId;
+                return Task.CompletedTask;
+            });
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         while (fixture.Supervisor.Group is null) await Task.Delay(10, timeout.Token);
         var group = fixture.Supervisor.Group;
         group.Write($"VIVIAN-ZZZ|{group.RunId:D}|start|5151|2");
+        Assert.Equal(registeredRun, group.RunId);
         await entered.Task.WaitAsync(timeout.Token);
         Assert.True(fixture.Registry.IsBusy(fixture.Root));
         cancel.Cancel();
@@ -60,6 +82,7 @@ public sealed class OneDragonHandoffLifecycleTests
         Assert.True(group.Disposed);
         Assert.False(fixture.Registry.IsBusy(fixture.Root));
         Assert.Equal(CleanupState.Confirmed, journal.Updates.Last().Cleanup);
+        Assert.All(journal.Updates, update => Assert.Equal(childBatchId, update.QueueId));
     }
 
     private sealed class FaultJournal(bool failEvents, bool failTerminal) : IRunJournal

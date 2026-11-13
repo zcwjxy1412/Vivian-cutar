@@ -60,3 +60,59 @@ No blocking findings.
 - 本地 bridge 修复未纳入自动回归测试。
 deepseek-recovered-review-request.json: 6BC5F103D9748720D14871A45F3F32E0C91DFBF3AD79D43DD7F38D66BCD28219
 deepseek-recovered-review-response.json: 88771D5FB4CDED1EEC2CB291877A4F89426FE8F61DE6B05F42055F7DB08E74A4
+
+## 集成冒烟发现后的修复与第2有效轮复审（最新）
+
+总控在合流C/B后运行现有Build.ps1 -SmokeTest发现游戏管理及运行日志页10项文字对比度失败，首审未捕获此问题。因此先前“可交实机”的状态曾暂时退回待修复；不能仅凭首审或1157测试声称集成冒烟通过。
+
+B原样重跑 scripts/Smoke.ps1 得到相同RED：C:/Temp/vivian-smoke-9302cc00070248d39990153da70c3069/contrast-failures.txt。已检查总控及本地screen-1.png、screen-3.png。根因是这两个页面直接使用透明根Grid，而其他普通页面的Page样式已有浅色背景；深色标题透到Stage/场景图，测得1.4–2.2:1。
+
+产品增量5ac4aab9d7043621f6af0fe32ab9fe0df3feb83a：仅MainWindow.xaml两行，为游戏管理及日志页根Grid设置现有不透明Furina.PanelBrush（#F1F6FF）。不改文字颜色、对比度门槛、App注册/代码、脚本、布局尺寸、绑定或行为；背景覆盖发生在对应内容区域，不覆盖子控件独立警告条。
+
+直接冒烟GREEN：C:/Temp/vivian-smoke-98c36f36940c43ef917d9dc5c17e68f0。随后在已提交5ac4aab执行完整 scripts/Build.ps1 -SmokeTest，退出0：
+
+- 默认全量1157/1157，0失败/跳过，构建0警告/错误。
+- 自包含发布版本0.4.0-dev+5ac4aab9d7043621f6af0fe32ab9fe0df3feb83a。
+- 完整冒烟GREEN：C:/Temp/vivian-smoke-a3336e180e87431986a9933371542580；243文字对比度通过，107个非纯色背景未自动检查（不能称全界面对比度全覆盖）。模拟队列3/3、紧急停止196ms、关闭停止通过，最差UI响应32ms。
+- ZIP SHA256：5de653f4c0ccd3099f5fc12988eed88044f69347d61809ad3930f201d01d50da。本工作树artifacts/VIvian-win-x64.zip只为开发验证包，没有替换正式安装。
+- 此次运行现有隔离数据的模拟WPF冒烟；没有启动真实游戏。最新M5全量未重复跑，两行纯XAML不含条件构建逻辑，之前M5结果仍属于040408c，不能冒充最新提交证据。
+
+第2有效轮/唯一复审：deepseek-v4-pro，thinking disabled，目标5ac4aab，累计B实际改动+最终两行差异+RED/GREEN和未改检查器上下文；18545 prompt/589 completion，finish_reason=stop、reasoning_tokens=0，约14秒返回。结论：两行修复有效、未发现具体回归，可在特定验收范围内放行。已核实源码、截图和脚本未修改，接受该结论；非纯色背景人工检查、真实DPI/多屏与游戏前台仍待总控，不能扩张为发布验收通过。有效首审+复审共2轮已用完，不再调用第3有效轮。
+
+本轮原始请求/返回位于artifacts/tests-b/deepseek-second-valid-request.json与response.json；完整构建日志contrast-build-smoke.log；直接RED/GREEN日志contrast-red-smoke.log、contrast-green-smoke.log。下面附复审原文和哈希。
+DeepSeekHelper review
+Model: deepseek-v4-pro
+Selection: explicit tool argument
+Model profile: stronger reasoning, suitable for review, verification, and higher-risk decisions
+Thinking: disabled
+Thinking selection: explicit tool argument
+Finish reason: stop
+Reasoning tokens: 0
+Tokens: prompt 18545, completion 589, total 19134
+Cache: hit 0, miss 18545
+Estimated cost: $0.008580
+
+## 审核结论（中文）
+
+**两行修复有效，已通过实际烟测，未发现具体回归；可在特定验收范围内放行。**
+
+### 根因验证
+- 烟测 RED 中十条失败全部为游戏管理页与运行日志页文字绘制在 `#FF101E4A`（Stage 背景）上。
+- 两行 diff 分别给两个页面的根 `Grid` 增加 `Background="{StaticResource Furina.PanelBrush}"`，直接替换文本实际背景，与 RED 中测量的背景色和失败文本位置完全对应。
+- GREEN 显示同一 `ContrastAudit` 对 243 个文本元素通过，未改动检查器、阈值或文本颜色——不是绕过检查。
+
+### 具体回归风险检查
+1. **无交互或绑定变更**：两行只增加 `Background` 属性，未覆盖任何依赖属性绑定；`Grid` 上无输入绑定、命中测试或模板改动。
+2. **层叠遮挡**：两处修改的 `Grid` 内已有子控件（Star Rail/Genshin 配置面板、日志列表、模拟队列）都自带 `Panel`/`Surface` 背景，新背景只影响原先透出 Stage 的空隙区域。没有发现依赖透明背景的装饰元素被遮蔽。
+3. **日志页 Danger 提示**：`RunLogTab` 的 `Background` 在外层 Grid，内部 `DangerBack` 条带带独立背景，未被覆盖。
+4. **测试夹具**：新 `FurinaWindowLayoutTests` 覆盖宽/窄布局、输入锁定/重入、快速指令展开后发送按钮与聊天视口最小可读高度；对两行修复无冲突。
+5. **DeepSeekHelper 修复**：`extra_body.thinking` 移至顶层 `thinking`，并补充 `finishReason`/`reasoningTokens`，逻辑独立于产品代码，不影响本次 UI 修复。
+
+### 剩余不确定性（非阻塞）
+- **107 个非纯色背景文本未做对比度检查**（烟测明示跳过）。其中可能包含动态图片/半透明叠加上的文字，需人工截图复核。
+- **烟测是模拟渲染**，不等于真实多 DPI、多显示器、Windows 版本下的显示效果。
+- 两处修复为不透明纯色背景，在**未来**主题切换为渐变或半透明背景时可能再次出现对比度问题；当前 `Furina.PanelBrush` 为不透明 SolidColorBrush，故本次成立。
+
+**总体判断**：修复针对根因、最小化、可验证；允许放行，建议在真实桌面环境对游戏管理页与运行日志页做一次人工视觉抽查作为收官确认。
+deepseek-second-valid-request.json: 8E1629B7F183C02AC20860733AB92293B5F65F18ECEB9B46288B5B53D584D7CC
+deepseek-second-valid-response.json: 218078AF999CD6755B4F14F6ED9412527EF4EA198CC54D97E7A4B6A0C34E9564

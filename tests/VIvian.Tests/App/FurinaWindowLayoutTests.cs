@@ -111,6 +111,14 @@ public sealed class FurinaWindowLayoutTests
             Render((FrameworkElement)assistant.Content, 360, 460, Path.Combine(output, "assistant-settings-360x460.png"));
             var inputBounds = input.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(input.RenderSize));
             Assert.True(inputBounds.Bottom <= 460 && inputBounds.Top >= 0, $"Input clipped: {inputBounds}");
+            vm.Assistant.ToggleSettingsCommand.Execute(null);
+            FlushBindings();
+            ((Expander)assistant.FindName("QuickCommandsExpander")).IsExpanded = true;
+            Render((FrameworkElement)assistant.Content, 360, 460, Path.Combine(output, "assistant-quick-expanded-360x460.png"));
+            Assert.True(((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight >= 22, $"Expanded quick commands leave no readable message line: {((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight}.");
+            var send = (Button)assistant.FindName("SendButton");
+            var sendBounds = send.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(send.RenderSize));
+            Assert.True(sendBounds.Bottom <= 452, $"Expanded quick commands hide Send: {sendBounds}");
             Assert.NotNull(input.Template.FindName("PART_ContentHost", input));
             Assert.True(input.AcceptsReturn);
             Assert.True(input.MaxHeight < double.PositiveInfinity);

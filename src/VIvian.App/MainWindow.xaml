@@ -247,7 +247,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </Grid></TabItem>
 
 <!-- ============ 游戏管理 ============ -->
-<TabItem Header="游戏管理" Tag="&#xE7FC;"><Grid Margin="34,22,34,10">
+<TabItem Header="游戏管理" Tag="&#xE7FC;"><Grid Margin="34,22,34,10" Background="{StaticResource Furina.PanelBrush}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="游戏管理" Style="{StaticResource H1}"/><TextBlock Text="ゲーム" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="选择游戏和账号，查看任务计划及可用的源配置。" Style="{StaticResource Lead}" Margin="0,4,0,12"/></StackPanel>
@@ -507,7 +507,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </TabControl>
 </StackPanel></ScrollViewer></TabItem>
 <!-- ============ 运行日志 ============ -->
-<TabItem x:Name="RunLogTab" Header="运行日志" Tag="&#xE9D2;"><Grid Margin="40,34,40,20" DataContext="{Binding Queue}">
+<TabItem x:Name="RunLogTab" Header="运行日志" Tag="&#xE9D2;"><Grid Margin="40,34,40,20" Background="{StaticResource Furina.PanelBrush}" DataContext="{Binding Queue}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="运行日志" Style="{StaticResource H1}"/><TextBlock Text="きろく" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，VIvian 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>

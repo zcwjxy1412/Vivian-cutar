@@ -136,3 +136,11 @@
 DeepSeek独立审查阻塞已解除。确认本机桥接将thinking错误嵌套进extra_body，导致disabled未生效；同模型对照已复现，修复根级参数并验证后，针对edf6fdd（产品040408c）完整累计改动的首次有效补审约11秒返回 `No blocking findings.`、stop、0 reasoning tokens。无新增产品修改，无需修复复审。此前两次600秒超时不追记为通过。
 
 默认/M5产品验证仍各1157/1157。详细诊断、独立审查原文和核实边界见 [furina-b-deepseek-recovery.md](furina-b-deepseek-recovery.md)。此后提交仅增加审查记录，产品代码与已审目标一致。交总控串行安排实机；PR保持草稿，未部署/未启动游戏。
+
+### 集成对比度修复及复审交付（覆盖此前状态）
+
+总控集成冒烟发现10项对比度失败后，B在原有Smoke.ps1复现RED，查明游戏/日志页透明根Grid导致深字落深底。增量5ac4aab仅给两页根Grid设置Furina.PanelBrush，不改App/脚本/阈值/文字颜色。已检查修复前后截图。
+
+在5ac4aab执行完整Build.ps1 -SmokeTest退出0：默认1157/1157，自包含发布、模拟WPF冒烟通过，243文字对比度通过；107非纯色背景仍未自动检查。最终证据C:/Temp/vivian-smoke-a3336e180e87431986a9933371542580，版本0.4.0-dev+5ac4aab9d7043621f6af0fe32ab9fe0df3feb83a。开发验证包未安装，未启动真实游戏。
+
+DeepSeek第2有效轮复审通过（stop、0reasoning tokens），无具体回归；有效2轮额度已用完。完整原文、源码核实和证据哈希见furina-b-deepseek-recovery.md。交总控合流后重新执行集成检查，再串行安排真实DPI/多屏/焦点/输入法及关闭时序验收；不能把模拟冒烟替代实机。此次文档提交不改变已审产品代码。

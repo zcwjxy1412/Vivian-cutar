@@ -8,6 +8,102 @@ namespace VIvian.Tests.Engines.OneDragon;
 public sealed class OneDragonHandoffLifecycleTests
 {
     [Theory]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(true, true, true)]
+    [InlineData(false, true, true)]
+    public async Task EventAndTerminalJournalFailuresDoNotHideTheFirstError(bool failEvents, bool failDispose, bool failTerminal)
+    {
+        await using var fixture = new OneDragonFixture();
+        var journal = new FaultJournal(failEvents, failTerminal);
+        var batch = OneDragonAccountBatch.RunAsync(journal,
+            fixture.Adapter(OneDragonArguments.OneDragon(instances: [2]).Request), fixture.Supervisor,
+            fixture.Root, Guid.NewGuid(), new(456, 2, ["coffee"], "138****11"), null, default);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (fixture.Supervisor.Group is null) await Task.Delay(10, timeout.Token);
+        var group = fixture.Supervisor.Group;
+        group.FailDispose = failDispose;
+        var prefix = $"VIVIAN-ZZZ|{group.RunId:D}|";
+        group.Write(prefix + "start|5151|2", prefix + "entered", prefix + "task_start|coffee",
+            prefix + "task|coffee|success", prefix + "end|success");
+        group.Exit(0);
+        var error = await Record.ExceptionAsync(() => batch.WaitAsync(timeout.Token));
+        Assert.Equal(failEvents ? "event journal unavailable" : "Synthetic supervisor disposal failure", error?.Message);
+        Assert.DoesNotContain(journal.Store.Updates, update => update.Cleanup == CleanupState.Confirmed);
+        Assert.Equal(failTerminal ? RunPhase.Running : RunPhase.Blocked, journal.Store.Updates.Last().Phase);
+        // A successfully released job may leave the installation registry, but no clean batch result is returned.
+        Assert.Equal(failDispose, fixture.Registry.IsBusy(fixture.Root));
+    }
+
+    [Fact]
+    public async Task NormalCancellationReturnsOnlyAfterOwnedCleanupAndRelease()
+    {
+        await using var fixture = new OneDragonFixture();
+        var journal = new InMemoryJournal();
+        using var cancel = new CancellationTokenSource();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var batch = OneDragonAccountBatch.RunAsync(journal,
+            fixture.Adapter(OneDragonArguments.OneDragon(instances: [2]).Request), fixture.Supervisor,
+            fixture.Root, Guid.NewGuid(), new(456, 2, ["coffee"], "138****11"),
+            message => { if (message.Contains("已接管")) entered.TrySetResult(); }, cancel.Token);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (fixture.Supervisor.Group is null) await Task.Delay(10, timeout.Token);
+        var group = fixture.Supervisor.Group;
+        group.Write($"VIVIAN-ZZZ|{group.RunId:D}|start|5151|2");
+        await entered.Task.WaitAsync(timeout.Token);
+        Assert.True(fixture.Registry.IsBusy(fixture.Root));
+        cancel.Cancel();
+        var result = await batch.WaitAsync(timeout.Token);
+        Assert.Equal(RunOutcome.Cancelled, result.Outcome);
+        Assert.True(result.CleanupConfirmed);
+        Assert.False(result.Success);
+        Assert.True(group.Disposed);
+        Assert.False(fixture.Registry.IsBusy(fixture.Root));
+        Assert.Equal(CleanupState.Confirmed, journal.Updates.Last().Cleanup);
+    }
+
+    private sealed class FaultJournal(bool failEvents, bool failTerminal) : IRunJournal
+    {
+        public InMemoryJournal Store { get; } = new();
+        public Task PublishAsync(RunUpdate update, CancellationToken ct) =>
+            failTerminal && update.Phase == RunPhase.Blocked
+                ? Task.FromException(new InvalidOperationException("terminal journal unavailable"))
+                : Store.PublishAsync(update, ct);
+        public Task AppendEventsAsync(IReadOnlyList<RunEvent> events, CancellationToken ct) =>
+            failEvents ? Task.FromException(new InvalidDataException("event journal unavailable"))
+                : Store.AppendEventsAsync(events, ct);
+        public Task<int> CountUnresolvedAsync(CancellationToken ct) => Store.CountUnresolvedAsync(ct);
+    }
+
+    [Fact]
+    public async Task EarlierFailureSurvivesDisposalFailureAndRecordsUnconfirmedCleanup()
+    {
+        await using var fixture = new OneDragonFixture();
+        var journal = new InMemoryJournal { FailOnPhase = RunPhase.Running };
+        var supervisor = new FailingDisposalSupervisor();
+        var batch = OneDragonAccountBatch.RunAsync(journal,
+            fixture.Adapter(OneDragonArguments.OneDragon(instances: [2]).Request), supervisor,
+            fixture.Root, Guid.NewGuid(), new(456, 2, ["coffee"], "138****11"), null, default);
+        var error = await Assert.ThrowsAsync<IOException>(() => batch.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("journal unavailable", error.Message);
+        var last = journal.Updates.Last();
+        Assert.Equal(RunPhase.Blocked, last.Phase);
+        Assert.Equal(CleanupState.Unconfirmed, last.Cleanup);
+        Assert.Equal(RunOutcome.Indeterminate, last.Outcome);
+        Assert.True(fixture.Registry.IsBusy(fixture.Root));
+    }
+
+    private sealed class FailingDisposalSupervisor : IProcessSupervisor
+    {
+        public Task<ISupervisedProcessGroup> StartAsync(ProcessLaunchSpec spec, Guid runId, CancellationToken ct)
+        {
+            var group = new FakeLauncherGroup(runId) { FailDispose = true };
+            group.Exit(1);
+            return Task.FromResult<ISupervisedProcessGroup>(group);
+        }
+    }
+
+    [Theory]
     [InlineData("owned", RunOutcome.Success, true)]
     [InlineData("foreign_run", RunOutcome.Indeterminate, false)]
     [InlineData("foreign_pid", RunOutcome.Indeterminate, false)]

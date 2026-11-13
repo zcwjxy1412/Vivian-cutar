@@ -119,15 +119,17 @@ public static class OneDragonAccountBatch
         }
         catch (EngineStartException ex)
         {
-            var cleanup = ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed;
-            await Update(RunPhase.Blocked, RunOutcome.Indeterminate, cleanup, ex.ReasonCode).ConfigureAwait(false);
+            var startCleanup = ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed;
+            await Update(RunPhase.Blocked, RunOutcome.Indeterminate, startCleanup, ex.ReasonCode).ConfigureAwait(false);
             return new(context.RunId, false, ex.NothingStarted, true, ex.Message, RunOutcome.Indeterminate);
         }
 
-        await using (run.ConfigureAwait(false))
+        var events = ReadEventsAsync();
+        RunVerdict verdict = new(RunOutcome.Indeterminate, ReasonCodes.NoCompletionEvidence, []);
+        var cleanup = CleanupState.Unconfirmed;
+        Exception? failure = null;
+        try
         {
-            var events = ReadEventsAsync();
-            RunVerdict verdict;
             try
             {
                 await Update(RunPhase.Running, null, CleanupState.Pending, null).ConfigureAwait(false);
@@ -141,34 +143,48 @@ public static class OneDragonAccountBatch
                 catch (OperationCanceledException) { }
                 verdict = new(RunOutcome.Cancelled, ReasonCodes.UserStop, []);
             }
-            var cleanup = await run.ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
+            cleanup = await run.ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
             await events.WaitAsync(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
-            // Final resource release can still fail after reconciliation; do not publish a clean handoff early.
-            try { await run.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception)
+        }
+        catch (Exception ex) { failure = ex; }
+
+        // Release once on every path, retaining the original error if release also fails.
+        try { await run.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception ex) { failure ??= ex; }
+        if (failure is not null)
+        {
+            _ = ObserveEventsAsync();
+            try
             {
                 await Update(RunPhase.Blocked, verdict.Outcome, CleanupState.Unconfirmed,
                     ReasonCodes.CleanupUnconfirmed).ConfigureAwait(false);
-                throw;
             }
-            var clean = cleanup == CleanupState.Confirmed;
-            await Update(clean ? RunPhase.Finished : RunPhase.Blocked, verdict.Outcome, cleanup, verdict.ReasonCode).ConfigureAwait(false);
-            var detail = verdict.Outcome switch
-            {
-                RunOutcome.Success => "OneDragon 已确认此账号的任务均已完成，含按源项目记录跳过的任务。",
-                RunOutcome.Failed => "OneDragon 报告执行失败，详情见运行日志。",
-                RunOutcome.Cancelled => "用户停止了 OneDragon。",
-                _ => "OneDragon 未报告此账号的全部任务完成，请查看运行日志。",
-            };
-            return new(context.RunId, verdict.Outcome == RunOutcome.Success, clean, true, detail, verdict.Outcome);
+            catch (Exception) { /* Persistence may be the original fault; the desktop marker remains dirty. */ }
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+        var clean = cleanup == CleanupState.Confirmed;
+        await Update(clean ? RunPhase.Finished : RunPhase.Blocked, verdict.Outcome, cleanup, verdict.ReasonCode).ConfigureAwait(false);
+        var detail = verdict.Outcome switch
+        {
+            RunOutcome.Success => "OneDragon 已确认此账号的任务均已完成，含按源项目记录跳过的任务。",
+            RunOutcome.Failed => "OneDragon 报告执行失败，详情见运行日志。",
+            RunOutcome.Cancelled => "用户停止了 OneDragon。",
+            _ => "OneDragon 未报告此账号的全部任务完成，请查看运行日志。",
+        };
+        return new(context.RunId, verdict.Outcome == RunOutcome.Success, clean, true, detail, verdict.Outcome);
 
-            async Task ReadEventsAsync()
+        async Task ObserveEventsAsync()
+        {
+            try { await events.ConfigureAwait(false); }
+            catch (Exception) { /* Observe a late journal failure without replacing the first error. */ }
+        }
+
+        async Task ReadEventsAsync()
+        {
+            await foreach (var entry in run.Events.ConfigureAwait(false))
             {
-                await foreach (var entry in run.Events.ConfigureAwait(false))
-                {
-                    await journal.AppendEventsAsync([entry], CancellationToken.None).ConfigureAwait(false);
-                    if (entry.Kind == RunEventKind.Progress) progress?.Invoke(entry.Message);
-                }
+                await journal.AppendEventsAsync([entry], CancellationToken.None).ConfigureAwait(false);
+                if (entry.Kind == RunEventKind.Progress) progress?.Invoke(entry.Message);
             }
         }
     }

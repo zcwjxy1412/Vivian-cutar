@@ -20,7 +20,7 @@
 
 1. `OneDragonRun.DisposeAsync` 保留 Unconfirmed、通过 finally 通知 registry，并向调用方传播释放异常。
 2. `OneDragonAccountBatch.RunAsync` 在发布最终清理状态前显式等待 Dispose；失败则记录 Blocked/Unconfirmed、保留已有业务 Outcome 并重抛，不能返回 clean。外层 `handoffClean` 在调用前已置 false，因而不会清除桌面标记。
-3. 原有 `await using` 仍保证其他异常路径释放；第二次 Dispose 由现有 `_disposed` 门短路。未添加新运行入口；单轮执行 helper 由 private 改为 internal 供同程序集契约测试调用，不扩展 public API。
+3. 首审后改为单一释放路径：先保存执行/事件异常，再始终释放一次；双重失败保留首个错误及原始堆栈，尽力写入 Blocked/Unconfirmed。终态日志再失败也不能覆盖首个错误，桌面 marker 留存；迟到事件任务的异常被观察。未添加新运行入口；单轮执行 helper 由 private 改为 internal 供同程序集契约测试调用，不扩展 public API。
 
 ## 本轮证据与能力边界
 
@@ -55,7 +55,18 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M5DailyTestBuil
 - M5 全量：1122/1122，通过，0 失败、0 跳过。默认/M5 各约 1 分 9 秒。
 - `git diff --check` 通过；公共 Core/App、安装脚本、HandoffEvidence 和 Python 桥相对 T0 无差异；ce3ebee 仍在祖先链。
 - 普通只读改动检查：未发现重要遗留问题；已检查释放时序、重复 Dispose 门和测试边界。不是 DeepSeek。
-- DeepSeek：本聊天仍未提供 `deepseek_review`，**blocked，0 轮**；总控已告知另行安排真实审查，不能提前标通过。
+- DeepSeek：总控随后提供已验证的本地调用入口，本聊天已完成真实首审；详见下节，替代原先工具不可用的记录。
+
+## DeepSeek 首审与修复复审
+
+- 工具：本机 `deepseekhelper-launcher/call-tool.mjs deepseek_review`，通过已授权 DPAPI 启动链调用，未读取密钥；模型 `deepseek-v4-pro`，thinking `disabled`。
+- 首次参数校验被拒（severity_style 枚举应为 ranked）；未进入模型审查，不计有效轮次。修正后有效首审 1 次，响应 `artifacts/deepseek-e/response-1.json`，SHA256 `16A80012A844E5F20B628A6925C453E27987C54C7CEBFB1FD6CEA8AC590FC70E`。
+- 首审 Medium：隐式 await using 释放异常会覆盖更早的执行/事件错误，且不记录 Blocked/Unconfirmed。已核实并复现：`EarlierFailureSurvivesDisposalFailureAndRecordsUnconfirmedCleanup` 原行为收到 Synthetic supervisor disposal failure 而不是 journal unavailable，RED 见 `e-review-red.trx`；改为单路径释放后通过。
+- 首审 Low：重复 Dispose；已随单路径释放消除。Low：缺少双故障测试及仍为模拟；补充正常取消、事件写入失败、事件+释放双故障、终态记录也失败的组合，实机限制继续保留。
+- 审查修复中一次编译发现局部 cleanup 重名，改名 startCleanup 后通过，未改变启动失败语义。
+- 安全边界：释放异常保留安装 registry busy；事件日志失败但资源已真实确认释放时 registry 可在 Dispose 后释放，批次仍抛异常而非返回 clean，外层桌面标记保留。不能把安装句柄已释放与桌面恢复已解除混为一谈。
+- 修复后默认/M5 全量：各 1128/1128，0 失败、0 跳过，TRX 为 `e-review-default.trx` / `e-review-m5.trx`。本次在首批 8 个用例外新增 6 个组合用例。
+- 唯一修复复审已提交，等待有效响应；有效完成轮次当前 1，不提前标通过。
 
 ## 交总控与后续
 

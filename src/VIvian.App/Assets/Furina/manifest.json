@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "Native image generation; reference artwork, not application screenshots",
   "generatedOn": "2026-11-13",
   "assets": [
@@ -23,24 +23,24 @@
       "file": "game-genshin.png",
       "width": 2172,
       "height": 724,
-      "bytes": 2229004,
-      "sha256": "d6fe37d6909f6240c4687265d0717ed973f7fdc8da0b4c7ed619c721bc33ad92",
+      "bytes": 2261289,
+      "sha256": "e4008e8bb6d68816e3ba61aef8397fba4f7ae6d1ac9b3e4317c5b68a0f6f5a30",
       "transparent": false
     },
     {
       "file": "game-hsr.png",
       "width": 2172,
       "height": 724,
-      "bytes": 2301873,
-      "sha256": "86b9dd7fedcb59e939114ab1fc1592b092a8f355c56fb5806091617a2baaccfc",
+      "bytes": 2262280,
+      "sha256": "90162be76300cd2126373cdae91b985013f0e0292406185f4eebd67bbb2b817e",
       "transparent": false
     },
     {
       "file": "game-zzz.png",
       "width": 2172,
       "height": 724,
-      "bytes": 1975106,
-      "sha256": "c4f1dc69d427306b03694c529deccfe31d78016cb15fabfdde003ab1b96e1e58",
+      "bytes": 1880559,
+      "sha256": "9f96211262ca05d806c7cb4fde336b5b6e92454334ff3f52d0a3901da18f464b",
       "transparent": false
     },
     {

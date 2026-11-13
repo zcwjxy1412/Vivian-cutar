@@ -66,7 +66,10 @@ dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release -p:M5DailyTestBuil
 - 审查修复中一次编译发现局部 cleanup 重名，改名 startCleanup 后通过，未改变启动失败语义。
 - 安全边界：释放异常保留安装 registry busy；事件日志失败但资源已真实确认释放时 registry 可在 Dispose 后释放，批次仍抛异常而非返回 clean，外层桌面标记保留。不能把安装句柄已释放与桌面恢复已解除混为一谈。
 - 修复后默认/M5 全量：各 1128/1128，0 失败、0 跳过，TRX 为 `e-review-default.trx` / `e-review-m5.trx`。本次在首批 8 个用例外新增 6 个组合用例。
-- 唯一修复复审已提交，等待有效响应；有效完成轮次当前 1，不提前标通过。
+- 有效审查完成 2 轮（首审+唯一修复复审），不再调用第三轮。复审响应 `artifacts/deepseek-e/response-2.json`，SHA256 `B5287B37A15BE15B5E102689BD521A09830E71D03F31E0F7D9B04948EF4E609C`。模型确认目标 Medium 已解决，无新增 High；保留以下残余，不称零问题/全部独立审查通过。
+- 复审 Medium：EngineStartException 分支写终态失败会遮蔽启动诊断。核实为 T0 已有代码（git show 8f857cf 对照），此次仅局部变量改名；日志错误仍抛出，`handoffClean=false`、桌面 marker 不释放，无错误成功/后续启动。作为非本次回归的诊断残余交总控，尚未修复，不伪称不存在。
+- 复审 Low：建议 await ObserveEventsAsync。未采纳无界等待：events 可能正因日志写入挂起而超过既有 8 秒期限，再 await 会重新无限卡住。当前旁路只观察迟到异常，不操作桌面/启动进程；批次已阻断且 marker 保留。残余为可能存活的日志任务，后续统一执行层需要有界 journal 设计。
+- E 结论：目标修复已被真实复审核实，本地双构建各 1128 通过；两轮审查仍有已确认的既有诊断残余，整体独立审查不能标为无剩余问题。总控决定合流条件，F 不重复审查。
 
 ## 交总控与后续
 

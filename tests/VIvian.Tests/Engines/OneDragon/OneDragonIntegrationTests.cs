@@ -58,6 +58,30 @@ public sealed class OneDragonIntegrationTests
         Assert.Equal(490, account.Y);
     }
 
+    [Fact]
+    public async Task ClosedAccountCardRereadsSplitPrefixAndSuffixWhenTheWideCropMissesTheSuffix()
+    {
+        var frame = new VIvian.Infrastructure.Accounts.CapturedFrame(new byte[1920 * 1080 * 4], 1920, 1080, "");
+        var accounts = await ZenlessAccountImport.ReadHeaderAsync(frame, [], default, (crop, _) =>
+        {
+            VIvian.Core.Accounts.RecognizedText[] lines;
+            if (crop.Width == 294)
+                lines = [new("139", 18, 17, 47, 22)];
+            else
+            {
+                Assert.Equal(392, crop.Width);
+                Assert.Equal(104, crop.Height);
+                lines = [new("139", 22, 38, 94, 44), new("22", 264, 38, 54, 44)];
+            }
+            return Task.FromResult(new VIvian.Infrastructure.Accounts.OcrReadResult(true, null, lines));
+        });
+        var account = Assert.Single(accounts);
+        Assert.Equal("139****22", account.NormalizedPhone);
+        Assert.Equal(739, account.X);
+        Assert.Equal(494, account.Y);
+        Assert.Equal(22, account.Height);
+    }
+
     [Theory]
     [InlineData("进 入 游 戏", true)]
     [InlineData("入 游 戏", true)]

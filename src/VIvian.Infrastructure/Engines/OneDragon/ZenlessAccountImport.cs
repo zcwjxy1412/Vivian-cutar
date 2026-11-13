@@ -157,15 +157,31 @@ public static class ZenlessAccountImport
         var accounts = await ReadMaskedRowsAsync(frame, lines, header, ct, readPhone).ConfigureAwait(false);
         if (accounts.Count > 0) return accounts;
 
-        // An entire phone line can be missing from full-window OCR. Reread the isolated phone on the verified card.
-        var phone = ScaleBox(frame.Width, frame.Height, 721, 477, 294, 46);
-        var x = (int)phone.X;
-        var y = (int)phone.Y;
-        var crop = frame.Crop(x, y, (int)phone.Width, (int)phone.Height);
-        var read = await readPhone(crop, ct).ConfigureAwait(false);
-        return read.Available && MaskedPhoneParser.FindAll(read.Lines) is [{ } found]
-            ? [found with { X = found.X + x, Y = found.Y + y }]
-            : [];
+        // The wider crop can miss the suffix even when the prefix is clear. At double size the tighter
+        // crop can return two separate digit groups on the same row for MaskedPhoneParser to verify.
+        var wide = await ReadCardPhoneAsync(721, 477, 294, 46, scale: 1).ConfigureAwait(false);
+        return wide.Count == 0
+            ? await ReadCardPhoneAsync(728, 475, 196, 52, scale: 2).ConfigureAwait(false)
+            : wide;
+
+        async Task<IReadOnlyList<LoginAccountObservation>> ReadCardPhoneAsync(
+            int x, int y, int width, int height, int scale)
+        {
+            var phone = ScaleBox(frame.Width, frame.Height, x, y, width, height);
+            var left = (int)phone.X;
+            var top = (int)phone.Y;
+            var crop = frame.Crop(left, top, (int)phone.Width, (int)phone.Height).Scale(scale);
+            var read = await readPhone(crop, ct).ConfigureAwait(false);
+            return read.Available
+                ? MaskedPhoneParser.FindAll(read.Lines).Select(found => found with
+                {
+                    X = found.X / scale + left,
+                    Y = found.Y / scale + top,
+                    Width = found.Width / scale,
+                    Height = found.Height / scale,
+                }).ToArray()
+                : [];
+        }
     }
 
     internal static Task<IReadOnlyList<LoginAccountObservation>> ReadExpandedRowsAsync(CapturedFrame frame,

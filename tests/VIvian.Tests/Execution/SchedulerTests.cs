@@ -43,6 +43,17 @@ public sealed class SchedulerTests
     private static QueueItem Item(ScriptedAdapter a, RunLimits? limits = null) => new(a.Game, a, limits);
 
     [Fact]
+    public async Task HostReservedRunIdIsUsedByAdapterAndReceipt()
+    {
+        var runId = Guid.NewGuid();
+        var adapter = Adapter(GameId.StarRail, EndsWith(EvidenceKind.CompletionReported));
+        var result = await NewScheduler().RunAsync([new QueueItem(GameId.StarRail, adapter, runId: runId)]);
+        Assert.Equal(runId, Assert.Single(result.Runs).RunId);
+        Assert.Equal(RunOutcome.Success, result.Runs[0].Outcome);
+        Assert.Throws<ArgumentException>(() => new QueueItem(GameId.StarRail, adapter, runId: Guid.Empty));
+    }
+
+    [Fact]
     public async Task AllGamesWithCompletionEvidenceSucceedInOrder()
     {
         var adapters = new[] { GameId.Genshin, GameId.StarRail, GameId.ZenlessZoneZero }

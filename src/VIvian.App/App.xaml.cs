@@ -235,6 +235,8 @@ public partial class App : Application
                 await database.SaveLoginProfileAsync(recognized.Id, "130******00", "130****00", 0, .9, null, "测试数据");
             }
             await Task.Run(() => database.ReconcileInterruptedBatchesAsync());
+            var interruptedPlans = await Task.Run(() => database.InterruptUnfinishedAsync());
+            if (interruptedPlans > 0) Log.Warning("Interrupted {Count} durable plans; no automatic replay", interruptedPlans);
             // Log retention follows the user's preference; only VIvian's own log files are considered.
             var prefs = await Task.Run(() => database.LoadPreferencesAsync());
             var pruned = await Task.Run(() => VIvian.Infrastructure.Diagnostics.LogMaintenance.Prune(

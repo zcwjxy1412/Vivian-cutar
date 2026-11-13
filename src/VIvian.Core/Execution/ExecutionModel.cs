@@ -80,15 +80,18 @@ public sealed record RunUpdate(
 
 public sealed record QueueItem
 {
-    public QueueItem(GameId game, IGameAdapter adapter, RunLimits? limits = null)
+    public QueueItem(GameId game, IGameAdapter adapter, RunLimits? limits = null, Guid? runId = null)
     {
         ArgumentNullException.ThrowIfNull(adapter);
         if (adapter.Game != game) throw new ArgumentException("适配器与队列中的游戏不一致。", nameof(adapter));
-        (Game, Adapter, Limits) = (game, adapter, limits);
+        if (runId == Guid.Empty) throw new ArgumentException("运行编号不能为空。", nameof(runId));
+        (Game, Adapter, Limits, RunId) = (game, adapter, limits, runId);
     }
     public GameId Game { get; }
     public IGameAdapter Adapter { get; }
     public RunLimits? Limits { get; }
+    /// <summary>Reserved by the host before temporary configuration, to persist exact plan association.</summary>
+    public Guid? RunId { get; }
 }
 
 public sealed record QueueResult(Guid QueueId, QueueStatus Status, IReadOnlyList<RunUpdate> Runs,

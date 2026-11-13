@@ -204,6 +204,9 @@ public sealed class QueueScheduler(
         ArgumentNullException.ThrowIfNull(items);
         if (items.Select(i => i.Game).Distinct().Count() != items.Count)
             throw new ArgumentException("每款游戏在一个队列中只能出现一次。", nameof(items));
+        var reservedIds = items.Where(i => i.RunId.HasValue).Select(i => i.RunId!.Value).ToArray();
+        if (reservedIds.Distinct().Count() != reservedIds.Length)
+            throw new ArgumentException("运行编号不能重复。", nameof(items));
         if (Interlocked.CompareExchange(ref _running, 1, 0) == 1)
             throw new InvalidOperationException("已有队列在运行。");
         try
@@ -291,7 +294,7 @@ public sealed class QueueScheduler(
         Func<bool> stopRequested)
     {
         private readonly RunStateMachine _sm = new();
-        private readonly Guid _runId = Guid.NewGuid();
+        private readonly Guid _runId = item.RunId ?? Guid.NewGuid();
         private RunProcessScope? _processScope;
         private long _lastActivity;
         private bool _lastPublishSucceeded;

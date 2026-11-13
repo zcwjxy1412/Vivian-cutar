@@ -132,8 +132,8 @@ public sealed class QueueViewModel : ObservableObject
     }
 
     /// <summary>Explicit, one-item user action only. Never called from saved plans or a timer.</summary>
-    public Task<QueueResult?> RunMarch7thAsync(IGameAdapter adapter) => RunItemsAsync(
-        [new QueueItem(GameId.StarRail, adapter, new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)))],
+    public Task<QueueResult?> RunMarch7thAsync(IGameAdapter adapter, Guid? runId = null) => RunItemsAsync(
+        [new QueueItem(GameId.StarRail, adapter, new RunLimits(TimeSpan.FromMinutes(60), TimeSpan.FromMinutes(10)), runId)],
         simulation: false);
 
     private async Task<QueueResult?> RunItemsAsync(IReadOnlyList<QueueItem> items, bool simulation)

@@ -12,7 +12,7 @@ namespace VIvian.App;
 /// changes for this one run; VIvian restores them afterwards.</param>
 public sealed record RealTaskAuthorization(string InstallDirectory, March7thReleaseEvidence Release,
     Func<bool> StillConfirmed, bool InstallationVerified, bool AllowTemporaryConfiguration = false,
-    IReadOnlyDictionary<string, string>? AccountSettings = null);
+    IReadOnlyDictionary<string, string>? AccountSettings = null, Func<Guid, Task>? BeforeRun = null);
 
 /// <summary>Queue result plus what happened to temporary configuration (null when nothing was changed).</summary>
 public sealed record TaskPlanExecution(QueueResult? Queue, RestoreResult? Restore);
@@ -88,6 +88,9 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
         if (changes.Count > 0 && !authorization.AllowTemporaryConfiguration)
             throw new InvalidOperationException("本任务需要临时修改：" + TemporaryConfigurationManager.Describe(changes, config) +
                 "。请勾选“允许本次临时修改”后再开始。");
+        var runId = Guid.NewGuid();
+        if (authorization.BeforeRun is not null) await authorization.BeforeRun(runId);
+        if (!authorization.StillConfirmed()) throw new OperationCanceledException("任务已停止，未应用临时配置。");
         desktop.MarkDirty();
         if (changes.Count > 0) _temporary.Apply(config, changes, authorization.InstallDirectory, task);
         QueueResult? result;
@@ -95,7 +98,7 @@ public sealed class UnifiedTaskControl : IUnifiedTaskControl
         {
             var adapter = new March7thAdapter(authorization.InstallDirectory, authorization.Release, task,
                 authorization.StillConfirmed, supervisor, queue.RegisterActiveRun, _circuitOptions);
-            result = await queue.RunMarch7thAsync(adapter);
+            result = await queue.RunMarch7thAsync(adapter, runId);
         }
         catch
         {

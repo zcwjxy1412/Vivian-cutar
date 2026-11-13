@@ -13,7 +13,7 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <local:Mascot Visibility="{Binding FallbackVisibility}"/></Grid></DataTemplate>
 </Window.Resources>
 <local:FurinaPanel Style="{StaticResource Furina.PanelStyle}" Background="#E7EEFF" Padding="0" Margin="8" BorderBrush="{StaticResource Furina.GoldBrush}" BorderThickness="1.5">
-<Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+<Grid SizeChanged="OnContentSizeChanged"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <Border Background="#183477" CornerRadius="17,17,0,0" Padding="12,7" MouseLeftButtonDown="DragHeader">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <local:FurinaOrnament Width="40" Height="44" Margin="0,0,8,0"/>

@@ -64,6 +64,7 @@ public sealed class FurinaWindowLayoutTests
             var vm = new MainViewModel(db, db, db, db, paths, queue, supervisor, accounts,
                 new MultiAccountOrchestrator(db, null!), new GamePathProvider());
             main = new MainWindow(vm);
+            Assert.Equal(4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);
             var home = (FrameworkElement)main.Content;
             foreach (var (width, height) in new[] { (1600, 900), (1280, 800), (1440, 900), (960, 500) })
             {
@@ -73,6 +74,17 @@ public sealed class FurinaWindowLayoutTests
                 Assert.Equal(width < 1500 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
                 var stopBounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
                 Assert.True(stopBounds.Bottom <= height && stopBounds.Right <= width, $"Stop clipped: {stopBounds}");
+                if (width >= 1280)
+                {
+                    var character = (Button)main.FindName("HomeCharacterPanel");
+                    var point = character.TranslatePoint(new Point(character.ActualWidth / 2, character.ActualHeight / 2), home);
+                    DependencyObject? hit = null;
+                    VisualTreeHelper.HitTest(home,
+                        node => node is UIElement { IsHitTestVisible: false } ? HitTestFilterBehavior.ContinueSkipSelfAndChildren : HitTestFilterBehavior.Continue,
+                        result => { hit = result.VisualHit; return HitTestResultBehavior.Stop; }, new PointHitTestParameters(point));
+                    while (hit is not null && hit != character) hit = VisualTreeHelper.GetParent(hit);
+                    Assert.Same(character, hit);
+                }
             }
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
             {
@@ -156,6 +168,7 @@ public sealed class FurinaWindowLayoutTests
             Render((FrameworkElement)assistant.Content, 360, 400, Path.Combine(output, "assistant-small-workarea-360x400.png"));
             var tinySendBounds = send.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(send.RenderSize));
             Assert.True(tinySendBounds.Bottom <= 392, $"Small work area hides Send: {tinySendBounds}");
+            Assert.True(((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight >= 22, "Tiny work area hides every message line.");
             assistant.Close();
             var confirmationGate = new FakeGate();
             var submissions = 0;
@@ -193,7 +206,8 @@ public sealed class FurinaWindowLayoutTests
     private static void AuditOffscreenText(FrameworkElement root)
     {
         // Reuse the owning audit's color resolution/threshold. Only native IsVisible is unavailable without Show.
-        var background = typeof(ContrastAudit).GetMethod("BackgroundBehind", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var background = typeof(ContrastAudit).GetMethod("BackgroundBehind", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(background);
         int checkedCount = 0;
         var pending = new Stack<DependencyObject>(); pending.Push(root);
         while (pending.TryPop(out var item))

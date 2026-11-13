@@ -42,4 +42,18 @@ public sealed class WindowWorkAreaTests
         Assert.Equal(2020, fitted.Left); Assert.Equal(-300, fitted.Top);
         Assert.Equal(540, fitted.Width); Assert.Equal(720, fitted.Height);
     }
+
+    [Theory]
+    [InlineData(-1920)] [InlineData(1920)]
+    public void OwnerPlacementFitsSelectedMonitorBeforeNoOpComparison(double origin)
+    {
+        var work = new Rect(origin, 0, 1920, 1040);
+        var owner = new Rect(origin, 0, 500, 700);
+        var fromOtherMonitor = new Rect(-origin, 80, 460, 720);
+        var fit = WindowWorkArea.FitNearOwner(fromOtherMonitor, owner, work, new Size(360, 460), 1);
+        Assert.True(work.Contains(fit));
+        Assert.NotEqual(fromOtherMonitor, fit);
+        // If the current rect already equals this final result, skipping SetWindowPos is correct.
+        Assert.Equal(fit, WindowWorkArea.FitNearOwner(fit, owner, work, new Size(360, 460), 1));
+    }
 }

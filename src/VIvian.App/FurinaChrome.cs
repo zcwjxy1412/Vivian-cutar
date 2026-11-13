@@ -51,6 +51,12 @@ public class FurinaPlaque : Border
 
 public sealed class FurinaOrnament : FrameworkElement
 {
+    private static readonly Geometry Shape0 = FreezeShape("M 50,8 C 72,0 77,17 68,23 C 78,8 59,12 61,19 C 55,16 52,12 50,8 Z");
+    private static readonly Geometry Shape1 = FreezeShape("M 37,16 L 34,6 L 44,11 L 50,1 L 56,11 L 66,6 L 63,16 Z");
+    private static readonly Geometry Shape2 = FreezeShape("M 18,76 C 12,61 6,39 9,31 C 15,28 28,41 30,66 M 30,66 C 21,36 33,17 42,24 C 49,28 43,51 46,66 M 46,66 L 50,11 L 54,66 M 54,66 C 57,51 51,28 58,24 C 67,17 79,36 70,66 M 70,66 C 72,41 85,28 91,31 C 94,39 88,61 82,76 M 18,76 Q 50,66 82,76 L 78,86 Q 50,78 22,86 Z M 29,91 Q 50,87 71,91");
+    private static readonly Geometry Shape3 = FreezeShape("M 50,35 L 56,47 L 50,59 L 44,47 Z");
+    private static Geometry FreezeShape(string data) { var shape = Geometry.Parse(data); shape.Freeze(); return shape; }
+
     public static readonly DependencyProperty KindProperty = DependencyProperty.Register(nameof(Kind), typeof(string), typeof(FurinaOrnament),
         new FrameworkPropertyMetadata("Crown", FrameworkPropertyMetadataOptions.AffectsRender));
     public string Kind { get => (string)GetValue(KindProperty); set => SetValue(KindProperty, value); }
@@ -69,18 +75,18 @@ public sealed class FurinaOrnament : FrameworkElement
             {
                 dc.PushTransform(new RotateTransform(i * 45, 50, 53));
                 dc.DrawGeometry(new SolidColorBrush(Color.FromArgb(170, 100, 194, 255)), white,
-                    Geometry.Parse("M 50,8 C 72,0 77,17 68,23 C 78,8 59,12 61,19 C 55,16 52,12 50,8 Z"));
+                    Shape0);
                 dc.Pop();
             }
             dc.DrawGeometry(new SolidColorBrush(Color.FromRgb(41, 83, 195)), gold,
-                Geometry.Parse("M 37,16 L 34,6 L 44,11 L 50,1 L 56,11 L 66,6 L 63,16 Z"));
+                Shape1);
         }
         else
         {
-            dc.DrawGeometry(null, gold, Geometry.Parse("M 18,76 C 12,61 6,39 9,31 C 15,28 28,41 30,66 M 30,66 C 21,36 33,17 42,24 C 49,28 43,51 46,66 M 46,66 L 50,11 L 54,66 M 54,66 C 57,51 51,28 58,24 C 67,17 79,36 70,66 M 70,66 C 72,41 85,28 91,31 C 94,39 88,61 82,76 M 18,76 Q 50,66 82,76 L 78,86 Q 50,78 22,86 Z M 29,91 Q 50,87 71,91"));
+            dc.DrawGeometry(null, gold, Shape2);
             foreach (var p in new[] { new Point(9, 28), new Point(35, 20), new Point(50, 8), new Point(65, 20), new Point(91, 28) })
                 dc.DrawEllipse(Brushes.White, gold, p, 2.8, 2.8);
-            dc.DrawGeometry(new SolidColorBrush(Color.FromRgb(126, 217, 255)), gold, Geometry.Parse("M 50,35 L 56,47 L 50,59 L 44,47 Z"));
+            dc.DrawGeometry(new SolidColorBrush(Color.FromRgb(126, 217, 255)), gold, Shape3);
         }
         dc.Pop();
     }

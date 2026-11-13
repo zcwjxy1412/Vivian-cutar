@@ -31,6 +31,9 @@ internal sealed class WindowWorkArea : IDisposable
             Math.Clamp(bounds.Y, work.Top, work.Bottom - height), width, height);
     }
 
+    internal static Rect FitNearOwner(Rect bounds, Rect owner, Rect work, Size minimumDip, double scale) =>
+        Fit(new Rect(owner.Right - bounds.Width - 24 * scale, owner.Top + 72 * scale, bounds.Width, bounds.Height), work, minimumDip, scale);
+
     internal void Recover(bool preferOwner = false)
     {
         if (_disposed || _window.WindowState != WindowState.Normal) return;
@@ -41,13 +44,13 @@ internal sealed class WindowWorkArea : IDisposable
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
         if (monitor == IntPtr.Zero || !GetMonitorInfo(monitor, ref info)) return;
         var work = info.Work.ToRect();
+        if (work.IsEmpty || work.Width <= 0 || work.Height <= 0) return;
         var scale = Math.Max(96, GetDpiForWindow(hwnd)) / 96.0;
         _window.MinWidth = Math.Min(_minimumDip.Width, work.Width / scale);
         _window.MinHeight = Math.Min(_minimumDip.Height, work.Height / scale);
-        var desired = native.ToRect();
+        var fit = Fit(native.ToRect(), work, _minimumDip, scale);
         if (owner != IntPtr.Zero && GetWindowRect(owner, out var ownerBounds))
-            desired = new Rect(ownerBounds.Right - desired.Width - 24 * scale, ownerBounds.Top + 72 * scale, desired.Width, desired.Height);
-        var fit = Fit(desired, work, _minimumDip, scale);
+            fit = FitNearOwner(native.ToRect(), ownerBounds.ToRect(), work, _minimumDip, scale);
         if (fit == native.ToRect()) return;
         // Geometry only: never show, activate, change z-order or acquire input permission here.
         if (!SetWindowPos(hwnd, IntPtr.Zero, (int)Math.Round(fit.X), (int)Math.Round(fit.Y),
@@ -59,6 +62,7 @@ internal sealed class WindowWorkArea : IDisposable
     {
         _source = HwndSource.FromHwnd(new WindowInteropHelper(_window).Handle);
         _source?.AddHook(OnMessage);
+        Recover();
         QueueRecovery();
     }
     private void OnStateChanged(object? sender, EventArgs e) => QueueRecovery();
@@ -83,7 +87,7 @@ internal sealed class WindowWorkArea : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        _source?.RemoveHook(OnMessage);
+        if (_source is { IsDisposed: false }) _source.RemoveHook(OnMessage);
         _window.SourceInitialized -= OnSourceInitialized;
         _window.StateChanged -= OnStateChanged;
         _window.Closed -= OnClosed;

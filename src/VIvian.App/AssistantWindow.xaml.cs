@@ -81,6 +81,13 @@ public partial class AssistantWindow : Window
     }
 
     private void EnterChat(object sender, RoutedEventArgs e) => TryOpenForUser();
+    private void OnContentSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // A small remaining work area prioritizes reading/typing over optional shortcut chips.
+        var tiny = e.NewSize.Height < 420;
+        QuickCommandsExpander.Visibility = tiny ? Visibility.Collapsed : Visibility.Visible;
+        InputBox.MaxHeight = tiny ? 52 : 72;
+    }
     private void StopLocally(object sender, RoutedEventArgs e)
     {
         LockInput();

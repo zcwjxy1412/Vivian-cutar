@@ -12,14 +12,14 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <Image RenderOptions.BitmapScalingMode="HighQuality" Source="{Binding Uri}" Visibility="{Binding StaticVisibility}" Stretch="Uniform"/>
 <local:Mascot Visibility="{Binding FallbackVisibility}"/></Grid></DataTemplate>
 </Window.Resources>
-<local:FurinaPanel Style="{StaticResource Furina.PanelStyle}" Background="#E7EEFF" Padding="0" Margin="8" BorderBrush="{StaticResource Furina.GoldBrush}" BorderThickness="1.5">
+<local:FurinaPanel Style="{StaticResource Furina.PanelStyle}" Background="#D7E9FF" Padding="0" Margin="8" BorderBrush="{StaticResource Furina.GoldBrush}" BorderThickness="1.5">
 <Grid SizeChanged="OnContentSizeChanged"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <Border Background="#183477" CornerRadius="17,17,0,0" Padding="12,7" MouseLeftButtonDown="DragHeader">
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><local:FurinaOrnament Kind="Surf" Grid.ColumnSpan="3" Height="24" VerticalAlignment="Bottom" Margin="0,0,0,-7" Opacity="0.55"/>
 <local:FurinaOrnament Width="40" Height="44" Margin="0,0,8,0"/>
 <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="#FFFFFF" FontSize="22" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding StatusLine}" Foreground="#D6E5FF" FontSize="12"/></StackPanel>
-<Grid Grid.Column="2" Width="102"><ContentPresenter Width="64" Height="58" HorizontalAlignment="Left" Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>
+<Grid Grid.Column="2" Width="102"><local:FurinaOrnament Kind="Halo" WaterImage="{Binding Theme.WaterFrame}" Width="70" Height="70" HorizontalAlignment="Left" Margin="-6,-6,0,-6"/><ContentPresenter Width="64" Height="58" HorizontalAlignment="Left" Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>
 <Button Content="×" Click="CloseWindow" ToolTip="收起对话，仅取消模型请求" Width="30" Height="30" MinHeight="30" Padding="0" FontSize="22" HorizontalAlignment="Right" Background="#284CAD" Foreground="White" BorderBrush="#D7BC79" AutomationProperties.Name="收起助手"/>
 </Grid></Grid></Border>
 <StackPanel Grid.Row="1" Margin="14,7,14,5">
@@ -54,19 +54,19 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <StackPanel><TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="#142651"/>
 <ItemsControl ItemsSource="{Binding Proposals}"><ItemsControl.ItemTemplate><DataTemplate>
 <Border Style="{StaticResource Furina.PanelStyle}" Padding="10" Margin="0,10,0,0"><StackPanel>
-<TextBlock Text="{Binding Title}" FontWeight="Bold"/><TextBlock Text="{Binding TargetText}" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Title}" FontWeight="Bold" TextWrapping="Wrap"/><TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" TextWrapping="Wrap" ToolTip="{Binding TargetText}"/>
 <TextBlock Text="{Binding Lines}" FontSize="13"/><TextBlock Text="{Binding State}" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}"/>
 <Button Content="{Binding ButtonText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" Style="{StaticResource Furina.PrimaryButtonStyle}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 </StackPanel></Border></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 </ScrollViewer>
-<Border Grid.Row="2" Background="#E7EEFF" Padding="14,4,14,10"><StackPanel>
+<Border Grid.Row="2" Background="#D7E9FF" Padding="14,4,14,10"><Grid><local:FurinaOrnament Kind="Surf" Height="48" VerticalAlignment="Bottom" Margin="-12,0,-12,-8"/><StackPanel>
 <Expander x:Name="QuickCommandsExpander" Header="快捷指令" IsExpanded="True" Margin="0,0,0,6"><ScrollViewer MaxHeight="36" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsControl ItemsSource="{Binding QuickCommands}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Command="{Binding DataContext.QuickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" MinHeight="28" FontSize="12" Padding="8,4" Margin="0,0,6,6"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Expander>
-<Border Background="#F6FAFF" BorderBrush="#91ABEC" BorderThickness="1.5" CornerRadius="16" Padding="6,2,6,6"><StackPanel>
+<local:FurinaPanel Background="#D7E9FF" BorderBrush="#D7BC79" BorderThickness="1.5" CornerRadius="16" Padding="6,2,6,6"><StackPanel>
 <TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="72" Background="#F6FAFF" BorderBrush="#F6FAFF" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="输入你的问题">
 <TextBox.InputBindings><KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox>
 <DockPanel Margin="0,8,0,0"><Button x:Name="SendButton" DockPanel.Dock="Right" Content="➤" ToolTip="发送（Ctrl+Enter）" AutomationProperties.Name="发送" Command="{Binding SendCommand}" Style="{StaticResource Furina.PrimaryButtonStyle}" Padding="12,4" MinHeight="32"/>
-<TextBlock Text="Enter 换行 · Ctrl+Enter 发送" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}" VerticalAlignment="Center"/></DockPanel></StackPanel></Border>
-</StackPanel></Border>
+<TextBlock Text="Enter 换行 · Ctrl+Enter 发送" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}" VerticalAlignment="Center"/></DockPanel></StackPanel></local:FurinaPanel>
+</StackPanel></Grid></Border>
 </Grid></Grid></local:FurinaPanel></Window>

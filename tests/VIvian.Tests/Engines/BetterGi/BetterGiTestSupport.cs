@@ -23,6 +23,7 @@ internal sealed class FakeGroup(Guid runId, int pid = 4242, DateTimeOffset? star
     public int KilledExitCode { get; set; } = 1;
     public int TerminateCalls;
     public bool Disposed;
+    public bool DisposeThrows;
 
     public void Exit(int code)
     {
@@ -55,6 +56,7 @@ internal sealed class FakeGroup(Guid runId, int pid = 4242, DateTimeOffset? star
     public ValueTask DisposeAsync()
     {
         Disposed = true;
+        if (DisposeThrows) throw new IOException("synthetic dispose failure");
         return ValueTask.CompletedTask;
     }
 }

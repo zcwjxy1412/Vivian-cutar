@@ -145,6 +145,7 @@ internal static class BetterGiDailyAcceptance
         var cleanup = CleanupState.Unconfirmed;
         var restored = false;
         string? startError = null;
+        BetterGiRun? activeRun = null;
         if (!HasExpectedScheme(scheme) || ReadRegistryString(protocol, string.Empty) != journal.Original
             || lease.VerifyCommonOwner() != owner)
             throw new InvalidOperationException("BetterGI 协议注册或桌面锁在启动前发生变化，拒绝启动。");
@@ -154,7 +155,7 @@ internal static class BetterGiDailyAcceptance
         lease.MarkDirty();
         try
         {
-            await using var run = await adapter.LaunchAsync(context, new WindowsProcessSupervisor(), stop.Token).ConfigureAwait(false);
+            await using var run = activeRun = (BetterGiRun)await adapter.LaunchAsync(context, new WindowsProcessSupervisor(), stop.Token).ConfigureAwait(false);
             status?.Invoke("原神短任务已启动。按 Ctrl+C 只终止本次受监管进程。");
             try
             {
@@ -183,6 +184,8 @@ internal static class BetterGiDailyAcceptance
         }
         finally
         {
+            if (activeRun is not null && !activeRun.CleanupConfirmedAfterDisposal)
+                cleanup = CleanupState.Unconfirmed;
             var report = new AcceptanceReport(runId, verdict?.Outcome, verdict?.ReasonCode, verdict?.Evidence,
                 observation, ct.IsCancellationRequested, stop.IsCancellationRequested && !ct.IsCancellationRequested, cleanup,
                 ProtocolRestored: false, OriginalConfigUnchanged: false, startError);

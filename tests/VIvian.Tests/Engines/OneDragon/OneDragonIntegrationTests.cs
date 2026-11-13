@@ -41,6 +41,23 @@ public sealed class OneDragonIntegrationTests
         }
     }
 
+    [Fact]
+    public async Task ClosedAccountCardRereadsItsPhoneWhenTheFullFrameMissesIt()
+    {
+        var frame = new VIvian.Infrastructure.Accounts.CapturedFrame(new byte[1920 * 1080 * 4], 1920, 1080, "");
+        var accounts = await ZenlessAccountImport.ReadHeaderAsync(frame, [], default, (crop, _) =>
+        {
+            Assert.Equal(294, crop.Width);
+            Assert.Equal(46, crop.Height);
+            return Task.FromResult(new VIvian.Infrastructure.Accounts.OcrReadResult(true, null,
+                [new("139******22", 18, 13, 180, 22)]));
+        });
+        var account = Assert.Single(accounts);
+        Assert.Equal("139****22", account.NormalizedPhone);
+        Assert.Equal(739, account.X);
+        Assert.Equal(490, account.Y);
+    }
+
     [Theory]
     [InlineData("进 入 游 戏", true)]
     [InlineData("入 游 戏", true)]

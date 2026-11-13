@@ -105,10 +105,14 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         var waiting = "尚未找到登录账号确认页。";
         string? lastAction = null;
         var awaitingLogout = false;
+        var selectedFromList = false;
         while (timeout.Elapsed < policy.LoginScreen)
         {
             ct.ThrowIfCancellationRequested();
-            if (_game is null || _game.HasExited) return Failure("本轮绝区零客户端已退出，尚未交给 OneDragon。");
+            if (_game is null || _game.HasExited)
+                return Failure(selectedFromList
+                    ? "已在列表中选择目标账号，但登录卡片核对完成前绝区零客户端退出，未交给 OneDragon。"
+                    : "本轮绝区零客户端在完成登录账号核对前退出，未交给 OneDragon。");
             if (EngineBusy()) return Failure("检测到另一个 OneDragon 已打开，已停止登录操作。");
             var window = ReadWindow();
             if (window is not null)
@@ -128,7 +132,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                         "button_unknown" => "已读取登录账号，但未能确认「进入游戏」按钮。",
                         "account_missing" => "已打开保存账号列表，但未找到唯一的目标账号。",
                         "logout_pending" => "正在核对退出登录弹窗和保留登录记录选项。",
-                        _ => "尚未完成登录账号确认。",
+                        _ => selectedFromList ? "已在列表中选择目标账号，正在等待登录卡片确认。" : "尚未完成登录账号确认。",
                     };
                     if (step.Action == "handoff" && ReadWindow() == window)
                     {
@@ -154,6 +158,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
                                 return step.Action is "retain" or "logout"
                                     ? NeedsUser("请在绝区零选中「退出并保留登录记录」后确认。")
                                     : Failure("登录画面变化或账号选择未响应。");
+                            if (step.Action == "choose") selectedFromList = true;
                             if (step.Action is "switch" or "logout")
                                 awaitingLogout = step.Action == "switch";
                             await Task.Delay(1100, ct).ConfigureAwait(false);

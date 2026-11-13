@@ -148,9 +148,25 @@ public static class ZenlessAccountImport
         return (readCrop ?? WindowsOcrReader.ReadAsync)(crop, ct);
     }
 
-    internal static Task<IReadOnlyList<LoginAccountObservation>> ReadHeaderAsync(CapturedFrame frame,
-        IReadOnlyList<RecognizedText> lines, CancellationToken ct) =>
-        ReadMaskedRowsAsync(frame, lines, ScaleBox(frame.Width, frame.Height, 610, 450, 590, 82), ct, WindowsOcrReader.ReadAsync);
+    internal static async Task<IReadOnlyList<LoginAccountObservation>> ReadHeaderAsync(CapturedFrame frame,
+        IReadOnlyList<RecognizedText> lines, CancellationToken ct,
+        Func<CapturedFrame, CancellationToken, Task<OcrReadResult>>? readCrop = null)
+    {
+        var header = ScaleBox(frame.Width, frame.Height, 610, 450, 590, 82);
+        var readPhone = readCrop ?? WindowsOcrReader.ReadAsync;
+        var accounts = await ReadMaskedRowsAsync(frame, lines, header, ct, readPhone).ConfigureAwait(false);
+        if (accounts.Count > 0) return accounts;
+
+        // An entire phone line can be missing from full-window OCR. Reread the isolated phone on the verified card.
+        var phone = ScaleBox(frame.Width, frame.Height, 721, 477, 294, 46);
+        var x = (int)phone.X;
+        var y = (int)phone.Y;
+        var crop = frame.Crop(x, y, (int)phone.Width, (int)phone.Height);
+        var read = await readPhone(crop, ct).ConfigureAwait(false);
+        return read.Available && MaskedPhoneParser.FindAll(read.Lines) is [{ } found]
+            ? [found with { X = found.X + x, Y = found.Y + y }]
+            : [];
+    }
 
     internal static Task<IReadOnlyList<LoginAccountObservation>> ReadExpandedRowsAsync(CapturedFrame frame,
         IReadOnlyList<RecognizedText> lines, CancellationToken ct,

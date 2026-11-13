@@ -23,8 +23,20 @@ public sealed class ProposalCard : ObservableObject
         _state = "等待你确认";
         ConfirmCommand = new(() => confirm(this), _ => State = "本次操作未通过核对，请查看主界面状态。");
     }
+    public ProposalCard(PreparedExecutionPlan plan, Func<ProposalCard, Task> confirm)
+    {
+        Id = plan.PlanId;
+        TargetText = $"有序计划 · {plan.Items.Count} 项 · {plan.PlanId:D}";
+        Lines = string.Join("\n", plan.Items.Select((i, index) =>
+            $"{index + 1}. {RunPresentation.GameName(i.Game)} · {i.AccountName} · {i.AccountId:D}\n任务：{i.TaskId} · {i.ResourceSummary}\n配置版本：{i.ConfigurationRevision} · 任务版本：{i.TaskPlanRevision}"))
+            + "\n失败、取消或清理/配置恢复未确认即停止后续项。";
+        Title = "有序运行计划";
+        ButtonText = "确认提交";
+        _state = "等待你确认";
+        ConfirmCommand = new(() => confirm(this), _ => State = $"操作未通过核对。计划 {Id:D}；请查回状态，不要自动重试。");
+    }
     public Guid Id { get; }
-    public AccountConfigurationTarget Target { get; }
+    public AccountConfigurationTarget? Target { get; }
     public string TargetText { get; }
     public string Lines { get; }
     public string Title { get; }
@@ -66,6 +78,7 @@ public sealed class AssistantViewModel : ObservableObject
     private readonly string _profileDirectory;
     private readonly Func<Task> _afterApply;
     private readonly Func<AssistantRunPlan, Task<string>> _submitPlan;
+    private readonly IExecutionPlanService? _executionPlans;
     private readonly Func<string, string, MessageBoxImage, bool> _confirm;
     public event Action? ExclusiveActionStarting;
     private int _confirmationRevision;
@@ -118,15 +131,17 @@ public sealed class AssistantViewModel : ObservableObject
 
     public AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools,
         Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply,
-        Func<AssistantRunPlan, Task<string>> submitPlan)
+        Func<AssistantRunPlan, Task<string>> submitPlan, IExecutionPlanService? executionPlans = null)
         : this(theme, settings, tools, canApply, profileDirectory, afterApply, submitPlan,
-            (text, title, icon) => MessageBox.Show(text, title, MessageBoxButton.YesNo, icon, MessageBoxResult.No) == MessageBoxResult.Yes) { }
+            (text, title, icon) => MessageBox.Show(text, title, MessageBoxButton.YesNo, icon, MessageBoxResult.No) == MessageBoxResult.Yes, executionPlans) { }
 
     internal AssistantViewModel(ThemeAssets theme, AssistantSettingsStore settings, AssistantTools tools,
         Func<AccountConfigurationTarget, bool> canApply, string profileDirectory, Func<Task> afterApply,
-        Func<AssistantRunPlan, Task<string>> submitPlan, Func<string, string, MessageBoxImage, bool> confirm)
+        Func<AssistantRunPlan, Task<string>> submitPlan, Func<string, string, MessageBoxImage, bool> confirm,
+        IExecutionPlanService? executionPlans = null)
     {
         _confirm = confirm;
+        _executionPlans = executionPlans;
         Theme = theme; Avatar = new ArtSlot(theme.Assistant); _settings = settings; _tools = tools;
         _canApply = canApply; _profileDirectory = profileDirectory; _afterApply = afterApply; _submitPlan = submitPlan;
         _endpoint = settings.Load();
@@ -169,6 +184,7 @@ public sealed class AssistantViewModel : ObservableObject
             cards.AddRange(_session.LastRunPlans.Select(plan => new ProposalCard(plan.Id, plan.Target, plan.AccountName,
                 "日常（清体力、每日实训、领奖）\n" + plan.Resources, "运行计划", "确认提交",
                 card => ConfirmRunAsync(card, plan))));
+            cards.AddRange(_session.LastExecutionPlans.Select(plan => new ProposalCard(plan, card => ConfirmExecutionPlanAsync(card, plan))));
             Add(false, reply, cards);
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
@@ -179,7 +195,7 @@ public sealed class AssistantViewModel : ObservableObject
 
     internal async Task ConfirmAsync(ProposalCard card)
     {
-        if (!card.CanConfirm) return;
+        if (!card.CanConfirm || card.Target is null) return;
         var revision = Volatile.Read(ref _confirmationRevision);
         if (!_canApply(card.Target))
         {
@@ -220,7 +236,7 @@ public sealed class AssistantViewModel : ObservableObject
 
     internal async Task ConfirmRunAsync(ProposalCard card, AssistantRunPlan plan)
     {
-        if (!card.CanConfirm || !EnableScheduleProposals) return;
+        if (!card.CanConfirm || card.Target is null || !EnableScheduleProposals) return;
         var revision = Volatile.Read(ref _confirmationRevision);
         if (plan.Expires <= DateTimeOffset.UtcNow)
         {
@@ -250,6 +266,46 @@ public sealed class AssistantViewModel : ObservableObject
         }
         card.State = "正在核对任务准入，进度与停止见主界面。";
         card.State = await _submitPlan(plan);
+    }
+
+    internal async Task ConfirmExecutionPlanAsync(ProposalCard card, PreparedExecutionPlan plan)
+    {
+        if (!card.CanConfirm || _executionPlans is null || !EnableScheduleProposals) return;
+        var revision = Volatile.Read(ref _confirmationRevision);
+        if (plan.PlanId != card.Id || plan.ExpiresAt <= DateTimeOffset.UtcNow)
+        {
+            card.CanConfirm = false;
+            card.State = "计划已失效，请重新生成。";
+            return;
+        }
+        if (!_confirm($"{card.TargetText}\n\n{card.Lines}\n\n确认按以上顺序提交？", $"{Name} · 确认运行", MessageBoxImage.Warning)) return;
+        card.CanConfirm = false;
+        bool StillValid() => revision == Volatile.Read(ref _confirmationRevision) && EnableScheduleProposals && plan.ExpiresAt > DateTimeOffset.UtcNow;
+        if (!StillValid()) { card.State = "计划已失效，请重新生成。"; return; }
+        ExclusiveActionStarting?.Invoke();
+        if (!StillValid()) { card.State = "计划已失效，请重新生成。"; return; }
+        card.State = $"正在提交计划 {plan.PlanId:D}。";
+        try
+        {
+            // Accepted execution belongs to the host, never to the chat request/visibility lifetime.
+            var submission = await _executionPlans.SubmitConfirmedAsync(plan, CancellationToken.None);
+            if (submission.Disposition is ExecutionPlanDisposition.Accepted or ExecutionPlanDisposition.Existing)
+            {
+                if (submission.Receipt is not { } receipt || receipt.Plan.PlanId != plan.PlanId)
+                    throw new InvalidOperationException("Plan receipt mismatch.");
+                card.State = $"{(submission.Disposition == ExecutionPlanDisposition.Existing ? "已有回执" : "已接受")} · 计划 {plan.PlanId:D}\n"
+                    + $"状态：{receipt.State}（接受不代表执行完成）\n"
+                    + string.Join("\n", receipt.Items.Select(i => $"{i.Item.Ordinal + 1}. {RunPresentation.GameName(i.Item.Game)} · {i.Item.AccountName}：{i.State}；结果 {i.Result?.Outcome.ToString() ?? "未知"}；清理 {i.Result?.Cleanup.ToString() ?? "未知"}；配置恢复 {(i.Result is null ? "未知" : i.Result.ConfigurationRestored ? "已确认" : "未确认")}"))
+                    + "\n可用计划 ID 精确查回；未知或中断不自动重试。";
+            }
+            else card.State = submission.Disposition == ExecutionPlanDisposition.Conflict
+                ? $"计划 ID 冲突，未覆盖已有计划。请查回 {plan.PlanId:D}。"
+                : $"宿主拒绝提交计划 {plan.PlanId:D}。请检查账号、版本、任务和运行准入，再重新生成。";
+        }
+        catch (Exception)
+        {
+            card.State = $"提交状态尚未确认。请按计划 ID {plan.PlanId:D} 查回；不要自动重新提交。";
+        }
     }
 
     public void InvalidateProposals()

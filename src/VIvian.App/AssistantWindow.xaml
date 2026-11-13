@@ -1,78 +1,68 @@
 <Window x:Class="VIvian.App.AssistantWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 xmlns:local="clr-namespace:VIvian.App" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
-Title="AI 智能助手" Width="440" Height="680" MinWidth="360" MinHeight="460" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" FontFamily="Microsoft YaHei UI" FontSize="14" Foreground="{StaticResource Text}">
+Title="芙宁娜 · AI 助手" Width="460" Height="720" MinWidth="360" MinHeight="460" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" ShowActivated="False" Topmost="False" FontFamily="{StaticResource Furina.BodyFontFamily}" FontSize="14"
+Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOptions.BitmapScalingMode="HighQuality">
 <Window.Resources>
-<Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
-<!-- Avatar: GIF animates, other images are static, no file shows the vector guide. -->
-<DataTemplate x:Key="AvatarArt"><Grid>
-<Image gif:AnimationBehavior.SourceUri="{Binding Uri}" Visibility="{Binding GifVisibility}" Stretch="UniformToFill"/>
-<Image Source="{Binding Uri}" Visibility="{Binding StaticVisibility}" Stretch="UniformToFill"/>
+<Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Furina.TextBrush}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
+<Style TargetType="Button" BasedOn="{StaticResource Furina.SecondaryButtonStyle}"/>
+<Style TargetType="TextBox" BasedOn="{StaticResource Furina.InputStyle}"/>
+<DataTemplate x:Key="AvatarArt"><Grid IsHitTestVisible="False">
+<Image RenderOptions.BitmapScalingMode="HighQuality" gif:AnimationBehavior.SourceUri="{Binding Uri}" Visibility="{Binding GifVisibility}" Stretch="Uniform"/>
+<Image RenderOptions.BitmapScalingMode="HighQuality" Source="{Binding Uri}" Visibility="{Binding StaticVisibility}" Stretch="Uniform"/>
 <local:Mascot Visibility="{Binding FallbackVisibility}"/></Grid></DataTemplate>
 </Window.Resources>
-<Border Background="{StaticResource Surface}" BorderBrush="{StaticResource Gold}" BorderThickness="1.5" CornerRadius="22" Margin="8">
-<Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.35" Color="#1A2B6B"/></Border.Effect>
-<Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-
-<!-- Header: drag to move -->
-<Border Background="{StaticResource NavyRibbon}" CornerRadius="20,20,0,0" Padding="16,12" MouseLeftButtonDown="DragHeader" Cursor="SizeAll">
+<Border Style="{StaticResource Furina.PanelStyle}" Padding="0" Margin="8" BorderBrush="{StaticResource Furina.GoldBrush}">
+<Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+<Border Background="{StaticResource Furina.StageBrush}" CornerRadius="17,17,0,0" Padding="14,10" MouseLeftButtonDown="DragHeader">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<Border Width="46" Height="46" CornerRadius="23" Background="#E9EFFF" BorderBrush="{StaticResource Gold}" BorderThickness="1.5" ClipToBounds="True">
-<ContentPresenter Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}" Margin="2"/></Border>
-<StackPanel Grid.Column="1" Margin="12,0,8,0" VerticalAlignment="Center">
-<TextBlock Text="{Binding Name, StringFormat=AI 智能助手 · {0}}" Foreground="White" FontSize="16" FontWeight="Bold" TextWrapping="NoWrap"/>
-<TextBlock Text="{Binding StatusLine}" Foreground="{StaticResource OnNavy}" FontSize="12" TextWrapping="NoWrap"/></StackPanel>
-<StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-<Button Content="⚙" Command="{Binding ToggleSettingsCommand}" ToolTip="AI 接口设置" Background="#2E4AA8" Foreground="White" BorderBrush="#5A75C8" Padding="10,5" Margin="0,0,6,0" AutomationProperties.Name="AI 接口设置"/>
-<Button Content="✕" Click="CloseWindow" ToolTip="收起（对话会保留）" Background="#2E4AA8" Foreground="White" BorderBrush="#5A75C8" Padding="10,5" Margin="0" AutomationProperties.Name="收起助手"/></StackPanel></Grid></Border>
+<ContentPresenter Width="40" Height="40" Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}"/>
+<StackPanel Grid.Column="1" Margin="10,0" VerticalAlignment="Center"><TextBlock Text="{Binding Name, StringFormat={}{0} · AI 助手}" Foreground="White" FontSize="16" FontWeight="Bold"/>
+<TextBlock Text="{Binding StatusLine}" Foreground="#D6E5FF" FontSize="12"/></StackPanel>
+<Button Grid.Column="2" Content="关闭" Click="CloseWindow" ToolTip="收起对话，仅取消模型请求" Padding="10,6" AutomationProperties.Name="收起助手"/>
+</Grid></Border>
+<StackPanel Grid.Row="1" Margin="14,10,14,8">
+<WrapPanel><Button Content="进入聊天" Click="EnterChat" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
+<Button Content="停止任务" Click="StopLocally" Style="{StaticResource Furina.DangerButtonStyle}" IsEnabled="{Binding StopSource.CanStopAll, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=False, TargetNullValue=False}" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
+<Button Content="取消请求" Command="{Binding CancelRequestCommand}" IsEnabled="{Binding IsBusy}" MinHeight="32" Padding="10,4" Margin="0,0,0,6"/></WrapPanel>
+<TextBlock Text="{Binding Interaction.Hint, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource Furina.MutedTextBrush}" FontSize="12" AutomationProperties.LiveSetting="Polite"/>
+</StackPanel>
+<Grid x:Name="EditingSurface" Grid.Row="2" IsEnabled="{Binding Interaction.CanEdit, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=False, TargetNullValue=False}">
+<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+<StackPanel Margin="14,0,14,0">
+<Button Content="接口设置" Command="{Binding ToggleSettingsCommand}" HorizontalAlignment="Left" MinHeight="28" Padding="10,2" Margin="0,0,0,4"/>
 
-<!-- Endpoint settings -->
-<Border Grid.Row="1" Visibility="{Binding SettingsVisibility}" Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="16,12"><StackPanel>
-<TextBlock Text="AI 接口（兼容 OpenAI 的 chat/completions，需支持工具调用）" FontWeight="SemiBold" FontSize="13"/>
-<TextBlock Text="接口地址，例如 https://api.deepseek.com/v1" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,2"/>
-<TextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="接口地址"/>
-<TextBlock Text="模型名" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,2"/>
-<TextBox Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="模型名"/>
-<TextBlock Text="密钥（仅原地址可留空沿用已保存密钥）" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,2"/>
-<PasswordBox x:Name="KeyBox" PasswordChanged="KeyChanged" Padding="10,7" Background="White" Foreground="{StaticResource Text}" BorderBrush="{StaticResource Line}" AutomationProperties.Name="密钥"/>
-<WrapPanel Margin="0,10,0,0">
-<Button Style="{StaticResource Primary}" Content="保存" Command="{Binding SaveSettingsCommand}"/>
-<Button Content="测试连接" Command="{Binding TestConnectionCommand}" Margin="6,0,0,0"/>
-</WrapPanel>
-<CheckBox Content="允许芙宁娜生成待确认的星铁运行计划" IsChecked="{Binding EnableScheduleProposals}" Visibility="{Binding ScheduleSettingsVisibility}" Margin="0,8,0,0"/>
-<TextBlock Text="{Binding SettingsStatus}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,8,0,0"/></StackPanel></Border>
-
-<!-- Conversation -->
-<ScrollViewer x:Name="ChatScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="14,12">
+</StackPanel>
+<ScrollViewer Visibility="{Binding SettingsVisibility}" Grid.Row="1" Panel.ZIndex="1" Margin="14,0,14,0" Background="{StaticResource Furina.PanelBrush}" VerticalScrollBarVisibility="Auto">
+<Border Style="{StaticResource Furina.PanelStyle}" Background="{StaticResource Furina.SoftBrush}" Padding="12"><StackPanel>
+<TextBlock Text="AI 接口" FontWeight="SemiBold"/>
+<TextBlock Text="接口地址" FontSize="12"/><TextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="接口地址"/>
+<TextBlock Text="模型名" FontSize="12"/><TextBox Text="{Binding Model, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="模型名"/>
+<TextBlock Text="密钥（仅原地址可留空沿用）" FontSize="12"/>
+<PasswordBox x:Name="KeyBox" PasswordChanged="KeyChanged" Padding="12,10" Background="White" Foreground="{StaticResource Furina.TextBrush}" AutomationProperties.Name="密钥"/>
+<WrapPanel Margin="0,8,0,0"><Button Content="保存" Command="{Binding SaveSettingsCommand}" Margin="0,0,8,8"/><Button Content="测试连接" Command="{Binding TestConnectionCommand}" Margin="0,0,0,8"/></WrapPanel>
+<CheckBox Content="允许生成待确认的星铁运行计划" IsChecked="{Binding EnableScheduleProposals}" Visibility="{Binding ScheduleSettingsVisibility}"/>
+<TextBlock Text="{Binding SettingsStatus}" Foreground="{StaticResource Furina.MutedTextBrush}" FontSize="12"/>
+</StackPanel></Border></ScrollViewer>
+<ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="14,10">
 <ItemsControl ItemsSource="{Binding Messages}"><ItemsControl.ItemTemplate><DataTemplate>
-<Grid Margin="0,0,0,12" HorizontalAlignment="{Binding Align}"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<Border Width="34" Height="34" CornerRadius="17" Background="#E9EFFF" BorderBrush="{StaticResource Gold}" BorderThickness="1" ClipToBounds="True" VerticalAlignment="Top" Margin="0,0,8,0" Visibility="{Binding AvatarVisibility}">
-<ContentPresenter Content="{Binding DataContext.Avatar, RelativeSource={RelativeSource AncestorType=Window}}" ContentTemplate="{StaticResource AvatarArt}" Margin="1"/></Border>
-<Border Grid.Column="1" CornerRadius="16" Padding="14,10" MaxWidth="320" BorderThickness="1">
-<Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{StaticResource Bubble}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/>
-<Style.Triggers><DataTrigger Binding="{Binding FromUser}" Value="True"><Setter Property="Background" Value="{StaticResource UserBubble}"/><Setter Property="BorderBrush" Value="{StaticResource UserBubble}"/></DataTrigger></Style.Triggers></Style></Border.Style>
-<StackPanel>
-<TextBlock Text="{Binding Text}"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Style.Triggers>
-<DataTrigger Binding="{Binding FromUser}" Value="True"><Setter Property="Foreground" Value="White"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+<Border Margin="0,0,0,12" HorizontalAlignment="Stretch">
+<Border.Style><Style TargetType="Border" BasedOn="{StaticResource Furina.MessageBubbleStyle}"><Style.Triggers><DataTrigger Binding="{Binding FromUser}" Value="True"><Setter Property="Background" Value="{StaticResource Furina.SoftBrush}"/></DataTrigger></Style.Triggers></Style></Border.Style>
+<StackPanel><TextBlock Text="{Binding Text}" TextWrapping="Wrap"/>
 <ItemsControl ItemsSource="{Binding Proposals}"><ItemsControl.ItemTemplate><DataTemplate>
-<Border Background="{StaticResource Tile}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Padding="12,10" Margin="0,10,0,0"><StackPanel>
-<TextBlock Text="{Binding Title}" FontWeight="Bold" FontSize="13"/>
-<TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" Margin="0,0,0,4"/>
-<TextBlock Text="{Binding Lines}" FontSize="13" Margin="0,4,0,0"/>
-<TextBlock Text="{Binding State}" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0"/>
-<Button Style="{StaticResource Primary}" Content="{Binding ButtonText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" HorizontalAlignment="Left" Margin="0,8,0,0" Padding="16,7"/>
+<Border Style="{StaticResource Furina.PanelStyle}" Padding="10" Margin="0,10,0,0"><StackPanel>
+<TextBlock Text="{Binding Title}" FontWeight="Bold"/><TextBlock Text="{Binding TargetText}" FontWeight="SemiBold"/>
+<TextBlock Text="{Binding Lines}" FontSize="13"/><TextBlock Text="{Binding State}" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}"/>
+<Button Content="{Binding ButtonText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" Style="{StaticResource Furina.PrimaryButtonStyle}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-</StackPanel></Border></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
-
-<!-- Quick commands -->
-<StackPanel Grid.Row="3" Margin="14,4,14,6"><TextBlock Text="快捷指令" FontWeight="SemiBold" FontSize="13" Margin="2,0,0,6"/>
-<ItemsControl ItemsSource="{Binding QuickCommands}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-<ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Command="{Binding DataContext.QuickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" FontSize="12" Padding="12,5" Margin="0,0,6,6" Background="White"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
-
-<!-- Input -->
-<Border Grid.Row="4" Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="16" Margin="14,0,14,14" Padding="6">
-<DockPanel><Button DockPanel.Dock="Right" Style="{StaticResource Primary}" Content="➤" Command="{Binding SendCommand}" Padding="14,8" Margin="6,0,0,0" ToolTip="发送（Enter）" AutomationProperties.Name="发送"/>
-<Button DockPanel.Dock="Right" Content="取消请求" IsEnabled="{Binding IsBusy}" Command="{Binding CancelRequestCommand}" Margin="6,0,0,0"/>
-<TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" BorderThickness="0" Background="White" AutomationProperties.Name="输入你的问题">
-<TextBox.InputBindings><KeyBinding Key="Enter" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox></DockPanel></Border>
-</Grid></Border></Window>
+</StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+</ScrollViewer>
+<Border Grid.Row="2" Background="{StaticResource Furina.PanelBrush}" Padding="14,6,14,14"><StackPanel>
+<Expander x:Name="QuickCommandsExpander" Header="快捷指令" IsExpanded="False" Margin="0,0,0,6"><ScrollViewer MaxHeight="36" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsControl ItemsSource="{Binding QuickCommands}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+<ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Command="{Binding DataContext.QuickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" MinHeight="28" FontSize="12" Padding="8,4" Margin="0,0,6,6"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Expander>
+<TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="52" MaxHeight="80" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="输入你的问题">
+<TextBox.InputBindings><KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox>
+<DockPanel Margin="0,8,0,0"><Button x:Name="SendButton" DockPanel.Dock="Right" Content="发送" Command="{Binding SendCommand}" Style="{StaticResource Furina.PrimaryButtonStyle}" Padding="18,6"/>
+<TextBlock Text="Enter 换行 · Ctrl+Enter 发送" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}" VerticalAlignment="Center"/></DockPanel>
+</StackPanel></Border>
+</Grid></Grid></Border></Window>

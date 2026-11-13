@@ -102,7 +102,7 @@ public sealed class MainViewModel : ObservableObject
         Raise(nameof(CanEditWorkspace));
     }
     public bool LastCheckPassed { get; private set; }
-    public string VersionText => $"VIvian {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
+    public string VersionText => $"furina {AppPaths.Version}（提交 {AppPaths.Commit}，构建 {AppPaths.BuildTime}）· "
         + (RealExecutionPolicy.IsUnifiedInstall ? "VIvian 合流版" : RealExecutionPolicy.IsM5DailyTest ? "M5 星铁账号批次"
             : RealExecutionPolicy.IsReusableManualTest ? "M4-F1 手动实测版（仅星铁 screen_test，每次需本人确认）"
             : RealExecutionPolicy.BuildPermitsRealExecution ? "星铁单次 screen_test 实机测试包" : "预桌面开发版（模拟引擎 + 只读引擎检查；真实任务未开放）");
@@ -450,6 +450,8 @@ public sealed class MainViewModel : ObservableObject
         accounts.ExecutionSelectionChanged += () => Raise(nameof(SelectedAccountsText));
         queue.StarRailInstallPath = () => Engines.Single(e => e.Id == GameId.StarRail).InstallPath;
         _control = new UnifiedTaskControl(queue, runs, statusSupervisor, paths.DataDirectory);
+        AssistantInputGate = new AssistantInputGate(paths.DataDirectory,
+            () => AssistantInputBlocked);
         Configuration = new ConfigurationViewModel(_control,
             game => Engines.Single(e => e.Id == game).InstallPath,
             () => !CanOperateWorkspace || CanStopAll, paths.DataDirectory, accounts.Database, () => accounts.SelectedStarRail);
@@ -634,6 +636,9 @@ public sealed class MainViewModel : ObservableObject
     public ArtSlot AssistantArt => new(Theme.Assistant);
     public GenshinConfigurationViewModel GenshinConfiguration { get; }
     public AssistantViewModel Assistant { get; }
+    public IAssistantInputGate AssistantInputGate { get; }
+    public bool AssistantInputBlocked => !CanOperateWorkspace || CanStopAll || Queue.HasUnresolved || _control.HasPendingConfigurationRestore;
+    public void ReportAssistantInputBlocked(string reason) => Status = reason;
     public ObservableCollection<RecentRunRow> RecentRuns { get; } = [];
     private string _estimate = "—";
     public string EstimateText { get => _estimate; private set => Set(ref _estimate, value); }

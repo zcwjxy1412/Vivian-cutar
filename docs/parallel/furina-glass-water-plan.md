@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans inline.
 
 **Goal:** 按总控 Q 新反馈改善五处参考质感，先交离屏候选，再独立审查。
-**Architecture:** 复用现有 WPF 装饰控件。浅色阅读底保留；高光、冰边、金饰、水纹不接收输入。无新增资源或依赖。
+**Architecture:** 复用现有 WPF 装饰控件。浅色阅读底保留；高光、冰边、金饰、水纹不接收输入。后续按 Q 指示新增两张透明水饰、替换背景；无新增依赖。
 **Tech Stack:** WPF XAML / DrawingContext / 现有离屏测试。
 **Spec:** 总控 2026-11-13 新任务：冰蓝玻璃/内阴影；圆形按钮水浪水滴；AI 头尾纹饰；导航柔光/金边与底部水纹衔接；弱化游戏行引擎字重。无虚构成功或任务。
 
@@ -13,7 +13,7 @@
 
 ## Global Constraints
 - 保留 PR78 已审查提交；新分支基于 fa2abeb。
-- 仅 FurinaChrome.cs/MainWindow.xaml/AssistantWindow.xaml；不改 I 拥有的 App/项目/主 ViewModel/执行契约。
+- UI 改 FurinaChrome.cs/MainWindow.xaml/AssistantWindow.xaml；素材 manifest/README 同步；两个 ThemeAssets 可空槽位只 cherry-pick I 的提交；不改 I 拥有的 App/项目/主 ViewModel/执行契约。
 - 不打开窗口、游戏或操作真实 DPI。视觉 85 总分/各项 70% 仍待 Q。
 - 本新任务最多两轮 DeepSeek；旧任务不追加轮次。
 
@@ -31,3 +31,5 @@
 - [ ] 新 draft PR、状态和证据交付。实机仍由总控串行安排。
 
 Ruling: 本任务为可逆装饰修改，不新增镜像实现测试；用已有真实控件离屏/命中/交互回归，符合工作区测试范围。
+
+Ruling: Q 拒绝第一版简化矢量质感，明确要求使用生图。改用独立水环/角部透明层与上沿喷泉背景；保留现有角色，底部水纹整图显示。首审已返回，最终复审留给稳定候选，不重置轮次。

@@ -8,6 +8,9 @@ namespace VIvian.App;
 // so text contrast auditing stays conservative even though the painted surface is lighter.
 public class FurinaPanel : Border
 {
+    public static readonly DependencyProperty CornerArtProperty = DependencyProperty.Register(nameof(CornerArt), typeof(ImageSource), typeof(FurinaPanel),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public ImageSource? CornerArt { get => (ImageSource?)GetValue(CornerArtProperty); set => SetValue(CornerArtProperty, value); }
     protected override void OnRender(DrawingContext dc)
     {
         base.OnRender(dc);
@@ -30,6 +33,8 @@ public class FurinaPanel : Border
         // Gold fleuron stays in the top bevel, clear of reading content.
         dc.DrawEllipse(Brushes.White, gold, new Point(ActualWidth - 23, 5), 3, 2);
         dc.DrawLine(gold, new Point(ActualWidth - 36, 5), new Point(ActualWidth - 30, 5));
+        if (CornerArt is not null && ActualWidth >= 140)
+            dc.DrawImage(CornerArt, new Rect(ActualWidth - 74, -16, 68, 68));
     }
 }
 
@@ -73,10 +78,18 @@ public sealed class FurinaOrnament : FrameworkElement
     public static readonly DependencyProperty KindProperty = DependencyProperty.Register(nameof(Kind), typeof(string), typeof(FurinaOrnament),
         new FrameworkPropertyMetadata("Crown", FrameworkPropertyMetadataOptions.AffectsRender));
     public string Kind { get => (string)GetValue(KindProperty); set => SetValue(KindProperty, value); }
+    public static readonly DependencyProperty WaterImageProperty = DependencyProperty.Register(nameof(WaterImage), typeof(ImageSource), typeof(FurinaOrnament),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+    public ImageSource? WaterImage { get => (ImageSource?)GetValue(WaterImageProperty); set => SetValue(WaterImageProperty, value); }
     public FurinaOrnament() { IsHitTestVisible = false; Focusable = false; }
     protected override void OnRender(DrawingContext dc)
     {
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
+        if (Kind == "Halo" && WaterImage is not null)
+        {
+            dc.DrawImage(WaterImage, new Rect(0, 0, ActualWidth, ActualHeight));
+            return;
+        }
         dc.PushTransform(new ScaleTransform(ActualWidth / 100, ActualHeight / 100));
         var gold = new Pen(new SolidColorBrush(Color.FromRgb(242, 212, 142)), 2);
         var white = new Pen(new SolidColorBrush(Color.FromRgb(226, 248, 255)), 1.1);

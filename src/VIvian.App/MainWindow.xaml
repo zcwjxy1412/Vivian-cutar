@@ -147,7 +147,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBlock Text="{Binding Queue.Status}" Foreground="{StaticResource DangerText}" FontWeight="SemiBold" Margin="0,0,0,10"/>
 <Button Content="我已确认，全部已关闭" Command="{Binding Queue.AcknowledgeCommand}" IsEnabled="{Binding Queue.CanAcknowledge}" HorizontalAlignment="Left" Background="White"/></StackPanel></Border>
 <!-- 今日概览 -->
-<local:FurinaPanel Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
+<local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <StackPanel Orientation="Horizontal"><local:FurinaPlaque Style="{StaticResource Ribbon}" Margin="0"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE734;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="今日概览" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <TextBlock Text="{Binding TodayText}" Style="{StaticResource Small}" VerticalAlignment="Center" Margin="14,0,0,0"/></StackPanel>
 <UniformGrid x:Name="HomeSummary" Columns="4" Margin="0,8,0,0">
@@ -158,7 +158,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </UniformGrid></StackPanel></local:FurinaPanel>
 
 <!-- 游戏与日常任务 -->
-<local:FurinaPanel Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
+<local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="游戏与日常任务" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate>
 <Border Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Margin="0,0,0,7" ClipToBounds="True"><Grid>
@@ -184,7 +184,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 
 <!-- 最近运行 + 本次运行 -->
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="3*"/><ColumnDefinition Width="2*"/></Grid.ColumnDefinitions>
-<local:FurinaPanel Style="{StaticResource Panel}" Padding="14,10" Margin="0,0,10,14"><StackPanel>
+<local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10" Margin="0,0,10,14"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE81C;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="最近运行" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <TextBlock Text="还没有真实运行记录。"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding RecentRuns.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
 <ItemsControl ItemsSource="{Binding RecentRuns}"><ItemsControl.ItemTemplate><DataTemplate>
@@ -193,7 +193,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <StackPanel Grid.Column="1"><TextBlock Text="{Binding Game}" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="{Binding Result}" Style="{StaticResource Small}" FontSize="12"/></StackPanel>
 <StackPanel Grid.Column="2" Margin="8,0,0,0"><TextBlock Text="{Binding When}" Style="{StaticResource Small}" FontSize="12" HorizontalAlignment="Right"/><TextBlock Text="{Binding Duration}" Style="{StaticResource Small}" FontSize="12" HorizontalAlignment="Right"/></StackPanel>
 </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></local:FurinaPanel>
-<local:FurinaPanel Grid.Column="1" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
+<local:FurinaPanel Grid.Column="1" CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D2;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="本次运行" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <TextBlock Text="{Binding Queue.Current}" FontSize="13"/>
 <TextBlock Text="{Binding Queue.Status}" Style="{StaticResource Small}" Margin="0,4,0,0"/>
@@ -203,15 +203,16 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 
 <!-- Right column: automation control + system status -->
 <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="0,6,0,10"><StackPanel>
-<local:FurinaPanel Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
+<local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE945;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="自动化控制" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <Button Command="{Binding OneClickCommand}" IsEnabled="{Binding CanOperateWorkspace}" HorizontalAlignment="Center" Margin="0,0,0,6" Cursor="Hand" AutomationProperties.Name="一键日常">
 <Button.Template><ControlTemplate TargetType="Button"><Grid Width="{DynamicResource Furina.RunButtonSize}" Height="{DynamicResource Furina.RunButtonSize}">
-<local:FurinaOrnament Kind="Halo"/>
-<Border x:Name="Core" Margin="28" CornerRadius="100" Background="{StaticResource Dream}" BorderBrush="White" BorderThickness="2">
+<local:FurinaOrnament Kind="Halo" WaterImage="{Binding Theme.WaterFrame}"/>
+<Border x:Name="Core" Margin="36" CornerRadius="100" BorderBrush="White" BorderThickness="2">
+<Border.Background><LinearGradientBrush StartPoint="0.2,0" EndPoint="0.8,1"><GradientStop Color="#4265CF" Offset="0"/><GradientStop Color="#2947B5" Offset="0.48"/><GradientStop Color="#152C78" Offset="1"/></LinearGradientBrush></Border.Background>
 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
 <Path Data="M 0,0 L 26,15 L 0,30 Z" Fill="White" HorizontalAlignment="Center" Margin="6,0,0,6"/>
-<TextBlock Text="一键日常" Foreground="White" FontSize="21" FontWeight="Bold"/><TextBlock Text="自动化日常" Foreground="#DFEAFF" FontSize="12" HorizontalAlignment="Center"/></StackPanel></Border></Grid>
+<TextBlock Text="一键日常" Foreground="White" FontSize="21" FontWeight="Bold"/><TextBlock Text="自动化日常" Foreground="White" FontSize="12" HorizontalAlignment="Center"/></StackPanel></Border></Grid>
 <ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
 <Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
 <UniformGrid Columns="2">
@@ -224,7 +225,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBlock Text="{Binding StopKeyText}" Style="{StaticResource Small}" FontSize="12" Margin="0,4,0,0"/>
 </StackPanel></Expander>
 </StackPanel></local:FurinaPanel>
-<local:FurinaPanel Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
+<local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9D9;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="系统状态" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <Grid Margin="0,2,0,8"><TextBlock Text="任务引擎"/><TextBlock Text="{Binding RunStateText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
 <Grid Margin="0,0,0,8"><TextBlock Text="配置同步"/><TextBlock Text="{Binding ConfigSyncText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
@@ -635,9 +636,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </TabControl>
 
 <!-- Decorative water never covers the persistent footer controls. -->
-<Rectangle Grid.Row="1" Panel.ZIndex="-1" Height="78" VerticalAlignment="Bottom" IsHitTestVisible="False"><Rectangle.Fill>
-<ImageBrush ImageSource="{Binding Theme.WaterForeground}" Viewbox="0,0.25,1,0.75" ViewboxUnits="RelativeToBoundingBox" Stretch="UniformToFill"/>
-</Rectangle.Fill></Rectangle>
+<Image Grid.Row="1" Panel.ZIndex="-1" Height="200" VerticalAlignment="Bottom" Source="{Binding Theme.WaterForeground}" Stretch="Fill" IsHitTestVisible="False"/>
 <!-- Persistent local actions stay reachable even when the page scrolls. -->
 <Border Grid.Row="2" Background="#183477" BorderBrush="#8BB8E4" BorderThickness="0,1,0,0" Padding="14,6">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>

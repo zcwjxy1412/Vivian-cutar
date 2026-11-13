@@ -169,6 +169,23 @@ public sealed class FurinaWindowLayoutTests
             var tinySendBounds = send.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(send.RenderSize));
             Assert.True(tinySendBounds.Bottom <= 392, $"Small work area hides Send: {tinySendBounds}");
             Assert.True(((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight >= 22, "Tiny work area hides every message line.");
+            // Explicitly synthetic evidence for Q; no confirmation or execution is invoked here.
+            vm.Assistant.Input = "";
+            vm.Assistant.Messages.Clear();
+            var demoTarget = new AccountConfigurationTarget(GameId.StarRail, Guid.Parse("00000000-0000-0000-0000-000000000001"));
+            var demoCard = new ProposalCard(Guid.NewGuid(), demoTarget, "演示账号组",
+                "1. 演示账号 A：每日实训\n2. 演示账号 B：体力与委托\n按以上顺序展示；不会启动游戏。",
+                "有序计划 · 合成演示", "确认（仅展示）", _ => Task.CompletedTask);
+            vm.Assistant.Messages.Add(new ChatItem(false, "离屏合成样例，不是执行回执。", [demoCard]));
+            ((Expander)assistant.FindName("QuickCommandsExpander")).IsExpanded = false;
+            FlushBindings();
+            Render((FrameworkElement)assistant.Content, 460, 800, Path.Combine(output, "assistant-ordered-plan-DEMO-460x800.png"));
+            vm.Assistant.Messages.Clear();
+            vm.Assistant.Messages.Add(new ChatItem(false,
+                "离屏合成样例，不是执行回执。\n\n这里展示较长说明在助手中的换行与滚动。运行前可以核对账号顺序、任务内容和游戏环境；待确认卡只表示计划仍在等待确认，并不表示任务已经开始或完成。\n\n" +
+                string.Concat(Enumerable.Repeat("如需调整顺序，请先返回账号管理检查已勾选的账号。运行记录应来自真实结果，未获得回执时应保留未知状态。\n\n", 4))));
+            FlushBindings();
+            Render((FrameworkElement)assistant.Content, 460, 720, Path.Combine(output, "assistant-long-message-DEMO-460x720.png"));
             assistant.Close();
             var confirmationGate = new FakeGate();
             var submissions = 0;

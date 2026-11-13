@@ -64,6 +64,19 @@ public sealed class AssistantConnectionTests
     }
 
     [Theory]
+    [InlineData("null")]
+    [InlineData("\"stop\"")]
+    public async Task NullOrNormalFinishReasonRetainsCompatibleTextResponse(string finish)
+    {
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"choices\":[{\"finish_reason\":" + finish +
+                ",\"message\":{\"role\":\"assistant\",\"content\":\"OK\"}}]}"),
+        })));
+        await new ChatCompletionsClient(http).TestConnectionAsync(Endpoint, CancellationToken.None);
+    }
+
+    [Theory]
     [InlineData("length")]
     [InlineData("content_filter")]
     [InlineData("unexpected")]

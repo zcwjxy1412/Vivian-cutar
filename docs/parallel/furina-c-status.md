@@ -1,5 +1,20 @@
 # C / AI 助手首批交付
 
+## 第二批：消费公共 v2（2026-11-13）
+
+- 已按总控指令 fast-forward 合入 `d8fd96b1a3a6b230c14dcc3ad53fdb18eca5b94b`（包含公共 `f49d9e3`）；本批 diff 以 d8fd96b 为基线。下文首批记录为历史，首批 #69 已由总控合流；总控报告其 DeepSeek 首审无 blocker，本聊天不重复审查首批。
+- 新增 `AssistantViewModel.ExclusiveActionStarting` 同步 `Action` 事件。配置/运行均在用户确认后、卡片禁用后、获取写锁或提交前触发；取消确认或确认期间 revision 失效不触发。事件异常向原命令错误处理传播并阻断后续动作。无订阅时仍保留原准入、revision、桌面锁和去重路径。B 是预期唯一订阅者，必须同步禁用全部可编辑输入并 Dispose 输入许可，不使用 async void 或延后释放；订阅/解绑归 B。事件触发后若操作失败，仍保持输入关闭，按 v2 重新显式申请许可，不能自动恢复输入。
+- 为无窗口验证，公共构造器维持原签名和 MessageBox 默认 No 行为，增加仅程序集可见的确认函数构造器重载；两条确认方法改为 internal 供真实 ViewModel 路径测试。未绕过生产人工确认，未新增公开确认开关。
+- `get_batch_progress` 新增可选 `batch_id`：严格非空 D 格式 GUID，用 v2 `LoadBatchAsync` 精确查询；未知明确报错且提示不可据此自动重发。省略仍返回最近五批次；结果仍为数组，精确查询最多一项，运行中尚无结果保持空列表。继续复用既有批次结果与 RunId，非多游父计划，不扩展执行能力。
+- 补充显式 JSON null / stop 结束原因的命名兼容用例，没有修改首批客户端产品代码。
+- 测试：精确查询在实现前 RED；事件初次构建因尚未调用而报 CS0067，随后另做运行顺序负向回归（移除运行事件调用时 Assert.False 失败），恢复调用后通过。助手针对性初轮 49/49；新增两个兼容用例后，默认全量 **1149/1149，0 失败/跳过，退出码 0**。记录位于 `artifacts/tests-c-v2/{red-batch,red-event-order,green,full}.trx`。数据独立临时目录，未启动窗口或游戏。
+- 验证命令：当前进程设置已有 DOTNET_ROOT/PATH 后，`dotnet test tests/VIvian.Tests/VIvian.Tests.csproj -c Release --results-directory artifacts/tests-c-v2 --logger 'trx;LogFileName=full.trx'`；`git diff --check` 通过。
+- 第二批 DeepSeek：通过总控提供的本机 launcher 调用真实 `deepseek_review`（deepseek-v4-pro，thinking disabled），仅发送本批 diff、新测试和必要上下文、v2 契约及脱敏验证情况。**首审 + 修复后复审共 2 轮完成，复审无剩余 blocker、无 critical/high**；请求/结果为 `artifacts/tests-c-v2/review-{request,response}{,-2}.json`，不含真实凭据，本聊天未读取 DPAPI 密钥。
+- 首审核实：意见 2（确认期间失效却先释放输入）成立；配置/运行两条 RED 用例复现后增加事件前 revision 检查。意见 1（事件异常无人处理）不成立，现有 `Mvvm.AsyncCommand` catch 调用 `ProposalCard` 错误回调并写 State，新增两条真实命令测试验证；意见 3（batch_id:null 回退）不成立，现有 schema MatchesType 在进入查询前拒绝 null/数字，新增断言验证。意见 4 为单订阅者契约注意项：任何异常都阻断后续动作，不为了继续调用其他处理器而忽略释放失败。
+- 修复后最终默认全量 **1153/1153，0 失败/跳过，退出码 0**，`artifacts/tests-c-v2/full-reviewed.trx`；确认失效 RED 记录为 `red-review.trx`。复审已发送完整本批最新 diff 和上述代码证据、测试结果。没有重复首批产品审查。
+- 复审保留低优先级建议：配置路径在事件之后、申请桌面锁之前额外检查一次 revision。当前 `ApplyConfirmedAsync` 的 stillAllowed 回调已经核对捕获 revision，且事件订阅契约仅禁用输入/释放许可；无已确认的越权写入缺陷，本批不增加重复检查。代价是异常订阅者若使提案失效，配置路径仍可能先获取桌面锁再由写入准入拒绝；不会因此允许写入。B/I 实际接线仍需集成验证，复审不证明实机焦点行为。
+- 未验证：B 窗口实际订阅后的焦点/许可释放实机、真人确认窗口、真实模型端点联调、游戏执行及 M5 本批全量。原正式安装/账号/上游配置未操作。下一步由 B/I 集成订阅后串行验收；C 不扩展公共层或多游父表。
+
 - 日期：2026-11-13；任务 #63，总任务 #59。
 - 工作树：`C:\Users\胡桃\.codex\worktrees\furina-vnext-ai\Vivian-source`；分支 `feat/furina-ai-agent`。
 - SOURCE_BASE_SHA：`ce3ebeea79c507825e66a9e97097a6f80ede33cc`；依赖公共 T0 / 分支 BASE：`8f857cf2cd16515d81f4c65f8e50b693374dccd4`。

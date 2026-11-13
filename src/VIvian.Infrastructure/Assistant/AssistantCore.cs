@@ -68,7 +68,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
      {"type":"function","function":{"name":"propose_changes","description":"用刚读取的同一游戏、账号和 revision 生成提案。只能使用 read_configuration 登记的参数路径和字符串值，写入需本机确认。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"revision":{"type":"string"},"changes":{"type":"object","additionalProperties":{"type":"string"}}},"required":["game","account_id","revision","changes"],"additionalProperties":false}}},
      {"type":"function","function":{"name":"get_run_status","description":"读取真实记录或有标记的模拟结果。按账号查询时同时提供 game 和 account_id，尚未关联的运行不会猜测归属。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]},"account_id":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":20}},"additionalProperties":false}}}
      ,{"type":"function","function":{"name":"list_accounts","description":"列出指定游戏的内部账号 ID、顺序和核对状态。目标不明确时先询问用户。","parameters":{"type":"object","properties":{"game":{"type":"string","enum":["genshin","starrail","zzz"]}},"required":["game"],"additionalProperties":false}}}
-     ,{"type":"function","function":{"name":"get_batch_progress","description":"读取最近多账号批次的进度、状态和失败原因。","parameters":{"type":"object","properties":{}}}}
+     ,{"type":"function","function":{"name":"get_batch_progress","description":"读取批次进度。提供 batch_id 时只查该批次（星铁运行计划的 action_id 即 batch_id）；未知不回退，不代表可重新提交。省略时读取最近批次。","parameters":{"type":"object","properties":{"batch_id":{"type":"string"}},"additionalProperties":false}}}
     ]
     """)!.AsArray();
         if (ScheduleProposalsEnabled)
@@ -114,7 +114,7 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
                 "read_configuration" => await ReadConfigurationAsync(ParseTarget(args), ct).ConfigureAwait(false),
                 "get_run_status" => await RunStatusAsync(args, ct).ConfigureAwait(false),
                 "list_accounts" => await ListAccountsAsync(ParseGame(args), ct).ConfigureAwait(false),
-                "get_batch_progress" => await BatchProgressAsync(ct).ConfigureAwait(false),
+                "get_batch_progress" => await BatchProgressAsync(args, ct).ConfigureAwait(false),
                 _ => Error("没有这个工具。"),
             });
         }
@@ -280,10 +280,19 @@ public sealed class AssistantTools(Func<IReadOnlyList<EngineStatusView>> engines
         }));
     }
 
-    private async Task<string> BatchProgressAsync(CancellationToken ct)
+    private async Task<string> BatchProgressAsync(JsonObject args, CancellationToken ct)
     {
         if (accountDatabase is null) return Error("账号数据尚未连接。");
-        var batches = await accountDatabase.LoadRecentBatchesAsync(5, ct).ConfigureAwait(false);
+        IReadOnlyList<AccountBatch> batches;
+        if (args["batch_id"] is { } batchNode)
+        {
+            if (!Guid.TryParseExact(ChatCompletionsClient.StringValue(batchNode), "D", out var batchId) || batchId == Guid.Empty)
+                return Error("批次 ID 格式无效。");
+            var batch = await accountDatabase.LoadBatchAsync(batchId, ct).ConfigureAwait(false);
+            if (batch is null) return Error("未找到该批次；不能据此自动重新提交。");
+            batches = [batch];
+        }
+        else batches = await accountDatabase.LoadRecentBatchesAsync(5, ct).ConfigureAwait(false);
         var summaries = new List<object>();
         foreach (var batch in batches)
         {

@@ -200,7 +200,11 @@ internal sealed class OneDragonRun : IEngineRun
         try { await _outputReader.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
         catch (Exception) { /* reader only reads */ }
         try { await _group.DisposeAsync().ConfigureAwait(false); }
-        catch (Exception) { _lastCleanup = CleanupState.Unconfirmed; }
-        _released(_lastCleanup);
+        catch (Exception)
+        {
+            _lastCleanup = CleanupState.Unconfirmed;
+            throw;
+        }
+        finally { _released(_lastCleanup); }
     }
 }

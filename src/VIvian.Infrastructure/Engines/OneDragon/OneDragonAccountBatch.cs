@@ -102,7 +102,7 @@ public static class OneDragonAccountBatch
 
     private const string BridgeDigest = "04C1D2D88B85D6E7FF3B14836CC86F788382FB6055D66E5EB40C9E38C9649EC6";
 
-    private static async Task<BatchTaskResult> RunAsync(IRunJournal journal, OneDragonAdapter adapter, IProcessSupervisor supervisor,
+    internal static async Task<BatchTaskResult> RunAsync(IRunJournal journal, OneDragonAdapter adapter, IProcessSupervisor supervisor,
         string root, Guid batchId, OneDragonHandoff handoff, Action<string>? progress, CancellationToken ct)
     {
         var context = new RunContext(Guid.NewGuid(), batchId, Game, DateTimeOffset.UtcNow);
@@ -143,6 +143,14 @@ public static class OneDragonAccountBatch
             }
             var cleanup = await run.ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
             await events.WaitAsync(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+            // Final resource release can still fail after reconciliation; do not publish a clean handoff early.
+            try { await run.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception)
+            {
+                await Update(RunPhase.Blocked, verdict.Outcome, CleanupState.Unconfirmed,
+                    ReasonCodes.CleanupUnconfirmed).ConfigureAwait(false);
+                throw;
+            }
             var clean = cleanup == CleanupState.Confirmed;
             await Update(clean ? RunPhase.Finished : RunPhase.Blocked, verdict.Outcome, cleanup, verdict.ReasonCode).ConfigureAwait(false);
             var detail = verdict.Outcome switch

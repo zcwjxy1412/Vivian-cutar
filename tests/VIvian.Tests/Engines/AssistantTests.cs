@@ -168,6 +168,24 @@ public sealed class AssistantTests : IDisposable
     }
 
     [Fact]
+    public async Task ExactBatchProgressDoesNotFallBackToRecentBatches()
+    {
+        var (db, _, tools, _, _) = await SetupAsync();
+        var wanted = await db.BeginBatchAsync(GameId.StarRail);
+        for (var i = 0; i < 6; i++) await db.BeginBatchAsync(GameId.Genshin);
+        string Args(string id) => new JsonObject { ["batch_id"] = id }.ToJsonString();
+        var result = await tools.InvokeAsync("get_batch_progress", Args(wanted.Id.ToString("D")), Ct);
+        var batch = Assert.Single(JsonNode.Parse(result.Content)!.AsArray());
+        Assert.Equal(wanted.Id.ToString("D"), batch!["batch_id"]!.GetValue<string>());
+        Assert.Empty(batch["account_results"]!.AsArray());
+        foreach (var id in new[] { Guid.NewGuid().ToString("D"), Guid.Empty.ToString("D"), "bad", wanted.Id.ToString("N") })
+            Assert.NotNull(JsonNode.Parse((await tools.InvokeAsync("get_batch_progress", Args(id), Ct)).Content)!["error"]);
+        foreach (var args in new[] { "{\"batch_id\":null}", "{\"batch_id\":123}" })
+            Assert.NotNull(JsonNode.Parse((await tools.InvokeAsync("get_batch_progress", args, Ct)).Content)!["error"]);
+        Assert.Equal(5, JsonNode.Parse((await tools.InvokeAsync("get_batch_progress", "{}", Ct)).Content)!.AsArray().Count);
+    }
+
+    [Fact]
     public async Task StarRailRunPlansAreOptInReadOnlyAndHaveASingleDurableActionId()
     {
         File.AppendAllText(Config, "use_fuel: false\nuse_reserved_trailblaze_power: false\nbreak_down_level_four_relicset: false\n");

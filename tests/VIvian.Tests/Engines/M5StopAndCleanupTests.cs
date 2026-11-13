@@ -178,6 +178,33 @@ public sealed class M5StopAndCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task CancelledPauseWithoutWorkerAcknowledgementNeverReportsPaused()
+    {
+        var group = new Group();
+        var run = new March7thRun(Guid.NewGuid(), group, new CountingSupervisor(),
+            Path.Combine(_root, "m7a.exe"), _root, "routine");
+        Record(RunId, "running"); Active(RunId);
+        March7thUpstreamActivity.Observe = _ => (true, Created);
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            var pause = run.SetPausedAsync(true, cancellation.Token);
+            Assert.Equal("{\"command\": \"pause\"}",
+                File.ReadAllText(Path.Combine(_runs, RunId + ".control")));
+            Assert.False(pause.IsCompleted);
+            Assert.False(run.IsPaused);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pause);
+            Assert.False(run.IsPaused);
+        }
+        finally
+        {
+            group.Exit();
+            await run.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task ResolutionErrorsTripOnlyThisRunsStopControl()
     {
         var group = new Group();

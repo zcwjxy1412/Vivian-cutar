@@ -115,3 +115,18 @@
 - 证据：artifacts/tests-b/full-default-final.trx、full-m5-final.trx、confirmation-final.log；截图由真实Window.Content离屏渲染，最新为默认构建。实际桌面窗口、系统DPI、游戏前台与多屏仍未验收。
 - DeepSeek第1轮仍等待提供方返回，未标通过；本轮请求之后接入的C交接与底栏调整会纳入第2轮最终差异。
 - 当前工作只修改B视图、MainViewModel、输入会话及专属测试；公共注册与C实现均来自合入提交，没有越权改写。
+
+### 审查与交付进展（以本节为最新）
+
+- 当前产品提交53086374c95b4c7823193f263257015e9ebbab11已推送；草稿PR https://github.com/zcwjxy1412/Vivian-cutar/pull/74，base integration/furina-vnext。
+- DeepSeek第1次调用在600秒后MCP超时（-32001），没有有效审查结果，不记通过；第2次/最后一次调用已提交最终B差异及C交接上下文，正在等待。两次均使用指定本机DPAPI桥接、deepseek-v4-pro、thinking=disabled；未读取/输出密钥。
+- 提交后针对性验证13/13：targeted-5308637.trx。artifacts/tests-b/visual/evidence.json记录提交、默认Release配置与五张离屏PNG哈希；不是桌面截图或实机验收。
+- 额外Codex只读质量复核正在进行，不替代DeepSeek。
+
+### B 最终交付状态（覆盖上方进行中记录）
+
+- 最新产品提交040408c（fix(ui): preserve message space with expanded shortcuts）已推送到PR74。
+- 额外Codex只读复核发现1项Important：最小浮窗长输入+展开快捷指令把消息区挤空。真实.NET 10窗口内容回归复现失败（quick-viewport-red.log），快捷区限高并独立滚动后通过（quick-viewport-green.log）；同时检查至少一行消息视口和发送按钮可见。没有发现Critical。1280宽概览拥挤仅为未验证风险，不记确定缺陷。
+- DeepSeek两次调用均在600秒MCP超时，错误码-32001，有效审查结果0。第2次请求针对5308637；随后040408c布局修复未获DeepSeek审查。已达本任务承诺的最后一次调用，不再请求第三次；独立审查阻塞/未通过，草稿不可据此认定可发布。
+- 修复后默认全量1157/1157，0失败/跳过（full-default-shortcuts.trx）；M5修复后全量1157/1157，0失败/跳过（full-m5-shortcuts.trx）。
+- 本次只操作独立B工作树和草稿PR；未部署、未启动游戏、未显示/激活桌面窗口。实际DPI/焦点/多屏、Alt+F4和关闭时序、其他功能页完整紧凑适配仍待后续验收。主屏定位及锁定历史不能滚动的取舍不变。

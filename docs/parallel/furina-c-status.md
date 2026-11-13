@@ -1,5 +1,12 @@
 # C / AI 助手首批交付
 
+## 第四批：多游持久回执消费（进行中，等待 I 冻结契约）
+
+- 已 fast-forward 到 `85977de4b8e0742e232574501dff96abddc5903c`。用户要求先补齐持久回执，再串行实机。本批仅 C 工具/卡片与专属测试；Core/迁移/宿主属于 I，协调器属于 F。
+- 已向总控聊天发送最小准备/提交/精确读取需求及回执字段；发现旧 `_canApply` 仅接受所选单星铁账号，必须保留给旧路径，新多游完整准入由宿主服务负责。类型名、旧 action_id 与新 PlanId 映射以 I 公共提交为准，不自行创建冲突类型。
+- 新增 `docs/parallel/furina-c-plan-consumption.md`：最小 DTO/签名意图、八工具兼容策略、确认卡字段复用、错误语义和 17 项合成消费测试规格。现在是规格，不声称可执行测试通过。
+- 接口提交到达后按 RED→GREEN 实现；现阶段无产品修改、无新模型请求/审查、无游戏或正式设置操作。新实现最多 DeepSeek 首审+修复后复审各一轮，新增 PR 以 integration/furina-vnext 为 base。
+
 ## 第三批真实供应商验收：三阶段通过，C 已核实证据
 
 - 总控使用固定安全入口实际执行 Probe；C 本轮只读取并校验已有结果，未重复请求供应商或发起审查。证据：本工作树 `artifacts/supplier-acceptance/evidence.json`，SHA256 `BDEFFC902F051A822881F3833F81D845FA0E5879A569E531D662AC722982FF12`。重新核对 Probe.dll/Program.cs 哈希与下列准备记录完全一致，产品版本为 `e1a0067de0c3566153903d8ee7cee67e1b176fbe`。

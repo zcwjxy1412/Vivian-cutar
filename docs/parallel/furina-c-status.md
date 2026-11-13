@@ -1,5 +1,34 @@
 # C / AI 助手首批交付
 
+## 第三批真实供应商验收：三阶段通过，C 已核实证据
+
+- 总控使用固定安全入口实际执行 Probe；C 本轮只读取并校验已有结果，未重复请求供应商或发起审查。证据：本工作树 `artifacts/supplier-acceptance/evidence.json`，SHA256 `BDEFFC902F051A822881F3833F81D845FA0E5879A569E531D662AC722982FF12`。重新核对 Probe.dll/Program.cs 哈希与下列准备记录完全一致，产品版本为 `e1a0067de0c3566153903d8ee7cee67e1b176fbe`。
+- 时间：2026-11-13 08:32:33–08:32:44 America/New_York（原始记录 13:32:33–13:32:44 UTC）。固定请求模型来源为总控批准的验收参数 `deepseek-v4-pro`，端点 `https://api.deepseek.com`；5 次 HTTP 200，实际响应 model 均为 `deepseek-v4-pro`。
+- 应用 `TestConnectionAsync`：passed，约 3.85 秒，结束原因 stop。
+- 应用 `TestToolRoundTripAsync`：passed，约 3.93 秒；收到 `vivian_probe({})`，结束原因 tool_calls，下一请求携带同 call_id 和合成随机验证码，最终 stop。原方法已断言最终文字包含验证码，日志未保存完整文字。
+- 应用 `AssistantSession.AskAsync`：passed，约 3.07 秒；收到 `list_games({})`，tool_calls → 同 call_id 的合成工具结果 → stop。结果仅含 synthetic-game/synthetic-engine/fixture-v1、随机 State，`can_run_for_real/account_configuration/ai_run_proposals` 均 false；宿主已断言最终回复包含随机 State、没有配置/运行提案。没有真实账号、路径或配置发送给模型。
+- C 核验命令为本机 PowerShell `ConvertFrom-Json` 断言 3 个阶段 passed、5 个 200 与模型一致、两对调用/结果 ID 相等及 tool_calls→stop，并 `Get-FileHash -Algorithm SHA256` 核对证据与固定宿主。上述校验退出码 0。原应用客户端没有额外注入 thinking/tool_choice，保持原 20 秒连接/往返、90 秒 Session 限制，本次均在原限制内完成；不是 DeepSeekHelper 鉴权替代验收。
+- 运行入口由总控提供：`C:/Users/胡桃/.codex/tools/deepseekhelper-launcher/run-fixed-application-probe.mjs`，固定 DLL/源码 SHA 和执行目标。总控报告入口安全审查首审+复审共 2 轮无已核实阻断并保留记录；C 未重复安全审查，也未读取密钥。入口执行命令是用指定 Node 运行该固定脚本，无密钥命令行参数。
+- 结论仅覆盖此模型/时间/产品版本的真实文字连接与无害合成工具往返。其他模型、图像、多游业务、真实账号配置写入/确认 UI、实机焦点及游戏执行仍未验收；无正式设置变更。本轮只更新状态文档与 PR #73，不修改产品代码、不重跑既有测试、不重复供应商调用。
+
+### 准备阶段记录（安全启动依赖已由上述执行解除）
+
+- 仅核对现有安全启动代码，未读取/执行解密脚本输出或 DPAPI 凭据文件。现有 `deepseekhelper-launcher/launch.mjs` 通过内部 pipe 接收 Read-Key.ps1 输出，将密钥仅放在 MCP 子进程环境并清空缓冲，但启动目标固定为 DeepSeekHelper server；不能直接运行应用客户端。按总控“需要额外安全启动入口先报”要求，本批在网络调用前报告该依赖，不自行增加密钥解密或通用带密钥命令入口。
+- 已准备并编译隔离验收宿主：本工作树 `artifacts/supplier-acceptance/Probe.csproj` / `Program.cs`（gitignored，不改正式项目）。直接引用现有 Infrastructure 项目，复用 `ChatCompletionsClient.TestConnectionAsync`、`TestToolRoundTripAsync`、`AssistantSession.AskAsync`；没有另一套模型客户端。无密钥启动只返回 `secure_parent_credential_required`，未发生网络调用。
+- 宿主只读取父进程临时注入的 `DEEPSEEK_API_KEY`，读取后清除自身环境变量；无密钥参数、文件保存或打印。固定目标 `https://api.deepseek.com` 和总控已使用的 `deepseek-v4-pro`，不修改现有应用请求参数（不注入 thinking/tool_choice），因此能验证应用本来的 20 秒连接/往返时限与 90 秒 Session 行为。
+- 三阶段：实际文字连接；应用原有随机验证码 probe；Session 只读 list_games 合成 fixture（虚拟引擎名称/版本和随机 State，无数据库、账号配置提供者、运行提案或真实路径）。记录请求模型来源、实际响应 model、finish_reason、实际调用 ID/名称/参数、已发送的合成 tool 结果、阶段结果；不记录 headers、原始响应/推理内容或 endpoint 对象。测试失败保留真实失败，不改超时求通过。该宿主不使用 DeepSeekHelper 鉴权/工具调用来代替应用通过。
+- **请求 I 提供的最小安全启动契约**：由已授权安全父进程通过现有 Read-Key 机制在内部捕获凭据，仅为下述 allowlisted dotnet 子进程设置临时 `DEEPSEEK_API_KEY`，不经命令行或工具输出；隐藏启动、结束后清除缓冲/环境；将子进程已脱敏 stdout 保存为本工作树 `artifacts/supplier-acceptance/evidence.json`。可由 I 直接执行，也可提供固定目标启动入口给 C。不要把密钥发给本聊天。
+
+```text
+executable: E:\auto agent game\.dotnet\dotnet.exe
+argument: C:\Users\胡桃\.codex\worktrees\furina-vnext-ai\Vivian-source\artifacts\supplier-acceptance\bin\Release\net10.0-windows10.0.19041.0\Probe.dll
+working directory: C:\Users\胡桃\.codex\worktrees\furina-vnext-ai\Vivian-source
+Probe.dll SHA256: 0B645059519AEF3BFB9C1930159AB6925FDD50DABA33F4B2D0D6F1519AD7E92D
+Program.cs SHA256: 3043EDF80F94547C44A42F941D11D3C3F3297D0543A7C4F6F7ACF275F940E8B5
+```
+
+- 已执行 `dotnet build artifacts/supplier-acceptance/Probe.csproj -c Release`，0 警告/错误；不带密钥启动已确认阻断，无真实供应商成功证据。未改产品代码、正式应用配置、账号或上游配置，未执行游戏。纯验证准备未发起新的 DeepSeek 实现审查。等待安全启动完成后核验 evidence，再登记真实连接与工具往返结果。
+
 ## 第二批：消费公共 v2（2026-11-13）
 
 - 已按总控指令 fast-forward 合入 `d8fd96b1a3a6b230c14dcc3ad53fdb18eca5b94b`（包含公共 `f49d9e3`）；本批 diff 以 d8fd96b 为基线。下文首批记录为历史，首批 #69 已由总控合流；总控报告其 DeepSeek 首审无 blocker，本聊天不重复审查首批。

@@ -1,5 +1,9 @@
 <Application x:Class="VIvian.App.App" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" ShutdownMode="OnMainWindowClose">
 <Application.Resources>
+<ResourceDictionary>
+<ResourceDictionary.MergedDictionaries>
+<ResourceDictionary Source="Themes/Furina/Theme.xaml"/>
+</ResourceDictionary.MergedDictionaries>
 <!-- Palette: royal blue and white with gold trim (light theme). Text pairs checked >= 4.7:1 (WCAG AA 4.5:1). -->
 <SolidColorBrush x:Key="Ink" Color="#FFFFFF"/>
 <SolidColorBrush x:Key="Rail" Color="#F21A2B6B"/>
@@ -154,4 +158,5 @@
 <ControlTemplate.Triggers><Trigger Property="IsExpanded" Value="True"><Setter TargetName="Body" Property="Visibility" Value="Visible"/></Trigger></ControlTemplate.Triggers>
 </ControlTemplate></Setter.Value></Setter></Style>
 <Style TargetType="ToolTip"><Setter Property="Background" Value="{StaticResource Raised}"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/></Style>
+</ResourceDictionary>
 </Application.Resources></Application>

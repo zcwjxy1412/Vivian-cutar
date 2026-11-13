@@ -21,4 +21,7 @@
 <PackageReference Include="Serilog.Sinks.File" Version="7.0.0" />
 <PackageReference Include="XamlAnimatedGif" Version="2.3.2" />
 </ItemGroup>
+<ItemGroup>
+<Content Include="Assets\Furina\*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+</ItemGroup>
 </Project>

@@ -1,4 +1,12 @@
-# C 多游持久计划消费规格（待 I 契约冻结）
+# C 多游持久计划消费规格与落地
+
+## v3 落地记录
+
+I 已冻结 `30aa4b5` 的 `IExecutionPlanService`，C 产品提交 `b9b290a` 消费该接口；下文签名意图为冻结前记录，以 `PersistentExecutionPlan.cs` 和 contracts-v3.md 为准。实际 Prepare 请求仅有序 Game/AccountId，不由模型指定任务/资源版本。ViewModel/Tools 可选注入同一服务，旧路径不变。
+
+可执行用例位于 `tests/VIvian.Tests/Engines/AssistantPersistentPlanTests.cs`，覆盖顺序、边界、非法嵌套字段、准备快照、完整轮次发布、精确 ID 查询/未知/中断、开关、确认前后失效、双击、类型化提交、查回提示和无聊天取消 token。旧路径继续由 AssistantTests/AssistantExclusiveActionTests 覆盖。默认全量1200/1200（数据库实现合入前）。
+
+界限：同 ID 同摘要的实际持久去重/异载荷冲突、重启中断以及失败后不启动下一项由 I/F 负责，C 目前模拟消费这些返回值；此处测试不能代替 I/F 实际集成或游戏验收。C 没有新增第九工具、公共类型、数据库迁移或执行后台任务。
 
 基线 `85977de4b8e0742e232574501dff96abddc5903c`。本文件是合成测试规格和消费需求，不是已实现接口；类型和方法名以 I 发布提交为准。I 拥有 Core/数据库迁移/宿主注册及 MainViewModel.ExecutionPlans.cs，F 拥有持久协调器；C 不另建同义公共类型。
 

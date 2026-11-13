@@ -63,6 +63,35 @@ public sealed class AssistantConnectionTests
             new ChatCompletionsClient(http).TestConnectionAsync(Endpoint, cancellation.Token));
     }
 
+    [Theory]
+    [InlineData("length")]
+    [InlineData("content_filter")]
+    [InlineData("unexpected")]
+    [InlineData("tool_calls")]
+    public async Task IncompleteCompletionCannotPassConnectionTest(string reason)
+    {
+        var body = new JsonObject { ["choices"] = new JsonArray(new JsonObject
+        {
+            ["finish_reason"] = reason,
+            ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = "OK" },
+        }) };
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(
+            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body.ToJsonString()) })));
+        await Assert.ThrowsAsync<AssistantException>(() =>
+            new ChatCompletionsClient(http).TestConnectionAsync(Endpoint, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UnsolicitedToolCallCannotPassTextConnectionTest()
+    {
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"choices":[{"message":{"role":"assistant","content":"OK","tool_calls":[{"id":"unexpected"}]}}]}"""),
+        })));
+        await Assert.ThrowsAsync<AssistantException>(() =>
+            new ChatCompletionsClient(http).TestConnectionAsync(Endpoint, CancellationToken.None));
+    }
+
     [Fact]
     public async Task ToolProbeRequiresARealCallAndEchoedResult()
     {
@@ -81,7 +110,8 @@ public sealed class AssistantConnectionTests
             };
             if (requests == 2)
                 Assert.Equal("probe-1", body["messages"]!.AsArray().Last()!["tool_call_id"]!.GetValue<string>());
-            var result = new JsonObject { ["choices"] = new JsonArray(new JsonObject { ["message"] = message }) };
+            var result = new JsonObject { ["choices"] = new JsonArray(new JsonObject
+            { ["message"] = message, ["finish_reason"] = requests == 1 ? "tool_calls" : "stop" }) };
             return new(HttpStatusCode.OK) { Content = new StringContent(result.ToJsonString()) };
         }));
         await new ChatCompletionsClient(http).TestToolRoundTripAsync(Endpoint, CancellationToken.None);

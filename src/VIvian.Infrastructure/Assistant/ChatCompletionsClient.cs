@@ -111,7 +111,16 @@ public sealed class ChatCompletionsClient(HttpClient http)
             if (JsonNode.Parse(text) is JsonObject root && root["choices"] is JsonArray { Count: > 0 } choices
                 && choices[0] is JsonObject choice && choice["message"] is JsonObject message
                 && StringValue(message["role"]) == "assistant")
+            {
+                // Some compatible endpoints omit finish_reason; explicit incomplete results are never usable.
+                if (choice["finish_reason"] is { } finish && StringValue(finish) is not ("stop" or "tool_calls"))
+                    throw new AssistantException("模型响应未完整结束，请重试或检查模型输出限制。");
+                if (StringValue(choice["finish_reason"]) == "tool_calls" && message["tool_calls"] is not JsonArray { Count: > 0 })
+                    throw new AssistantException("模型声明了工具调用，但未返回调用内容，请检查接口兼容性。");
+                if (tools is not { Count: > 0 } && message["tool_calls"] is not (null or JsonArray { Count: 0 }))
+                    throw new AssistantException("模型在未开放工具时返回了工具调用，请检查接口兼容性。");
                 return message;
+            }
             throw new AssistantException("AI 接口未返回兼容的聊天响应，请核对地址和模型。");
         }
         catch (JsonException) { throw new AssistantException("AI 接口返回了无效的 JSON。"); }

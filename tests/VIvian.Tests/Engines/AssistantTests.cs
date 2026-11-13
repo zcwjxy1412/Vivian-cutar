@@ -48,10 +48,28 @@ public sealed class AssistantTests : IDisposable
         var current = await provider.ReadAsync(card.Target, Ct);
         Assert.Equal(applied.Revision, current.Revision);
         Assert.Equal("饰品提取", current.Values.Single(v => v.Schema.Path == "instance_type").Value);
+        var toolReadback = JsonNode.Parse((await tools.InvokeAsync("read_configuration", TargetArgs(a.Id), Ct)).Content)!;
+        Assert.Equal(a.Id.ToString("D"), toolReadback["account_id"]!.GetValue<string>());
+        Assert.Equal("starrail", toolReadback["game"]!.GetValue<string>());
+        Assert.Equal(applied.Revision, toolReadback["revision"]!.GetValue<string>());
+        Assert.Equal("饰品提取", toolReadback["values"]!.AsArray()
+            .Single(v => v!["Path"]!.GetValue<string>() == "instance_type")!["value"]!.GetValue<string>());
         Assert.Empty((await db.LoadAccountSettingsAsync(b.Id)).Values);
         Assert.Equal(before, File.ReadAllText(Config));
         Assert.Equal(("{}", "{\"instance_type\":\"\\u9970\\u54C1\\u63D0\\u53D6\"}"), await ReadAuditAsync(applied.AuditId));
         await Assert.ThrowsAsync<InvalidOperationException>(() => tools.ApplyConfirmedAsync(card.Id, _ => true));
+    }
+
+    [Fact]
+    public async Task TruncatedFinalReplyDoesNotPublishOrWritePreparedProposal()
+    {
+        var (db, _, tools, a, _) = await SetupAsync();
+        using var http = new HttpClient(new ScriptedModel(a.Id, "length"));
+        var session = new AssistantSession(new ChatCompletionsClient(http), tools, "芙宁娜");
+        await Assert.ThrowsAsync<AssistantException>(() => session.AskAsync(Endpoint, "修改配置", Ct));
+        Assert.Empty(session.LastProposals);
+        Assert.Empty(session.LastRunPlans);
+        Assert.Empty((await db.LoadAccountSettingsAsync(a.Id)).Values);
     }
 
     [Fact]
@@ -227,7 +245,7 @@ public sealed class AssistantTests : IDisposable
             ["changes"] = new JsonObject { [path] = "饰品提取" },
         }.ToJsonString();
 
-    private sealed class ScriptedModel(Guid accountId) : HttpMessageHandler
+    private sealed class ScriptedModel(Guid accountId, string? finalFinishReason = null) : HttpMessageHandler
     {
         private int _request;
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
@@ -253,7 +271,8 @@ public sealed class AssistantTests : IDisposable
             if (_request == 5) Assert.True(Result(messages, "proposal")!["valid"]!.GetValue<bool>());
             return new(HttpStatusCode.OK)
             {
-                Content = new StringContent(new JsonObject { ["choices"] = new JsonArray(new JsonObject { ["message"] = reply }) }.ToJsonString()),
+                Content = new StringContent(new JsonObject { ["choices"] = new JsonArray(new JsonObject
+                { ["message"] = reply, ["finish_reason"] = _request == 5 ? finalFinishReason : null }) }.ToJsonString()),
             };
         }
 

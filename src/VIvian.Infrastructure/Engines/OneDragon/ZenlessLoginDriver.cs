@@ -168,7 +168,7 @@ internal sealed class ZenlessLoginDriver(string gamePath, string root, Action be
         }
         return awaitingLogout || lastAction == "logout_pending"
             ? NeedsUser("无法核对保留登录记录的选项，请在绝区零选中「退出并保留登录记录」后确认。")
-            : Failure("等待登录账号确认超时。" + waiting);
+            : Failure($"等待登录账号确认超时（{policy.LoginScreen.TotalSeconds:0} 秒）。" + waiting);
     }
 
     private async Task<(string Action, ScreenRegion? Point)> ClassifyAsync(CapturedFrame frame, IReadOnlyList<RecognizedText> lines,

@@ -45,7 +45,8 @@ public static class OneDragonAccountBatch
             throw new InvalidOperationException("有账号尚未绑定登录画面的脱敏标识。");
 
         using var driver = new ZenlessLoginDriver(gamePaths[0], root, lease.MarkDirty);
-        var orchestrator = new MultiAccountOrchestrator(database, driver);
+        var orchestrator = new MultiAccountOrchestrator(database, driver, host: null,
+            policy: new SwitchPolicy(LoginScreenTimeout: TimeSpan.FromMinutes(5)));
         var batchId = Guid.NewGuid();
         var handoffClean = true;
         try

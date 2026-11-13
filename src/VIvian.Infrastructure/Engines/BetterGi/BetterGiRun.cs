@@ -77,6 +77,7 @@ internal sealed class BetterGiRun : IEngineRun
     public IAsyncEnumerable<RunEvent> Events => _events.Reader.ReadAllAsync();
     internal BetterGiRunEvidence Evidence => _evidence;
     internal bool Detached => _detached;
+    internal bool CleanupConfirmedAfterDisposal { get; private set; }
     internal BetterGiRunObservation Observe() => _evidence.Observe(_rootExitCode);
 
     private void Emit(RunEventKind kind, string message) =>
@@ -268,5 +269,6 @@ internal sealed class BetterGiRun : IEngineRun
         try { await _group.DisposeAsync().ConfigureAwait(false); }
         catch (Exception) { _lastCleanup = CleanupState.Unconfirmed; }
         _released(_lastCleanup);
+        CleanupConfirmedAfterDisposal = _lastCleanup == CleanupState.Confirmed;
     }
 }

@@ -141,7 +141,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
         }
     }
 
-    private static async Task<BatchTaskResult> RecordDailyAsync(LocalDatabase database, BetterGiDailyAcceptanceResult result, bool acceptance)
+    internal static async Task<BatchTaskResult> RecordDailyAsync(LocalDatabase database, BetterGiDailyAcceptanceResult result, bool acceptance)
     {
         var cleanup = result.Restored ? result.Cleanup : CleanupState.Unconfirmed;
         var clean = cleanup is CleanupState.Confirmed or CleanupState.NotRequired;

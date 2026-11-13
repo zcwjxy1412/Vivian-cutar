@@ -59,12 +59,26 @@ internal static class BetterGiNativeDaily
         observation is { OwnedPrimary: true, FlowEnded: true,
             ForeignActivitySeen: false, AdverseSignal: false, ExitCode: 0 };
 
-    internal static async Task<BetterGiDailyAcceptanceResult> RunAsync(string root, Guid accountId,
+    internal static Task<BetterGiDailyAcceptanceResult> RunAsync(string root, Guid accountId,
         string revision, string reportDirectory, DesktopOperationLease lease,
         Func<CancellationToken, Task> confirmGate, CancellationToken ct,
         IReadOnlyDictionary<string, string>? accountParameters = null)
     {
         lease.VerifyCommonOwner();
+        return RunCoreAsync(root, accountId, revision, reportDirectory, lease, async (context, token) =>
+        {
+            var adapter = new BetterGiAdapter(() => root,
+                BetterGiArguments.OneDragon(BetterGiAccountPlan.SourceProfileName(accountId)).Request!) { DelegateNativeTasks = true };
+            return (BetterGiRun)await adapter.LaunchAsync(context,
+                new WindowsProcessSupervisor(startMinimizedWithoutActivation: true), token, confirmGate).ConfigureAwait(false);
+        }, ct, accountParameters);
+    }
+
+    internal static async Task<BetterGiDailyAcceptanceResult> RunCoreAsync(string root, Guid accountId,
+        string revision, string reportDirectory, DesktopOperationLease lease,
+        Func<RunContext, CancellationToken, Task<BetterGiRun>> launch, CancellationToken ct,
+        IReadOnlyDictionary<string, string>? accountParameters = null)
+    {
         if (lease.Recovering) throw new InvalidOperationException("请先恢复未完成的批次。");
         var profileName = BetterGiAccountPlan.SourceProfileName(accountId);
         var plan = await BetterGiConfiguration.InspectOneDragonAsync(root, profileName, ct).ConfigureAwait(false);
@@ -92,6 +106,7 @@ internal static class BetterGiNativeDaily
         var restored = false;
         string? startError = null;
         string? startErrorDetail = null;
+        BetterGiRun? activeRun = null;
         try
         {
             lease.MarkDirty();
@@ -99,11 +114,9 @@ internal static class BetterGiNativeDaily
                 ? accountParameters : new Dictionary<string, string>(), handoffAtGate: true);
             // Preserve every upstream setting, including teams, scripts, capture and teleport settings.
             overlay.Apply(revision, "关闭软件");
-            var adapter = new BetterGiAdapter(() => root, BetterGiArguments.OneDragon(profileName).Request!) { DelegateNativeTasks = true };
             var context = new RunContext(runId, runId, GameId.Genshin, DateTimeOffset.UtcNow);
             cleanup = CleanupState.Unconfirmed;
-            await using var run = await adapter.LaunchAsync(context,
-                new WindowsProcessSupervisor(startMinimizedWithoutActivation: true), ct, confirmGate).ConfigureAwait(false);
+            await using var run = activeRun = await launch(context, ct).ConfigureAwait(false);
             // The original engine already persists its logs; consume the event queue during arbitrarily long tasks.
             _ = DrainEventsAsync(run.Events);
             try
@@ -136,6 +149,8 @@ internal static class BetterGiNativeDaily
         }
         finally
         {
+            if (activeRun is not null && !activeRun.CleanupConfirmedAfterDisposal)
+                cleanup = CleanupState.Unconfirmed;
             if (cleanup is CleanupState.Confirmed or CleanupState.NotRequired)
             {
                 var profileRestore = overlay.Restore();

@@ -7,6 +7,9 @@ using System.Windows.Media.Imaging;
 using System.Xml.Linq;
 using VIvian.App;
 using VIvian.Core.Execution;
+using VIvian.Core;
+using VIvian.Core.Engines;
+using VIvian.Infrastructure.Assistant;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Simulation;
@@ -67,8 +70,13 @@ public sealed class FurinaWindowLayoutTests
                 main.Width = width; main.Height = height; main.UpdateHomeLayout();
                 Assert.Equal(width < 1280, main.IsCompactLayout);
                 Render(home, width, height, Path.Combine(output, $"home-content-{width}x{height}.png"));
-                Assert.Equal(width < 1280 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);
+                Assert.Equal(width < 1280 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
+                var stopBounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
+                Assert.True(stopBounds.Bottom <= height && stopBounds.Right <= width, $"Stop clipped: {stopBounds}");
             }
+            vm.ReportAssistantInputBlocked("测试提示：运行中暂不能进入聊天。");
+            FlushBindings();
+            Assert.Equal(vm.Status, ((TextBlock)main.FindName("PersistentStatusText")).Text);
             var gate = new FakeGate();
             assistant = new AssistantWindow(vm.Assistant, gate, vm);
             var input = (TextBox)assistant.FindName("InputBox");
@@ -106,6 +114,28 @@ public sealed class FurinaWindowLayoutTests
             Assert.NotNull(input.Template.FindName("PART_ContentHost", input));
             Assert.True(input.AcceptsReturn);
             Assert.True(input.MaxHeight < double.PositiveInfinity);
+            assistant.Close();
+            var confirmationGate = new FakeGate();
+            var submissions = 0;
+            var tools = new AssistantTools(() => [], _ => Task.FromResult<IReadOnlyList<RunRecord>>([])) { ScheduleProposalsEnabled = true };
+            var confirmingModel = new AssistantViewModel(new ThemeAssets(fixture.FullName, fixture.FullName), new AssistantSettingsStore(fixture.FullName),
+                tools, _ => true, fixture.FullName, () => Task.CompletedTask, _ =>
+                {
+                    Assert.False(assistant!.Interaction.CanEdit);
+                    Assert.False(((TextBox)assistant.FindName("InputBox")).IsEnabled);
+                    Assert.Equal(1, confirmationGate.Releases);
+                    submissions++;
+                    return Task.FromResult("模拟已接收，非真实执行");
+                }, (_, _, _) => true);
+            assistant = new AssistantWindow(confirmingModel, confirmationGate);
+            Assert.True(assistant.Interaction.TryEnter());
+            FlushBindings();
+            var target = new AccountConfigurationTarget(GameId.StarRail, Guid.NewGuid());
+            var plan = new AssistantRunPlan(Guid.NewGuid(), target, "隔离样例", "revision", 1, "saved", DateTimeOffset.UtcNow.AddMinutes(1));
+            var card = new ProposalCard(plan.Id, target, "隔离样例", "模拟计划", "确认测试", "确认", _ => Task.CompletedTask);
+            confirmingModel.ConfirmRunAsync(card, plan).GetAwaiter().GetResult();
+            confirmingModel.ConfirmRunAsync(card, plan).GetAwaiter().GetResult();
+            Assert.Equal(1, submissions);
         }
         finally
         {
@@ -138,5 +168,3 @@ public sealed class FurinaWindowLayoutTests
         private sealed class Release(Action action) : IDisposable { public void Dispose() => action(); }
     }
 }
-
-

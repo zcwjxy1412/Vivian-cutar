@@ -6,9 +6,9 @@
 - 分支：feat/furina-wpf-ui。
 - SOURCE_BASE_SHA：ce3ebeea79c507825e66a9e97097a6f80ede33cc。
 - 当前产品基线 / T0：8f857cf2cd16515d81f4c65f8e50b693374dccd4。
-- A：草稿 PR #71；实现 f6cb0af，交接补记 9078182。总控正在处理注册、审查、合流；B 尚未接收合流 SHA。
-- 当前范围：已合入 d8fd96b 并实现首批首页、浮窗与输入许可；产品修改暂存待首审。尚未创建 B 产品 PR。
-- 依赖：已读取 v2；仍等待 C 的 ExclusiveActionStarting 同步事件提交，再完成提案确认前的输入释放。下方布局/入口清单记录的是 T0 只读审计事实，当前实现变更见文末。
+- A/I 已接收并合入 d8fd96b；C 的事件提交 e1a0067 也已合入。A 首批已由总控完成 DeepSeek 首审，B 不重复。
+- 当前范围：已实现首批首页、浮窗、输入许可生命周期与 C 确认前同步释放；本地布局提交7685cd9，交接补丁待记录新提交。准备草稿PR，禁止部署。
+- 依赖：已消费 v2 的 AssistantInputGate 与 ExclusiveActionStarting。下方布局/入口清单是 T0 只读审计事实，最新实现及验证见文末。
 
 ## 已固定的行为
 
@@ -100,3 +100,18 @@
 验证证据文件：artifacts/tests-b/input-red.log（初始2失败/1通过）、input-green.log（3/3）、windows-first.log（初始绑定失败）、windows-second.log（修复后4/4）、recovery-red.log（恢复出现未撤销）、recovery-green.log（修复后4/4）、full-default.trx（1145/1145）、full-m5.trx（1145/1145）。最新离屏PNG为M5测试写出的真实窗口内容，未执行 Window.Show/Activate，不是实际桌面截图；待提交后会重建带提交身份的证据。
 
 当前明确限制：系统DPI/多屏/实际游戏前台焦点、Alt+F4及主窗关闭时序需要总控串行实机；首次定位暂约束到主屏工作区，不声称多屏恢复完成。聊天锁定时消息区也禁用交互；需要阅读更早内容需空闲时显式进入。完整功能页紧凑适配未在本垂直切片全部验收。首批候选不部署。
+
+### C 交接已接通（首审等待期间的新进展）
+
+已合入 C 提交 e1a0067de0c3566153903d8ee7cee67e1b176fbe。AssistantWindow 订阅 ExclusiveActionStarting，并同步禁用输入/释放许可；Closed 取消订阅。实际 UI + C 确认路径测试先失败（提交时输入仍启用），接通后13/13通过；重复确认仅提交一次，模拟宿主接收前已经观察到 InputBox.IsEnabled=false、许可释放一次。没有引用不存在接口，也没有绕过 C/宿主自身准入。
+
+首批布局本地提交7685cd9；当前新增交接仍待最终审查/提交。最终默认/M5全量正在执行；DeepSeek第一轮请求是交接事件到达前的B差异，复审将包含已接通事件与必要C方法上下文。
+
+
+### 首批最终本地验证
+
+- 默认全量1157/1157，M5全量1157/1157，0失败/跳过，含C事件增量。
+- 最终绑定/输入/确认针对性13/13。补充检查960/1600布局停止按钮在视口内；全局底栏显示Status，拒绝聊天原因不只在首页可见。
+- 证据：artifacts/tests-b/full-default-final.trx、full-m5-final.trx、confirmation-final.log；截图由真实Window.Content离屏渲染，最新为默认构建。实际桌面窗口、系统DPI、游戏前台与多屏仍未验收。
+- DeepSeek第1轮仍等待提供方返回，未标通过；本轮请求之后接入的C交接与底栏调整会纳入第2轮最终差异。
+- 当前工作只修改B视图、MainViewModel、输入会话及专属测试；公共注册与C实现均来自合入提交，没有越权改写。

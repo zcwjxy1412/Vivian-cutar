@@ -639,7 +639,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <!-- Persistent local actions stay reachable even when the page scrolls. -->
 <Border Grid.Row="2" Background="{StaticResource Furina.StageBrush}" Padding="14,6">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="{Binding VersionText}" ToolTip="{Binding VersionText}" Foreground="#D6E5FF" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0"/>
+<TextBlock x:Name="PersistentStatusText" Text="{Binding Status}" ToolTip="{Binding VersionText}" Foreground="#D6E5FF" FontSize="12" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Margin="0,0,12,0"/>
 <StackPanel Grid.Column="1" Orientation="Horizontal">
 <TextBlock Text="{Binding RunStateText}" Foreground="#CFE6FF" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0"/>
 <Button Content="AI 助手" Click="OpenAssistant" IsEnabled="{Binding CanOperateWorkspace}" Padding="12,4" MinHeight="30" Margin="0,0,8,0"/>

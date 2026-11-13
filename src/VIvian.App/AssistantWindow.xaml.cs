@@ -19,6 +19,7 @@ public partial class AssistantWindow : Window
         DataContext = model;
         model.Messages.CollectionChanged += OnMessagesChanged;
         model.PropertyChanged += OnModelChanged;
+        model.ExclusiveActionStarting += ReleaseForExclusiveAction;
         if (host is not null)
         {
             host.PropertyChanged += OnHostStateChanged;
@@ -36,6 +37,7 @@ public partial class AssistantWindow : Window
             model.CancelRequest();
             model.Messages.CollectionChanged -= OnMessagesChanged;
             model.PropertyChanged -= OnModelChanged;
+            model.ExclusiveActionStarting -= ReleaseForExclusiveAction;
             if (host is not null)
             {
                 host.PropertyChanged -= OnHostStateChanged;
@@ -66,6 +68,12 @@ public partial class AssistantWindow : Window
         EditingSurface.SetCurrentValue(IsEnabledProperty, false);
         Interaction.Dispose();
 
+    }
+
+    private void ReleaseForExclusiveAction()
+    {
+        if (Dispatcher.CheckAccess()) LockInput();
+        else Dispatcher.Invoke(LockInput);
     }
 
     private void EnterChat(object sender, RoutedEventArgs e) => TryOpenForUser();

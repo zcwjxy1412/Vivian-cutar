@@ -23,7 +23,7 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 </Grid></Border>
 <StackPanel Grid.Row="1" Margin="14,10,14,8">
 <WrapPanel><Button Content="进入聊天" Click="EnterChat" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
-<Button Content="停止任务" Click="StopLocally" Style="{StaticResource Furina.DangerButtonStyle}" IsEnabled="{Binding StopSource.CanStopAll, RelativeSource={RelativeSource AncestorType=Window}}" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
+<Button Content="停止任务" Click="StopLocally" Style="{StaticResource Furina.DangerButtonStyle}" IsEnabled="{Binding StopSource.CanStopAll, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=False, TargetNullValue=False}" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
 <Button Content="取消请求" Command="{Binding CancelRequestCommand}" IsEnabled="{Binding IsBusy}" MinHeight="32" Padding="10,4" Margin="0,0,0,6"/></WrapPanel>
 <TextBlock Text="{Binding Interaction.Hint, RelativeSource={RelativeSource AncestorType=Window}}" Foreground="{StaticResource Furina.MutedTextBrush}" FontSize="12" AutomationProperties.LiveSetting="Polite"/>
 </StackPanel>

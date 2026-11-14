@@ -34,7 +34,7 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <Button Content="接口设置" Command="{Binding ToggleSettingsCommand}" HorizontalAlignment="Left" MinHeight="28" Padding="10,2" Margin="0,0,0,4"/>
 
 </StackPanel>
-<ScrollViewer Visibility="{Binding SettingsVisibility}" Grid.Row="1" Panel.ZIndex="1" Margin="14,0,14,0" Background="#E7EEFF" VerticalScrollBarVisibility="Auto">
+<ScrollViewer x:Name="SettingsScroll" Visibility="{Binding SettingsVisibility}" Grid.Row="1" Panel.ZIndex="1" Margin="14,0,14,0" Background="#E7EEFF" VerticalScrollBarVisibility="Auto">
 <Border Style="{StaticResource Furina.PanelStyle}" Background="{StaticResource Furina.SoftBrush}" Padding="12"><StackPanel>
 <TextBlock Text="AI 接口" FontWeight="SemiBold"/>
 <TextBlock Text="接口地址" FontSize="12"/><TextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="接口地址"/>
@@ -64,7 +64,8 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <Expander x:Name="QuickCommandsExpander" Header="快捷指令" IsExpanded="True" Margin="0,0,0,6"><ScrollViewer MaxHeight="36" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsControl ItemsSource="{Binding QuickCommands}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Command="{Binding DataContext.QuickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" MinHeight="28" FontSize="12" Padding="8,4" Margin="0,0,6,6"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Expander>
 <local:FurinaPanel Background="#D7E9FF" BorderBrush="#D7BC79" BorderThickness="1.5" CornerRadius="16" Padding="6,2,6,6"><StackPanel>
-<TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="72" Background="#F6FAFF" BorderBrush="#F6FAFF" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="输入你的问题">
+<!-- The shared template also applies Padding as host margin; keep this height-capped editor's inset small. -->
+<TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Padding="8,3" MinHeight="44" MaxHeight="72" Background="#F6FAFF" BorderBrush="#F6FAFF" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="输入你的问题">
 <TextBox.InputBindings><KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox>
 <DockPanel Margin="0,8,0,0"><Button x:Name="SendButton" DockPanel.Dock="Right" Content="➤" ToolTip="发送（Ctrl+Enter）" AutomationProperties.Name="发送" Command="{Binding SendCommand}" Style="{StaticResource Furina.PrimaryButtonStyle}" Padding="12,4" MinHeight="32"/>
 <TextBlock Text="Enter 换行 · Ctrl+Enter 发送" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}" VerticalAlignment="Center"/></DockPanel></StackPanel></local:FurinaPanel>

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><TargetFramework>net10.0-windows10.0.19041.0</TargetFramework><OutputType>Exe</OutputType><UseWPF>true</UseWPF><AssemblyName>CourtPreview</AssemblyName><ApplicationManifest>app.manifest</ApplicationManifest></PropertyGroup>
+<ItemGroup><ProjectReference Include="../../src/VIvian.App/VIvian.App.csproj"/>
+<Content Include="../../src/VIvian.App/MainWindow.xaml;../../src/VIvian.App/AssistantWindow.xaml;../../src/VIvian.App/App.xaml" Link="Markup/%(Filename)%(Extension)" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always"/><Content Include="../../src/VIvian.App/Themes/Furina/Theme.xaml" Link="Markup/Theme.xaml" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always"/>
+<Content Include="input-sha256.json" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always"/></ItemGroup>
+</Project>

@@ -23,6 +23,7 @@ internal sealed class FakeLauncherGroup(Guid runId) : ISupervisedProcessGroup
     public CleanupState TerminateResult { get; set; } = CleanupState.Confirmed;
     public int TerminateCalls;
     public bool Disposed;
+    public int DisposeCalls;
     public bool FailDispose;
 
     public void Write(params string[] lines)
@@ -56,6 +57,7 @@ internal sealed class FakeLauncherGroup(Guid runId) : ISupervisedProcessGroup
 
     public ValueTask DisposeAsync()
     {
+        Interlocked.Increment(ref DisposeCalls);
         Disposed = true;
         if (FailDispose) throw new IOException("Synthetic supervisor disposal failure");
         return ValueTask.CompletedTask;

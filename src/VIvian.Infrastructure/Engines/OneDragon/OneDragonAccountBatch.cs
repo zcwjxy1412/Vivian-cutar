@@ -114,14 +114,17 @@ public static class OneDragonAccountBatch
 
     internal static async Task<BatchTaskResult> RunAsync(IRunJournal journal, OneDragonAdapter adapter, IProcessSupervisor supervisor,
         string root, Guid batchId, OneDragonHandoff handoff, Action<string>? progress, CancellationToken ct,
-        Func<Guid, CancellationToken, Task>? beforeRun = null)
+        Func<Guid, CancellationToken, Task>? beforeRun = null, TimeSpan? journalTimeout = null)
     {
         var context = new RunContext(Guid.NewGuid(), batchId, Game, DateTimeOffset.UtcNow);
         if (beforeRun is not null) await beforeRun(context.RunId, ct).ConfigureAwait(false);
-        Task Update(RunPhase phase, RunOutcome? outcome, CleanupState cleanup, string? reason) =>
-            journal.PublishAsync(new(context.RunId, batchId, Game, RuleVersion, false, phase, outcome, cleanup,
-                reason, DateTimeOffset.UtcNow), CancellationToken.None);
-        await Update(RunPhase.Starting, null, CleanupState.Pending, null).ConfigureAwait(false);
+        var writeLimit = journalTimeout ?? TimeSpan.FromSeconds(8);
+        var writes = new OneDragonJournalBoundary(writeLimit);
+        Task Update(RunPhase phase, RunOutcome? outcome, CleanupState cleanup, string? reason,
+            CancellationToken token = default) =>
+            writes.WriteAsync(writeToken => journal.PublishAsync(new(context.RunId, batchId, Game, RuleVersion, false,
+                phase, outcome, cleanup, reason, DateTimeOffset.UtcNow), writeToken), token);
+        await Update(RunPhase.Starting, null, CleanupState.Pending, null, ct).ConfigureAwait(false);
         IEngineRun run;
         try
         {
@@ -132,11 +135,13 @@ public static class OneDragonAccountBatch
         catch (EngineStartException ex)
         {
             var startCleanup = ex.NothingStarted ? CleanupState.NotRequired : CleanupState.Unconfirmed;
-            await Update(RunPhase.Blocked, RunOutcome.Indeterminate, startCleanup, ex.ReasonCode).ConfigureAwait(false);
+            try { await Update(RunPhase.Blocked, RunOutcome.Indeterminate, startCleanup, ex.ReasonCode).ConfigureAwait(false); }
+            catch (Exception) { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(ex).Throw(); }
             return new(context.RunId, false, ex.NothingStarted, true, ex.Message, RunOutcome.Indeterminate);
         }
 
-        var events = ReadEventsAsync();
+        var events = Task.Run(ReadEventsAsync);
+        _ = ObserveTaskAsync(events);
         RunVerdict verdict = new(RunOutcome.Indeterminate, ReasonCodes.NoCompletionEvidence, []);
         var cleanup = CleanupState.Unconfirmed;
         Exception? failure = null;
@@ -144,28 +149,41 @@ public static class OneDragonAccountBatch
         {
             try
             {
-                await Update(RunPhase.Running, null, CleanupState.Pending, null).ConfigureAwait(false);
-                verdict = await run.WaitForVerdictAsync(ct).ConfigureAwait(false);
+                await Update(RunPhase.Running, null, CleanupState.Pending, null, ct).ConfigureAwait(false);
+                var pendingVerdict = run.WaitForVerdictAsync(ct);
+                _ = ObserveTaskAsync(pendingVerdict);
+                // A failed event writer must stop an engine that is still doing work, not wait for its verdict.
+                if (await Task.WhenAny(pendingVerdict, events).ConfigureAwait(false) == events)
+                    await events.ConfigureAwait(false);
+                verdict = await pendingVerdict.ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
-                using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(25));
-                await run.RequestStopAsync(StopMode.Emergency, stop.Token).ConfigureAwait(false);
-                try { await run.WaitForVerdictAsync(stop.Token).ConfigureAwait(false); }
-                catch (OperationCanceledException) { }
                 verdict = new(RunOutcome.Cancelled, ReasonCodes.UserStop, []);
             }
-            cleanup = await run.ReconcileAsync(CancellationToken.None).ConfigureAwait(false);
-            await events.WaitAsync(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
         }
         catch (Exception ex) { failure = ex; }
+
+        if (failure is not null || ct.IsCancellationRequested)
+        {
+            using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+            try { await run.RequestStopAsync(StopMode.Emergency, stop.Token).ConfigureAwait(false); }
+            catch (Exception ex) { failure ??= ex; }
+        }
+        using (var reconcile = new CancellationTokenSource(TimeSpan.FromSeconds(25)))
+        {
+            try { cleanup = await run.ReconcileAsync(reconcile.Token).ConfigureAwait(false); }
+            catch (Exception ex) { failure ??= ex; }
+        }
+        if (failure is null)
+            try { await events.WaitAsync(writeLimit).ConfigureAwait(false); }
+            catch (Exception ex) { failure = ex; }
 
         // Release once on every path, retaining the original error if release also fails.
         try { await run.DisposeAsync().ConfigureAwait(false); }
         catch (Exception ex) { failure ??= ex; }
         if (failure is not null)
         {
-            _ = ObserveEventsAsync();
             try
             {
                 await Update(RunPhase.Blocked, verdict.Outcome, CleanupState.Unconfirmed,
@@ -185,9 +203,9 @@ public static class OneDragonAccountBatch
         };
         return new(context.RunId, verdict.Outcome == RunOutcome.Success, clean, true, detail, verdict.Outcome);
 
-        async Task ObserveEventsAsync()
+        static async Task ObserveTaskAsync(Task task)
         {
-            try { await events.ConfigureAwait(false); }
+            try { await task.ConfigureAwait(false); }
             catch (Exception) { /* Observe a late journal failure without replacing the first error. */ }
         }
 
@@ -195,7 +213,7 @@ public static class OneDragonAccountBatch
         {
             await foreach (var entry in run.Events.ConfigureAwait(false))
             {
-                await journal.AppendEventsAsync([entry], CancellationToken.None).ConfigureAwait(false);
+                await writes.WriteAsync(token => journal.AppendEventsAsync([entry], token)).ConfigureAwait(false);
                 if (entry.Kind == RunEventKind.Progress) progress?.Invoke(entry.Message);
             }
         }

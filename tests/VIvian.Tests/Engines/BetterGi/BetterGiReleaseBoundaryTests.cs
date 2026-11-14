@@ -111,6 +111,8 @@ public sealed class BetterGiReleaseBoundaryTests
                 Assert.Equal(!failDispose, result.Restored);
             });
             Assert.Equal(failDispose, fixture.Registry.IsBusy);
+            var recorded = await db.ReadRecentRunsAsync(10);
+            Assert.All(recorded, run => Assert.Equal(failDispose ? RunPhase.Blocked : RunPhase.Finished, run.Phase));
             Assert.Equal(failDispose, File.Exists(Path.Combine(owner, "native-recovery.json")));
             Assert.Equal(failDispose, BetterGiNativeDaily.Profile(fixture.Root, first.Id).HasPending);
             Assert.Equal(failDispose, File.Exists(Path.Combine(fixture.Root, "User", "config.json.vivian-domain-recovery")));

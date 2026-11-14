@@ -588,8 +588,8 @@ public partial class App : Application
         var states = vm.Engines.ToDictionary(e => e.Id, e => e.Compatibility);
         if (states[GameId.Genshin] != "版本未知" || states[GameId.StarRail] != "待桌面验证" || states[GameId.ZenlessZoneZero] != "未设置路径")
             throw new InvalidOperationException("Engine discovery states unexpected: " + string.Join(", ", states.Select(kv => kv.Key + "=" + kv.Value)));
-        if (vm.Engines.Any(e => !e.Execution.Contains("未开放", StringComparison.Ordinal)))
-            throw new InvalidOperationException("An engine card does not state that real execution is unavailable");
+        if (vm.Engines.Any(e => e.CanRunForReal))
+            throw new InvalidOperationException("A harmless unverified engine fixture was admitted for real execution");
         if (vm.Engines.Any(e => e.Report is null || e.Report.RealExecutionAllowed))
             throw new InvalidOperationException("An engine report is missing or allows real execution");
         return "engine readiness: 原神=版本未知, 星铁=待桌面验证, 绝区零=未设置 (read-only fixtures).";

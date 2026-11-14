@@ -19,3 +19,5 @@
 AI真实合成业务验证：6次HTTP200、模型匹配，两阶段（有序三游确认卡、精确未知计划）通过，prepare1/submit0/query1，无真实账号/游戏；详见 C 交付记录。用户另行明确同意将现有本机密钥配置到正式AI助手，此配置将在完整数据备份之后进行，密钥不经聊天。
 
 只读预检（artifacts/readonly-preflight/result.log）：复制档案的三游各2个勾选账号，6个SavedExecutionPlanReader请求均prepared；星铁ZIP Verified/安装IdentityVerified、ZZZ IdentityVerified、原神PendingValidation且无安装错误（仍待实机）。未调用提交/启动，未输出账号名称、标识或配置内容。正式保存的发行包路径存在。
+
+最终包093aac默认/统一各1268/1268、升级副本启动通过；WPF烟测发现新GI接线下未核验时的Execution文案缺“未开放”。先以新断言复现失败，再修正提示；烟测也直接检查CanRunForReal，保留Report门槛，不以关键词替代准入。注册/描述3/3通过。接线任务由此使用最后第2轮DeepSeek（review-2.json），核实无实现阻断：RealExecutionPolicy由编译宏决定且只有getter，不是可变静态环境；rewardAcceptance指专用奖励验收模式，命名不是逻辑倒置；ConfigureHomeGenshinReward明确以_genshinDailyBatch is null设HomeRewardWired，两路径互斥；注册测试独立验证DI存在性，烟测验证未核验禁止，两者职责不同。此后仅重新测试/构建，不追加第三轮。093aac候选保留为烟测失败证据，不部署。

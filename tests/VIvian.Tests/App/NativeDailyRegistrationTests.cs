@@ -8,6 +8,14 @@ namespace VIvian.Tests.App;
 public sealed class NativeDailyRegistrationTests
 {
     [Fact]
+    public void NativeDailyDescriptionDoesNotClaimAvailabilityBeforeInstallationCheck()
+    {
+        var card = new VIvian.App.EngineCard(VIvian.Core.GameId.Genshin, "原神", "BetterGI", "") { GenshinDailyWired = true };
+        Assert.False(card.CanRunForReal);
+        Assert.Contains("未开放", card.Execution);
+    }
+
+    [Fact]
     public void UnifiedDailyUsesNativeSavedPlanAndRecoveryWithoutOpeningLegacyCliGate()
     {
         var services = new ServiceCollection();

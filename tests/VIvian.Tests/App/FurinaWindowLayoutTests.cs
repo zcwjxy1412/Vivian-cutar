@@ -72,6 +72,7 @@ public sealed class FurinaWindowLayoutTests
                 Assert.Equal(width < 1280, main.IsCompactLayout);
                 Render(home, width, height, Path.Combine(output, $"home-content-{width}x{height}.png"));
                 AssertMedallionTextContrast((Button)main.FindName("DailyRunButton"), Path.Combine(root, "src", "VIvian.App", "Assets", "Furina", "run-medallion.png"));
+                Assert.Equal(1536, Assert.IsAssignableFrom<BitmapSource>(((FurinaOrnament)main.FindName("BrandCrown")).WaterImage).PixelWidth);
                 Assert.Equal(width < 1500 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
                 var stopBounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
                 Assert.True(stopBounds.Bottom <= height && stopBounds.Right <= width, $"Stop clipped: {stopBounds}");
@@ -153,6 +154,7 @@ public sealed class FurinaWindowLayoutTests
             Assert.True(assistant.Interaction.TryEnter());
             FlushBindings();
             Render((FrameworkElement)assistant.Content, 460, 720, Path.Combine(output, "assistant-reference-460x720.png"));
+            Assert.Equal(1536, Assert.IsAssignableFrom<BitmapSource>(((FurinaOrnament)assistant.FindName("AssistantCrown")).WaterImage).PixelWidth);
             AuditOffscreenText((FrameworkElement)assistant.Content);
             Assert.True(input.IsEnabled);
             assistant.LockInput();
@@ -325,6 +327,8 @@ public sealed class FurinaWindowLayoutTests
         // Use both actual text bounds: fixed font sizes occupy different image regions at 168/218 DIP.
         var core = Assert.IsType<StackPanel>(button.Template.FindName("Core", button));
         var art = Assert.IsType<FurinaOrnament>(button.Template.FindName("MedallionArt", button));
+        Assert.Equal(image.PixelWidth, Assert.IsAssignableFrom<BitmapSource>(art.WaterImage).PixelWidth);
+        Assert.Equal(BitmapScalingMode.HighQuality, RenderOptions.GetBitmapScalingMode(art));
         foreach (var text in core.Children.OfType<TextBlock>())
         {
             var bounds = new Rect(text.TranslatePoint(new Point(), art), text.RenderSize);

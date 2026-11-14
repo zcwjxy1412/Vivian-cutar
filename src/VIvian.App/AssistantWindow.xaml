@@ -16,7 +16,7 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <Grid SizeChanged="OnContentSizeChanged"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
 <Border Background="#183477" CornerRadius="16,16,0,0" Padding="12,7" MouseLeftButtonDown="DragHeader">
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<local:FurinaOrnament WaterImage="{Binding Theme.Crown}" Width="40" Height="44" Margin="0,0,8,0"/>
+<local:FurinaOrnament x:Name="AssistantCrown" RenderOptions.BitmapScalingMode="HighQuality" WaterImage="{Binding Theme.Crown}" Width="40" Height="44" Margin="0,0,8,0"/>
 <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="#FFFFFF" FontFamily="STZhongsong, SimSun, Microsoft YaHei UI" FontSize="22" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding StatusLine}" Foreground="#D6E5FF" FontSize="12"/></StackPanel>
 <Grid Grid.Column="2" Width="102"><ContentPresenter Width="64" Height="58" HorizontalAlignment="Left" Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>

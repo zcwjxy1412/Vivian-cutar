@@ -284,6 +284,7 @@ public sealed class FurinaWindowLayoutTests
                     if (state == "settings") vm.Assistant.ToggleSettingsCommand.Execute(null);
                 }
             }
+            RenderPopulatedDemo(main, vm, output);
             assistant.Close();
             var confirmationGate = new FakeGate();
             var submissions = 0;
@@ -317,6 +318,96 @@ public sealed class FurinaWindowLayoutTests
 
     private static void FlushBindings() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
         () => { }, System.Windows.Threading.DispatcherPriority.DataBind);
+
+    private static void RenderPopulatedDemo(MainWindow main, MainViewModel vm, string output)
+    {
+        // Synthetic display state only: bypass selection setters so no engine/file reads or saves run.
+        static void SeedField(object target, string name, object value) =>
+            (target.GetType().GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException(name)).SetValue(target, value);
+        static void SeedStatus(object target, string name, string value) => target.GetType().GetProperty(name)!.SetValue(target, value);
+        static void RefreshDemoBindings(ObservableObject target, params string[] names)
+        {
+            var raise = typeof(ObservableObject).GetMethod("Raise", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            foreach (var name in names) raise.Invoke(target, [name]);
+        }
+        static GameAccount Account(GameId game, int order) => new(Guid.NewGuid(), game, $"DEMO · {game} 账号 {order + 1}",
+            "国服", null, "", true, false, order, "DEMO 未登录", "unverified", null, "DEMO 仅排版样例", 1);
+        foreach (var game in new[] { GameId.StarRail, GameId.Genshin, GameId.ZenlessZoneZero })
+        for (int i = 0; i < 3; i++)
+        {
+            var account = Account(game, i);
+            if (game == GameId.StarRail) vm.Accounts.Rows.Add(new(account, null, new(account.Id, true, 1)));
+            else if (game == GameId.Genshin) vm.GenshinConfiguration.Accounts.Add(account);
+            else vm.Accounts.ZenlessRows.Add(account);
+        }
+        SeedField(vm.Accounts, "_configurationRow", vm.Accounts.Rows[0]);
+        vm.Accounts.SelectedRow = vm.Accounts.Rows[0];
+        foreach (var field in EngineCatalog.March7th.Parameters)
+            vm.Configuration.Parameters.Add(new(new(field, field.DefaultValue, "DEMO 已载入默认值")));
+        SeedStatus(vm.Configuration, "Status", "DEMO · 全部配置字段已载入；仅隔离排版，不连接引擎或保存。");
+        var genshinValues = VIvian.Infrastructure.Engines.BetterGi.BetterGiAccountPlans.Parameters
+            .Select(field => new ConfigurationValue(field, field.DefaultValue, "DEMO 已载入默认值")).ToArray();
+        foreach (var value in genshinValues) vm.GenshinConfiguration.Parameters.Add(new(value));
+        var genshin = vm.GenshinConfiguration.Accounts[0];
+        SeedField(vm.GenshinConfiguration, "_selectedAccount", genshin);
+        SeedField(vm.GenshinConfiguration, "_snapshot", new AccountConfigurationView(new(GameId.Genshin, genshin.Id), genshin.Name,
+            "DEMO", genshinValues, null));
+        SeedStatus(vm.GenshinConfiguration, "Status", "DEMO · 任务表单默认值已载入；未读取真实账号或源配置。");
+        SeedField(vm.Accounts, "_selectedZenless", vm.Accounts.ZenlessRows[0]);
+        vm.Accounts.ZenlessName = vm.Accounts.ZenlessRows[0].Name;
+        SeedStatus(vm.Accounts, "ZenlessReadiness", "DEMO · 常用任务目录完整展示；未连接源档案，因此保持只读。");
+        SeedStatus(vm.Accounts, "ZenlessStatus", "DEMO · 仅检查排版，不表示账号或引擎已准备完成。");
+        SeedStatus(vm.GenshinConfiguration.Source, "Status", "DEMO · 未连接 BetterGI，展示本机任务字段样例。");
+        RefreshDemoBindings(vm.Accounts, "ConfigurationRow", "SelectedStarRail", "SelectedZenless", "HasZenlessAccount");
+        RefreshDemoBindings(vm.GenshinConfiguration, "SelectedAccount", "VisiblePlanParameters", "DetailedPlanParameters", "CanEdit");
+        for (int i = 0; i < 8; i++)
+        {
+            vm.Queue.Runs.Add(new(Guid.NewGuid(), $"DEMO · 隔离运行记录 {i + 1} · 状态未知（非真实运行）", "11-14 12:00", true, false));
+            vm.Queue.LogLines.Add($"DEMO 12:00:{i:00} · 仅供排版检查：任务步骤、较长诊断说明和换行布局，不是引擎执行证据。");
+        }
+        vm.History.Add(new("DEMO", DateTimeOffset.UnixEpoch, "DEMO · 基础自检展示数据，不是真实检查结果。"));
+        vm.RecentRuns.Add(new("DEMO · 星铁", "11-14 12:00", "未知 · 仅布局样例", false, "—"));
+        var navigation = (TabControl)main.FindName("Navigation");
+        var surface = (FrameworkElement)main.Content;
+        foreach (var (width, height, scale) in new[] { (1600, 900, 1.0), (960, 500, 2.0) })
+        {
+            main.Width = width; main.Height = height; main.UpdateHomeLayout();
+            VisualTreeHelper.SetRootDpi(main, new DpiScale(scale, scale));
+            ((TextBlock)main.FindName("PersistentStatusText")).SetCurrentValue(TextBlock.TextProperty,
+                "DEMO · 隔离合成展示数据；无真实账号、无引擎运行、未保存设置。");
+            for (int page = 0; page < navigation.Items.Count; page++)
+            {
+                navigation.SelectedIndex = page;
+                var tabs = page == 1 ? (TabControl)main.FindName("GameTabs") : page == 2 ? (TabControl)main.FindName("AccountTabs") : null;
+                for (int sub = 0; sub < (tabs?.Items.Count ?? 1); sub++)
+                {
+                    if (tabs is not null) tabs.SelectedIndex = sub;
+                    FlushBindings();
+                    var path = Path.Combine(output, $"court-DEMO-page-{page}-sub-{sub}-{width}x{height}");
+                    Render(surface, width, height, path + "-part-00.png", scale);
+                    if (page == 1 && sub == 1)
+                        Assert.True(((ItemsControl)main.FindName("GenshinPlanFields")).Items.Count > 0, "DEMO Genshin form did not load fields.");
+                    var scroll = page == 1 ? ((TabItem)tabs!.SelectedItem).Content as ScrollViewer
+                        : ((TabItem)navigation.SelectedItem).Content as ScrollViewer;
+                    if (scroll is null) continue;
+                    scroll.ScrollToTop(); surface.UpdateLayout();
+                    Render(surface, width, height, path + "-part-00.png", scale);
+                    Assert.True(scroll.ViewportHeight > 0);
+                    var step = scroll.ViewportHeight * .85;
+                    var parts = (int)Math.Ceiling(scroll.ScrollableHeight / step);
+                    Assert.InRange(parts, 0, 60);
+                    for (int part = 1; part <= parts; part++)
+                    {
+                        scroll.ScrollToVerticalOffset(Math.Min(part * step, scroll.ScrollableHeight)); surface.UpdateLayout();
+                        Render(surface, width, height, path + $"-part-{part:00}.png", scale);
+                    }
+                    Assert.True(Math.Abs(scroll.VerticalOffset - scroll.ScrollableHeight) < 1);
+                    scroll.ScrollToTop(); surface.UpdateLayout();
+                }
+            }
+        }
+    }
 
     private static void AssertMedallionTextContrast(Button button, string path)
     {

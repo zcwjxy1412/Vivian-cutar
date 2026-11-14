@@ -169,6 +169,13 @@ public sealed class FurinaWindowLayoutTests
             var tinySendBounds = send.TransformToAncestor((Visual)assistant.Content).TransformBounds(new Rect(send.RenderSize));
             Assert.True(tinySendBounds.Bottom <= 392, $"Small work area hides Send: {tinySendBounds}");
             Assert.True(((ScrollViewer)assistant.FindName("ChatScroll")).ViewportHeight >= 22, "Tiny work area hides every message line.");
+            AssertInputLinesVisible(input);
+            vm.Assistant.ToggleSettingsCommand.Execute(null);
+            FlushBindings();
+            Render((FrameworkElement)assistant.Content, 360, 400, Path.Combine(output, "assistant-tiny-settings-input.png"));
+            AssertInputLinesVisible(input);
+            vm.Assistant.ToggleSettingsCommand.Execute(null);
+            FlushBindings();
             // Explicitly synthetic evidence for Q; no confirmation or execution is invoked here.
             vm.Assistant.Input = "";
             vm.Assistant.Messages.Clear();
@@ -186,6 +193,61 @@ public sealed class FurinaWindowLayoutTests
                 string.Concat(Enumerable.Repeat("如需调整顺序，请先返回账号管理检查已勾选的账号。运行记录应来自真实结果，未获得回执时应保留未知状态。\n\n", 4))));
             FlushBindings();
             Render((FrameworkElement)assistant.Content, 460, 720, Path.Combine(output, "assistant-long-message-DEMO-460x720.png"));
+            vm.Assistant.Input = "首行中文可读：请核对账号。\n" + new string('测', 160) + "\n末行中文可读：不会执行。";
+            foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                VisualTreeHelper.SetRootDpi(assistant, new DpiScale(scale, scale));
+                foreach (var state in new[] { "message", "plan", "settings" })
+                {
+                    if (state == "plan")
+                    {
+                        vm.Assistant.Messages.Clear();
+                        var longCard = new ProposalCard(Guid.NewGuid(), demoTarget, "离屏演示账号",
+                            string.Concat(Enumerable.Range(1, 20).Select(n => $"{n}. 合成任务：只用于滚动布局验证。\n")),
+                            "长计划 · 合成演示", "确认（仅展示）", _ => throw new InvalidOperationException("Demo must never execute."));
+                        vm.Assistant.Messages.Add(new ChatItem(false, "仅验证排版，不会执行。", [longCard]));
+                    }
+                    if (state == "message")
+                    {
+                        vm.Assistant.Messages.Clear();
+                        vm.Assistant.Messages.Add(new ChatItem(false, "合成长消息，非执行回执。\n" + string.Concat(Enumerable.Repeat("中文长消息换行与滚动验证。\n", 30))));
+                    }
+                    if (state == "settings") vm.Assistant.ToggleSettingsCommand.Execute(null);
+                    FlushBindings();
+                    var assistantSurface = (FrameworkElement)assistant.Content;
+                    var path = Path.Combine(output, $"assistant-tiny-{state}-{scale * 100:0}.png");
+                    Render(assistantSurface, 360, 400, path, scale);
+                    AssertInputLinesVisible(input);
+                    var scroll = (ScrollViewer)assistant.FindName(state == "settings" ? "SettingsScroll" : "ChatScroll");
+                    var contentBounds = scroll.TransformToAncestor(assistantSurface).TransformBounds(new Rect(scroll.RenderSize));
+                    var editorBounds = input.TransformToAncestor(assistantSurface).TransformBounds(new Rect(input.RenderSize));
+                    Assert.True(scroll.ViewportHeight >= 22);
+                    Assert.True(contentBounds.Bottom <= editorBounds.Top, $"{state} overlaps input: {contentBounds} / {editorBounds}");
+                    scroll.ScrollToEnd(); assistantSurface.UpdateLayout();
+                    Assert.True(scroll.ScrollableHeight > 0, $"{state} fixture did not exercise scrolling.");
+                    Assert.True(Math.Abs(scroll.VerticalOffset - scroll.ScrollableHeight) < 1, $"{state} bottom unreachable.");
+                    AssertInputLinesVisible(input);
+                    Render(assistantSurface, 360, 400, path.Replace(".png", "-end.png"), scale);
+                    if (state != "message")
+                    {
+                        var pending = new Stack<DependencyObject>(); pending.Push(scroll);
+                        Button? action = null;
+                        while (pending.TryPop(out var visual))
+                        {
+                            if (visual is Button b && Equals(b.Content, state == "settings" ? "保存" : "确认（仅展示）")) { action = b; break; }
+                            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(visual); i++) pending.Push(VisualTreeHelper.GetChild(visual, i));
+                        }
+                        Assert.NotNull(action);
+                        action.BringIntoView(); assistantSurface.UpdateLayout();
+                        var actionBounds = action.TransformToAncestor(scroll).TransformBounds(new Rect(action.RenderSize));
+                        Assert.True(actionBounds.Top >= -1 && actionBounds.Bottom <= scroll.ActualHeight + 1,
+                            $"{state} action cannot be fully shown: {actionBounds} / {scroll.ActualHeight}");
+                        AssertInputLinesVisible(input);
+                        Render(assistantSurface, 360, 400, path.Replace(".png", "-action.png"), scale);
+                    }
+                    if (state == "settings") vm.Assistant.ToggleSettingsCommand.Execute(null);
+                }
+            }
             assistant.Close();
             var confirmationGate = new FakeGate();
             var submissions = 0;
@@ -219,6 +281,25 @@ public sealed class FurinaWindowLayoutTests
 
     private static void FlushBindings() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
         () => { }, System.Windows.Threading.DispatcherPriority.DataBind);
+
+    private static void AssertInputLinesVisible(TextBox input)
+    {
+        var host = Assert.IsType<ScrollViewer>(input.Template.FindName("PART_ContentHost", input));
+        host.ApplyTemplate();
+        var presenter = Assert.IsType<ScrollContentPresenter>(host.Template.FindName("PART_ScrollContentPresenter", host));
+        var viewport = presenter.TransformToAncestor(input).TransformBounds(new Rect(presenter.RenderSize));
+        Assert.True(viewport.Height >= input.FontSize * input.FontFamily.LineSpacing,
+            $"Input viewport too short: {viewport}; font line {input.FontSize * input.FontFamily.LineSpacing}.");
+        foreach (var index in new[] { 0, input.Text.Length - 1 })
+        {
+            input.ScrollToLine(input.GetLineIndexFromCharacterIndex(index));
+            input.UpdateLayout();
+            var glyph = input.GetRectFromCharacterIndex(index);
+            Assert.False(glyph.IsEmpty);
+            Assert.True(glyph.Top >= viewport.Top - 1 && glyph.Bottom <= viewport.Bottom + 1,
+                $"Input glyph {index} clipped: {glyph}; viewport {viewport}.");
+        }
+    }
 
     private static void AuditOffscreenText(FrameworkElement root)
     {

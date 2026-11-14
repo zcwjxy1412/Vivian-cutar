@@ -20,6 +20,8 @@ public sealed class ThemeAssets
     public string? WaterForeground { get; }
     public string? WaterFrame { get; }
     public string? WaterCorner { get; }
+    public string? Crown { get; }
+    public string? RunMedallion { get; }
     public string? BannerGenshin { get; }
     public string? BannerStarRail { get; }
     public string? BannerZenless { get; }
@@ -41,6 +43,8 @@ public sealed class ThemeAssets
         WaterForeground = Layer("water-foreground", "water-foreground", "png");
         WaterFrame = Layer("water-frame", "water-frame", "png");
         WaterCorner = Layer("water-corner", "water-corner", "png");
+        Crown = Layer("crown", "crown", "png");
+        RunMedallion = Layer("run-medallion", "run-medallion", "png");
         BannerGenshin = Layer("banner-genshin", "game-genshin", "png", "jpg", "jpeg", "gif");
         BannerStarRail = Layer("banner-starrail", "game-hsr", "png", "jpg", "jpeg", "gif");
         BannerZenless = Layer("banner-zzz", "game-zzz", "png", "jpg", "jpeg", "gif");

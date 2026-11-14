@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "source": "Native image generation; reference artwork, not application screenshots",
-  "generatedOn": "2026-11-13",
+  "generatedOn": "2026-11-14",
   "assets": [
     {
       "file": "furina-avatar.png",
@@ -73,6 +73,22 @@
       "height": 1254,
       "bytes": 1209223,
       "sha256": "485a9c163f3928299a58b30b706bb39b96a859bdf9946651a5d8181efa1d2bb9",
+      "transparent": true
+    },
+    {
+      "file": "crown.png",
+      "width": 1536,
+      "height": 1024,
+      "bytes": 2296924,
+      "sha256": "3a3a8fbbcfd0a8334b61c314426782f251eb2d0531095bb79d88b3988b46f600",
+      "transparent": true
+    },
+    {
+      "file": "run-medallion.png",
+      "width": 1254,
+      "height": 1254,
+      "bytes": 1865082,
+      "sha256": "4c8a3d0a14650894d4acae7fc6f86531c5b3777751fdb433d014db419f7f2b23",
       "transparent": true
     }
   ]

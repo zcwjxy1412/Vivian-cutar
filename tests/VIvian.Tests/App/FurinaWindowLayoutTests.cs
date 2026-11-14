@@ -30,7 +30,7 @@ public sealed class FurinaWindowLayoutTests
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Window content render timed out.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(120)), "Window content render timed out.");
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
@@ -71,6 +71,8 @@ public sealed class FurinaWindowLayoutTests
                 main.Width = width; main.Height = height; main.UpdateHomeLayout();
                 Assert.Equal(width < 1280, main.IsCompactLayout);
                 Render(home, width, height, Path.Combine(output, $"home-content-{width}x{height}.png"));
+                AssertMedallionTextContrast((Button)main.FindName("DailyRunButton"), Path.Combine(root, "src", "VIvian.App", "Assets", "Furina", "run-medallion.png"));
+                Assert.Equal(1536, Assert.IsAssignableFrom<BitmapSource>(((FurinaOrnament)main.FindName("BrandCrown")).WaterImage).PixelWidth);
                 Assert.Equal(width < 1500 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
                 var stopBounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
                 Assert.True(stopBounds.Bottom <= height && stopBounds.Right <= width, $"Stop clipped: {stopBounds}");
@@ -105,6 +107,39 @@ public sealed class FurinaWindowLayoutTests
                 Render(home, 1600, 900, Path.Combine(output, $"page-{tab}-1600x900.png"));
                 AuditOffscreenText(home);
             }
+            // Every navigation page and each game/account subpage at a fixed physical budget.
+            foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                var width = (int)(1920 / scale); var height = (int)(1000 / scale);
+                main.Width = width; main.Height = height; main.UpdateHomeLayout();
+                VisualTreeHelper.SetRootDpi(main, new DpiScale(scale, scale));
+                for (int tab = 0; tab < navigation.Items.Count; tab++)
+                {
+                    navigation.SelectedIndex = tab;
+                    var children = tab == 1 ? (TabControl)main.FindName("GameTabs")
+                        : tab == 2 ? (TabControl)main.FindName("AccountTabs") : null;
+                    for (int child = 0; child < (children?.Items.Count ?? 1); child++)
+                    {
+                        if (children is not null) children.SelectedIndex = child;
+                        Render(home, width, height, Path.Combine(output, $"court-page-{tab}-sub-{child}-dpi-{scale * 100:0}.png"), scale);
+                        AuditOffscreenText(home);
+                        var stop = (Button)main.FindName("PersistentStopButton");
+                        var bounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
+                        Assert.True(new Rect(0, 0, width, height).Contains(bounds), $"Stop clipped on page {tab}/{child} at {scale}: {bounds}");
+                        if (tab == 1 && child < 2)
+                        {
+                            var pageScroll = (ScrollViewer)main.FindName(child == 0 ? "StarRailPageScroll" : "GenshinPageScroll");
+                            pageScroll.ScrollToBottom(); home.UpdateLayout();
+                            Assert.True(Math.Abs(pageScroll.VerticalOffset - pageScroll.ScrollableHeight) < 1, "Game page bottom is unreachable.");
+                            Render(home, width, height, Path.Combine(output, $"court-page-{tab}-sub-{child}-dpi-{scale * 100:0}-bottom.png"), scale);
+                            pageScroll.ScrollToTop(); home.UpdateLayout();
+                        }
+                    }
+                    if (children is not null) children.SelectedIndex = 0;
+                }
+            }
+            VisualTreeHelper.SetRootDpi(main, new DpiScale(1, 1));
+            main.Width = 1600; main.Height = 900; main.UpdateHomeLayout();
             navigation.SelectedIndex = 0;
             vm.ReportAssistantInputBlocked("测试提示：运行中暂不能进入聊天。");
             FlushBindings();
@@ -119,6 +154,7 @@ public sealed class FurinaWindowLayoutTests
             Assert.True(assistant.Interaction.TryEnter());
             FlushBindings();
             Render((FrameworkElement)assistant.Content, 460, 720, Path.Combine(output, "assistant-reference-460x720.png"));
+            Assert.Equal(1536, Assert.IsAssignableFrom<BitmapSource>(((FurinaOrnament)assistant.FindName("AssistantCrown")).WaterImage).PixelWidth);
             AuditOffscreenText((FrameworkElement)assistant.Content);
             Assert.True(input.IsEnabled);
             assistant.LockInput();
@@ -248,6 +284,7 @@ public sealed class FurinaWindowLayoutTests
                     if (state == "settings") vm.Assistant.ToggleSettingsCommand.Execute(null);
                 }
             }
+            RenderPopulatedDemo(main, vm, output);
             assistant.Close();
             var confirmationGate = new FakeGate();
             var submissions = 0;
@@ -281,6 +318,136 @@ public sealed class FurinaWindowLayoutTests
 
     private static void FlushBindings() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
         () => { }, System.Windows.Threading.DispatcherPriority.DataBind);
+
+    private static void RenderPopulatedDemo(MainWindow main, MainViewModel vm, string output)
+    {
+        // Synthetic display state only: bypass selection setters so no engine/file reads or saves run.
+        static void SeedField(object target, string name, object value) =>
+            (target.GetType().GetField(name, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException(name)).SetValue(target, value);
+        static void SeedStatus(object target, string name, string value) => target.GetType().GetProperty(name)!.SetValue(target, value);
+        static void RefreshDemoBindings(ObservableObject target, params string[] names)
+        {
+            var raise = typeof(ObservableObject).GetMethod("Raise", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            foreach (var name in names) raise.Invoke(target, [name]);
+        }
+        static GameAccount Account(GameId game, int order) => new(Guid.NewGuid(), game, $"DEMO · {game} 账号 {order + 1}",
+            "国服", null, "", true, false, order, "DEMO 未登录", "unverified", null, "DEMO 仅排版样例", 1);
+        foreach (var game in new[] { GameId.StarRail, GameId.Genshin, GameId.ZenlessZoneZero })
+        for (int i = 0; i < 3; i++)
+        {
+            var account = Account(game, i);
+            if (game == GameId.StarRail) vm.Accounts.Rows.Add(new(account, null, new(account.Id, true, 1)));
+            else if (game == GameId.Genshin) vm.GenshinConfiguration.Accounts.Add(account);
+            else vm.Accounts.ZenlessRows.Add(account);
+        }
+        SeedField(vm.Accounts, "_configurationRow", vm.Accounts.Rows[0]);
+        vm.Accounts.SelectedRow = vm.Accounts.Rows[0];
+        foreach (var field in EngineCatalog.March7th.Parameters)
+            vm.Configuration.Parameters.Add(new(new(field, field.DefaultValue, "DEMO 已载入默认值")));
+        SeedStatus(vm.Configuration, "Status", "DEMO · 全部配置字段已载入；仅隔离排版，不连接引擎或保存。");
+        var genshinValues = VIvian.Infrastructure.Engines.BetterGi.BetterGiAccountPlans.Parameters
+            .Select(field => new ConfigurationValue(field, field.DefaultValue, "DEMO 已载入默认值")).ToArray();
+        foreach (var value in genshinValues) vm.GenshinConfiguration.Parameters.Add(new(value));
+        var genshin = vm.GenshinConfiguration.Accounts[0];
+        SeedField(vm.GenshinConfiguration, "_selectedAccount", genshin);
+        SeedField(vm.GenshinConfiguration, "_snapshot", new AccountConfigurationView(new(GameId.Genshin, genshin.Id), genshin.Name,
+            "DEMO", genshinValues, null));
+        SeedStatus(vm.GenshinConfiguration, "Status", "DEMO · 任务表单默认值已载入；未读取真实账号或源配置。");
+        SeedField(vm.Accounts, "_selectedZenless", vm.Accounts.ZenlessRows[0]);
+        vm.Accounts.ZenlessName = vm.Accounts.ZenlessRows[0].Name;
+        SeedStatus(vm.Accounts, "ZenlessReadiness", "DEMO · 常用任务目录完整展示；未连接源档案，因此保持只读。");
+        SeedStatus(vm.Accounts, "ZenlessStatus", "DEMO · 仅检查排版，不表示账号或引擎已准备完成。");
+        SeedStatus(vm.GenshinConfiguration.Source, "Status", "DEMO · 未连接 BetterGI，展示本机任务字段样例。");
+        RefreshDemoBindings(vm.Accounts, "ConfigurationRow", "SelectedStarRail", "SelectedZenless", "HasZenlessAccount");
+        RefreshDemoBindings(vm.GenshinConfiguration, "SelectedAccount", "VisiblePlanParameters", "DetailedPlanParameters", "CanEdit");
+        for (int i = 0; i < 8; i++)
+        {
+            vm.Queue.Runs.Add(new(Guid.NewGuid(), $"DEMO · 隔离运行记录 {i + 1} · 状态未知（非真实运行）", "11-14 12:00", true, false));
+            vm.Queue.LogLines.Add($"DEMO 12:00:{i:00} · 仅供排版检查：任务步骤、较长诊断说明和换行布局，不是引擎执行证据。");
+        }
+        vm.History.Add(new("DEMO", DateTimeOffset.UnixEpoch, "DEMO · 基础自检展示数据，不是真实检查结果。"));
+        vm.RecentRuns.Add(new("DEMO · 星铁", "11-14 12:00", "未知 · 仅布局样例", false, "—"));
+        var navigation = (TabControl)main.FindName("Navigation");
+        var surface = (FrameworkElement)main.Content;
+        foreach (var (width, height, scale) in new[] { (1600, 900, 1.0), (960, 500, 2.0) })
+        {
+            main.Width = width; main.Height = height; main.UpdateHomeLayout();
+            VisualTreeHelper.SetRootDpi(main, new DpiScale(scale, scale));
+            ((TextBlock)main.FindName("PersistentStatusText")).SetCurrentValue(TextBlock.TextProperty,
+                "DEMO · 隔离合成展示数据；无真实账号、无引擎运行、未保存设置。");
+            for (int page = 0; page < navigation.Items.Count; page++)
+            {
+                navigation.SelectedIndex = page;
+                var tabs = page == 1 ? (TabControl)main.FindName("GameTabs") : page == 2 ? (TabControl)main.FindName("AccountTabs") : null;
+                for (int sub = 0; sub < (tabs?.Items.Count ?? 1); sub++)
+                {
+                    if (tabs is not null) tabs.SelectedIndex = sub;
+                    FlushBindings();
+                    var path = Path.Combine(output, $"court-DEMO-page-{page}-sub-{sub}-{width}x{height}");
+                    Render(surface, width, height, path + "-part-00.png", scale);
+                    var headingName = page switch { 1 => "GamePageHeading", 2 => "AccountPageHeading", 6 => "SettingsPageHeading", _ => null };
+                    if (headingName is not null)
+                    {
+                        var heading = (TextBlock)main.FindName(headingName);
+                        Assert.InRange(heading.TranslatePoint(new Point(), surface).X, (width < 1280 ? 112 : 216) - 1, (width < 1280 ? 112 : 216) + 1);
+                    }
+                    if (page == 1 && sub == 1)
+                        Assert.True(((ItemsControl)main.FindName("GenshinPlanFields")).Items.Count > 0, "DEMO Genshin form did not load fields.");
+                    var scroll = page == 1 ? ((TabItem)tabs!.SelectedItem).Content as ScrollViewer
+                        : ((TabItem)navigation.SelectedItem).Content as ScrollViewer;
+                    if (scroll is null) continue;
+                    scroll.ScrollToTop(); surface.UpdateLayout();
+                    Render(surface, width, height, path + "-part-00.png", scale);
+                    Assert.True(scroll.ViewportHeight > 0);
+                    var step = scroll.ViewportHeight * .85;
+                    var parts = (int)Math.Ceiling(scroll.ScrollableHeight / step);
+                    Assert.InRange(parts, 0, 60);
+                    for (int part = 1; part <= parts; part++)
+                    {
+                        scroll.ScrollToVerticalOffset(Math.Min(part * step, scroll.ScrollableHeight)); surface.UpdateLayout();
+                        Render(surface, width, height, path + $"-part-{part:00}.png", scale);
+                    }
+                    Assert.True(Math.Abs(scroll.VerticalOffset - scroll.ScrollableHeight) < 1);
+                    scroll.ScrollToTop(); surface.UpdateLayout();
+                }
+            }
+        }
+    }
+
+    private static void AssertMedallionTextContrast(Button button, string path)
+    {
+        var image = new FormatConvertedBitmap(new BitmapImage(new Uri(path)), PixelFormats.Bgra32, null, 0);
+        var stride = image.PixelWidth * 4;
+        var pixels = new byte[stride * image.PixelHeight];
+        image.CopyPixels(pixels, stride, 0);
+        // Use both actual text bounds: fixed font sizes occupy different image regions at 168/218 DIP.
+        var core = Assert.IsType<StackPanel>(button.Template.FindName("Core", button));
+        var art = Assert.IsType<FurinaOrnament>(button.Template.FindName("MedallionArt", button));
+        Assert.Equal(image.PixelWidth, Assert.IsAssignableFrom<BitmapSource>(art.WaterImage).PixelWidth);
+        Assert.Equal(BitmapScalingMode.HighQuality, RenderOptions.GetBitmapScalingMode(art));
+        foreach (var text in core.Children.OfType<TextBlock>())
+        {
+            var bounds = new Rect(text.TranslatePoint(new Point(), art), text.RenderSize);
+            var left = (int)Math.Floor(bounds.Left / art.ActualWidth * image.PixelWidth);
+            var right = (int)Math.Ceiling(bounds.Right / art.ActualWidth * image.PixelWidth);
+            var top = (int)Math.Floor(bounds.Top / art.ActualHeight * image.PixelHeight);
+            var bottom = (int)Math.Ceiling(bounds.Bottom / art.ActualHeight * image.PixelHeight);
+            Assert.InRange(left, 0, image.PixelWidth - 1); Assert.InRange(right, left + 1, image.PixelWidth);
+            Assert.InRange(top, 0, image.PixelHeight - 1); Assert.InRange(bottom, top + 1, image.PixelHeight);
+            for (int y = top; y < bottom; y++)
+            for (int x = left; x < right; x++)
+            {
+                var offset = y * stride + x * 4;
+                // White behind translucent artwork is a conservative upper bound on luminance.
+                var alpha = pixels[offset + 3] / 255.0;
+                byte Composite(byte channel) => (byte)Math.Round(channel * alpha + 255 * (1 - alpha));
+                var color = Color.FromRgb(Composite(pixels[offset + 2]), Composite(pixels[offset + 1]), Composite(pixels[offset]));
+                Assert.True(ContrastAudit.Ratio(Colors.White, color) >= 4.5,
+                    $"Medallion text {text.Text} at {button.ActualWidth} DIP has bright background at {x},{y}.");
+            }
+        }
+    }
 
     private static void AssertInputLinesVisible(TextBox input)
     {

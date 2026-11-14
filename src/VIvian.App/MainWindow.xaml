@@ -3,6 +3,9 @@ xmlns:local="clr-namespace:VIvian.App" xmlns:core="clr-namespace:VIvian.Core;ass
 Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight="500" Background="{StaticResource Furina.StageBrush}" Foreground="{StaticResource Text}" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" RenderOptions.BitmapScalingMode="HighQuality">
 <Window.Resources>
 <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Furina.RunButtonSize">176</sys:Double>
+<sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Furina.PageWidth">1100</sys:Double>
+<sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Furina.FieldWidth">780</sys:Double>
+<sys:Int32 xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Furina.SettingsColumns">2</sys:Int32>
 <GridLength x:Key="Furina.NavigationWidth">180</GridLength>
 <GridLength x:Key="Furina.CharacterWidth">360</GridLength>
 <GridLength x:Key="Furina.ControlsWidth">260</GridLength>
@@ -11,14 +14,18 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Style TargetType="TextBox" BasedOn="{StaticResource Furina.InputStyle}"/>
 <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource Furina.PrimaryButtonStyle}"/>
 <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource Furina.DangerButtonStyle}"/>
-<Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
-<Style x:Key="H1" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="28"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="LineHeight" Value="36"/></Style>
-<Style x:Key="Kana" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Sakura}"/><Setter Property="FontSize" Value="15"/><Setter Property="FontFamily" Value="{StaticResource JapaneseFont}"/><Setter Property="Margin" Value="14,0,0,5"/><Setter Property="VerticalAlignment" Value="Bottom"/></Style>
+<Style TargetType="TextBlock"><Setter Property="FontFamily" Value="Microsoft YaHei UI"/><Setter Property="FontSize" Value="14"/><Setter Property="Foreground" Value="{StaticResource Text}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
+<Style x:Key="H1" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="28"/><Setter Property="FontFamily" Value="STZhongsong, SimSun, Microsoft YaHei UI"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="LineHeight" Value="36"/></Style>
+<Style x:Key="Kana" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="Foreground" Value="{StaticResource Sakura}"/><Setter Property="FontSize" Value="15"/><Setter Property="FontFamily" Value="{StaticResource JapaneseFont}"/><Setter Property="Margin" Value="14,0,0,5"/><Setter Property="VerticalAlignment" Value="Bottom"/></Style>
 <Style x:Key="H2" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="FontSize" Value="17"/><Setter Property="FontWeight" Value="Bold"/><Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="Margin" Value="0,0,0,6"/></Style>
-<Style x:Key="Lead" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Margin" Value="0,6,0,20"/><Setter Property="MaxWidth" Value="780"/><Setter Property="HorizontalAlignment" Value="Left"/></Style>
+<Style x:Key="Lead" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="Margin" Value="0,8,0,22"/><Setter Property="MaxWidth" Value="780"/><Setter Property="HorizontalAlignment" Value="Left"/></Style>
 <Style x:Key="Small" TargetType="TextBlock" BasedOn="{StaticResource {x:Type TextBlock}}"><Setter Property="Foreground" Value="{StaticResource Muted}"/><Setter Property="FontSize" Value="13"/><Setter Property="LineHeight" Value="20"/></Style>
 <Style x:Key="Panel" TargetType="Border" BasedOn="{StaticResource Furina.PanelStyle}"><Setter Property="Background" Value="#D7E9FF"/><Setter Property="BorderBrush" Value="#9EB6F3"/><Setter Property="BorderThickness" Value="1.5"/><Setter Property="Margin" Value="0,0,0,10"/></Style>
 <Style x:Key="AccountChoiceList" TargetType="ListBox">
+<Setter Property="ItemContainerStyle"><Setter.Value><Style TargetType="ListBoxItem">
+<Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+<Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><ContentPresenter HorizontalAlignment="Stretch"/></ControlTemplate></Setter.Value></Setter>
+</Style></Setter.Value></Setter>
 <Setter Property="MinHeight" Value="140"/><Setter Property="MaxHeight" Value="360"/>
 <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="BorderThickness" Value="0"/>
 <Setter Property="Background" Value="Transparent"/><Setter Property="Margin" Value="0,10,0,0"/>
@@ -28,9 +35,13 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Setter Property="Background" Value="#EAF0FF"/><Setter Property="BorderBrush" Value="{StaticResource Line}"/>
 <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="12"/>
 <Setter Property="Padding" Value="12"/><Setter Property="Margin" Value="0,0,0,8"/>
+<Style.Triggers>
+<DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter Property="Background" Value="#D9E6FF"/><Setter Property="BorderBrush" Value="{StaticResource Navy}"/></DataTrigger>
+<DataTrigger Binding="{Binding IsKeyboardFocusWithin, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter Property="BorderBrush" Value="#856021"/><Setter Property="BorderThickness" Value="2"/></DataTrigger>
+</Style.Triggers>
 </Style>
 <Style x:Key="Notice" TargetType="Border"><Setter Property="Background" Value="{StaticResource WarnBack}"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,12"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
-<Style x:Key="Page" TargetType="ScrollViewer"><Setter Property="Background" Value="{StaticResource Furina.PanelBrush}"/><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="Padding" Value="34,26,34,20"/></Style>
+<Style x:Key="Page" TargetType="ScrollViewer"><Setter Property="Background" Value="Transparent"/><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="Padding" Value="24,22,24,20"/></Style>
 <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{StaticResource Sakura}"/></Style>
 <!-- Navy ribbon heading with gold trim, as in the reference design. -->
 <Style x:Key="Ribbon" TargetType="Border"><Setter Property="Background" Value="{StaticResource NavyRibbon}"/><Setter Property="BorderBrush" Value="{StaticResource Gold}"/><Setter Property="BorderThickness" Value="1.5"/><Setter Property="CornerRadius" Value="14,4,14,4"/><Setter Property="Padding" Value="14,6,22,6"/><Setter Property="HorizontalAlignment" Value="Left"/><Setter Property="Margin" Value="0,0,0,12"/></Style>
@@ -71,17 +82,17 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <ControlTemplate.Triggers><Trigger Property="IsSelected" Value="True"><Setter TargetName="Pill" Property="Background" Value="{StaticResource Navy}"/><Setter TargetName="Pill" Property="BorderBrush" Value="{StaticResource Gold}"/><Setter TargetName="Label" Property="Foreground" Value="White"/></Trigger></ControlTemplate.Triggers>
 </ControlTemplate></Setter.Value></Setter></Style>
 <DataTemplate x:Key="AccountConfigurationGroup">
-<TextBlock Text="{Binding Name, StringFormat=✦ {0}}" FontSize="16" FontFamily="{StaticResource Round}" Foreground="{StaticResource Sakura}" Margin="0,20,0,6"/>
+<local:FurinaPlaque Style="{StaticResource Ribbon}" Margin="0,20,0,6"><TextBlock Text="{Binding Name}" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 </DataTemplate>
 <DataTemplate x:Key="AccountConfigurationField">
-<Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,10,0,12"><Grid>
-<Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="210"/></Grid.ColumnDefinitions>
-<StackPanel Margin="0,0,18,0" ToolTip="{Binding Dependencies}">
+<Border Width="{DynamicResource Furina.FieldWidth}" HorizontalAlignment="Left" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="0,10,0,12"><Grid>
+<Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="180"/></Grid.ColumnDefinitions>
+<StackPanel Margin="0,0,24,0" ToolTip="{Binding Dependencies}">
 <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding Description}" Style="{StaticResource Small}" Margin="0,2,0,0"/>
 <TextBlock Text="{Binding State}" Foreground="{StaticResource Warn}" FontSize="12" Margin="0,4,0,0" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></StackPanel>
 <Grid Grid.Column="1" VerticalAlignment="Center">
-<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding BoolValue}" IsEnabled="{Binding Editable}" HorizontalAlignment="Right" Visibility="{Binding IsBoolean, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
+<CheckBox Style="{StaticResource Switch}" IsChecked="{Binding BoolValue}" IsEnabled="{Binding Editable}" HorizontalAlignment="Left" Visibility="{Binding IsBoolean, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
 <ComboBox ItemsSource="{Binding Options}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding Current}" IsEnabled="{Binding Editable}" Visibility="{Binding IsChoice, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
 <TextBox Text="{Binding Current, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Editable}" ToolTip="{Binding Rule}" Visibility="{Binding IsTextual, Converter={StaticResource Visible}}" AutomationProperties.Name="{Binding Title}"/>
 <TextBlock Text="由原软件管理" Style="{StaticResource Small}" HorizontalAlignment="Right" Visibility="{Binding IsReadOnlyDisplay, Converter={StaticResource Visible}}"/></Grid>
@@ -113,7 +124,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Rectangle Fill="#20101E4A" IsHitTestVisible="False"/><Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <!-- Title -->
 <StackPanel Orientation="Horizontal" Margin="24,6,0,12">
-<local:FurinaOrnament Width="66" Height="62" VerticalAlignment="Center"/>
+<local:FurinaOrnament x:Name="BrandCrown" RenderOptions.BitmapScalingMode="HighQuality" WaterImage="{Binding Theme.Crown}" Width="72" Height="62" VerticalAlignment="Center"/>
 <StackPanel Margin="14,0,0,0" VerticalAlignment="Center">
 <TextBlock Text="{Binding Theme.Title}" MaxWidth="460" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Theme.Title}" FontFamily="{StaticResource Script}" FontStyle="Italic" FontSize="42" Foreground="White" LineHeight="46"/>
 <TextBlock Text="游戏自动化代理工具 · 任务、账号与运行回执" Foreground="#D6E5FF" FontSize="13"/></StackPanel></StackPanel>
@@ -126,7 +137,12 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Border.Style><Style TargetType="Border"><Style.Triggers><DataTrigger Binding="{Binding IsCompactLayout, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Border.Style>
 <TextBlock Text="{Binding ExecutionBanner}" Foreground="White" FontSize="12" LineHeight="18" TextWrapping="Wrap"/></Border>
 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><TabPanel IsItemsHost="True" Background="Transparent" KeyboardNavigation.TabIndex="1"/></ScrollViewer></DockPanel></Border>
-<ContentPresenter Grid.Column="1" ContentSource="SelectedContent"/></Grid>
+<Border Grid.Column="1" CornerRadius="22" BorderThickness="1.5">
+<Border.Style><Style TargetType="Border"><Setter Property="Background" Value="#DCEAFF"/><Setter Property="BorderBrush" Value="#D7BC79"/><Setter Property="Margin" Value="14,4,14,10"/>
+<Style.Triggers><DataTrigger Binding="{Binding SelectedIndex, RelativeSource={RelativeSource TemplatedParent}}" Value="0"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Margin" Value="0"/><Setter Property="BorderThickness" Value="0"/></DataTrigger></Style.Triggers></Style></Border.Style>
+
+<ContentPresenter ContentSource="SelectedContent"/>
+</Border></Grid>
 </ControlTemplate></TabControl.Template>
 
 <!-- ============ 首页概览 ============ -->
@@ -168,9 +184,10 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="{Binding BannerFrom}" Offset="0"/><GradientStop Color="{Binding BannerTo}" Offset="1"/></LinearGradientBrush></Border.Background>
 <Grid><Image RenderOptions.BitmapScalingMode="HighQuality" Source="{Binding Banner.Uri}" Stretch="Uniform" Visibility="{Binding Banner.StaticVisibility}"/>
 <Image RenderOptions.BitmapScalingMode="HighQuality" gif:AnimationBehavior.SourceUri="{Binding Banner.Uri}" Stretch="Uniform" Visibility="{Binding Banner.GifVisibility}"/>
-<StackPanel Margin="8,0,0,0" Width="{DynamicResource Furina.BannerTextWidth}" HorizontalAlignment="Left" Background="#EE101E4A" VerticalAlignment="Center">
-<TextBlock Text="{Binding Name}" Foreground="White" FontSize="16" FontWeight="Bold" TextWrapping="Wrap"/>
-<TextBlock Text="{Binding Tagline}" Foreground="#E6ECFF" FontFamily="{StaticResource Script}" FontStyle="Italic" FontSize="11" TextWrapping="Wrap"/></StackPanel></Grid></Border>
+<Rectangle IsHitTestVisible="False"><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#F0102050" Offset="0"/><GradientStop Color="#D9102050" Offset="0.5"/><GradientStop Color="#30102050" Offset="0.85"/><GradientStop Color="#00102050" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+<StackPanel Margin="12,0,0,0" Width="{DynamicResource Furina.BannerTextWidth}" HorizontalAlignment="Left" VerticalAlignment="Center">
+<TextBlock Text="{Binding Name}" Foreground="White" FontFamily="STZhongsong, SimSun, Microsoft YaHei UI" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+<TextBlock Text="{Binding Tagline}" Foreground="#E6ECFF" FontFamily="Segoe UI" FontSize="10" TextWrapping="Wrap"/></StackPanel></Grid></Border>
 <StackPanel Grid.Column="1" Margin="10,6,6,6" VerticalAlignment="Center">
 <DockPanel><Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
 <TextBlock DockPanel.Dock="Right" Text="{Binding RunHint}" Style="{StaticResource Small}" FontSize="12" TextWrapping="NoWrap" Margin="8,0,0,0"/>
@@ -205,16 +222,20 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="0,6,0,10"><StackPanel>
 <local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE945;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="自动化控制" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
-<Button Command="{Binding OneClickCommand}" IsEnabled="{Binding CanOperateWorkspace}" HorizontalAlignment="Center" Margin="0,0,0,6" Cursor="Hand" AutomationProperties.Name="一键日常">
+<Button x:Name="DailyRunButton" Background="{StaticResource Dream}" Command="{Binding OneClickCommand}" IsEnabled="{Binding CanOperateWorkspace}" HorizontalAlignment="Center" Margin="0,0,0,6" Cursor="Hand" AutomationProperties.Name="一键日常">
 <Button.Template><ControlTemplate TargetType="Button"><Grid Width="{DynamicResource Furina.RunButtonSize}" Height="{DynamicResource Furina.RunButtonSize}">
-<local:FurinaOrnament Kind="Halo" WaterImage="{Binding Theme.WaterFrame}"/>
-<Border x:Name="Core" Margin="36" CornerRadius="100" BorderBrush="White" BorderThickness="2">
-<Border.Background><LinearGradientBrush StartPoint="0.2,0" EndPoint="0.8,1"><GradientStop Color="#4265CF" Offset="0"/><GradientStop Color="#2947B5" Offset="0.48"/><GradientStop Color="#152C78" Offset="1"/></LinearGradientBrush></Border.Background>
-<StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-<Path Data="M 0,0 L 26,15 L 0,30 Z" Fill="White" HorizontalAlignment="Center" Margin="6,0,0,6"/>
-<TextBlock Text="一键日常" Foreground="White" FontSize="21" FontWeight="Bold"/><TextBlock Text="自动化日常" Foreground="White" FontSize="12" HorizontalAlignment="Center"/></StackPanel></Border></Grid>
-<ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
-<Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
+<Border x:Name="FallbackCore" Margin="26" CornerRadius="100" Background="{StaticResource Dream}"/>
+<local:FurinaOrnament x:Name="MedallionArt" RenderOptions.BitmapScalingMode="HighQuality" Kind="Halo" WaterImage="{Binding Theme.RunMedallion}"/>
+<StackPanel x:Name="Core" VerticalAlignment="Center" HorizontalAlignment="Center">
+<Path Data="M 0,0 L 26,15 L 0,30 Z" Fill="White" HorizontalAlignment="Center" Margin="6,0,0,8"/>
+<TextBlock Text="一键日常" Foreground="White" FontFamily="STZhongsong, SimSun, Microsoft YaHei UI" FontSize="20" FontWeight="Bold"/>
+<TextBlock Text="自动化日常" Foreground="White" FontSize="12" HorizontalAlignment="Center"/></StackPanel>
+<Ellipse x:Name="RunFocus" Margin="20" Stroke="White" StrokeThickness="2" Visibility="Collapsed" IsHitTestVisible="False"/>
+</Grid><ControlTemplate.Triggers>
+<Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="RunFocus" Property="Visibility" Value="Visible"/></Trigger>
+<Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.9"/></Trigger>
+<Trigger Property="IsPressed" Value="True"><Setter TargetName="Core" Property="Opacity" Value="0.8"/></Trigger>
+</ControlTemplate.Triggers></ControlTemplate></Button.Template></Button>
 <UniformGrid Columns="2">
 <Button Content="{Binding Queue.PauseButtonText}" Command="{Binding Queue.PauseCommand}" IsEnabled="{Binding Queue.CanPause}" Margin="0,0,6,0" Padding="6,9" FontSize="13"/>
 <Button Style="{StaticResource DangerButton}" Content="停止" Command="{Binding StopAllCommand}" IsEnabled="{Binding CanStopAll}" Margin="0" Padding="6,9" FontSize="13"/></UniformGrid>
@@ -250,15 +271,15 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </Grid></TabItem>
 
 <!-- ============ 游戏管理 ============ -->
-<TabItem Header="游戏管理" Tag="&#xE7FC;"><Grid Margin="34,22,34,10" Background="{StaticResource Furina.PanelBrush}">
+<TabItem Header="游戏管理" Tag="&#xE7FC;"><Grid Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left" Margin="24,22,24,20" Background="Transparent">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="游戏管理" Style="{StaticResource H1}"/><TextBlock Text="ゲーム" Style="{StaticResource Kana}"/></StackPanel>
+<StackPanel><StackPanel Orientation="Horizontal"><TextBlock x:Name="GamePageHeading" Text="游戏管理" Style="{StaticResource H1}"/><TextBlock Text="ゲーム" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="选择游戏和账号，查看任务计划及可用的源配置。" Style="{StaticResource Lead}" Margin="0,4,0,12"/></StackPanel>
 <TabControl x:Name="GameTabs" Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="0,14,0,0" ItemContainerStyle="{StaticResource PillTab}">
-<TabItem Header="崩坏：星穹铁道"><Border Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}" Margin="0" Padding="20,6,8,8"><DockPanel DataContext="{Binding Configuration}" Margin="0,14,0,0">
+<TabItem Header="崩坏：星穹铁道"><ScrollViewer x:Name="StarRailPageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}" Margin="0" Padding="20,6,8,8"><DockPanel DataContext="{Binding Configuration}" Margin="0,14,0,0">
 <StackPanel DockPanel.Dock="Top" Margin="0,0,16,10">
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="配置" Style="{StaticResource H2}" VerticalAlignment="Center" Margin="0"/>
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<TextBlock Text="配置" Style="{StaticResource H2}" VerticalAlignment="Center" Margin="0,0,16,0"/>
 <WrapPanel Grid.Column="1"><Button Content="重新读取" Command="{Binding ReadCommand}" Margin="0,0,8,0"/><Button Content="从原项目导入" Command="{Binding ImportUpstreamCommand}" Margin="0,0,8,0" ToolTip="将所选账号原项目中已登记的参数同步到该账号档案"/><Button Style="{StaticResource Primary}" Content="立即保存" Command="{Binding SaveCommand}" Margin="0,0,8,0" ToolTip="修改会自动保存；这里用于重试排队中的修改"/><Button Content="打开原项目详细设置" Command="{Binding OpenUpstreamCommand}" Margin="0,0,8,0" ToolTip="打开星铁助手主界面，随后在原程序中进入支援角色详细设置"/><Button Content="复制设置文件路径" Command="{Binding OpenSettingsCommand}" Margin="0"/></WrapPanel></Grid>
 <StackPanel Orientation="Horizontal" Margin="0,8,0,0"><TextBlock Text="当前账号：" VerticalAlignment="Center"/>
 <ComboBox Width="230" ItemsSource="{Binding DataContext.Accounts.Rows, RelativeSource={RelativeSource AncestorType=Window}}" SelectedItem="{Binding DataContext.Accounts.ConfigurationRow, RelativeSource={RelativeSource AncestorType=Window}}" DisplayMemberPath="Name"/>
@@ -268,12 +289,12 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Button Content="保存任务开关" Command="{Binding SaveDailyPlanCommand}" ToolTip="{Binding Status}"/>
 </StackPanel>
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/></StackPanel>
-<ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
-<ScrollViewer.Resources><CollectionViewSource x:Key="Grouped" Source="{Binding Parameters}"><CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions></CollectionViewSource></ScrollViewer.Resources>
+<Border Padding="0,0,16,20">
+<Border.Resources><CollectionViewSource x:Key="Grouped" Source="{Binding Parameters}"><CollectionViewSource.GroupDescriptions><PropertyGroupDescription PropertyName="Group"/></CollectionViewSource.GroupDescriptions></CollectionViewSource></Border.Resources>
 <ItemsControl ItemsSource="{Binding Source={StaticResource Grouped}}" ItemTemplate="{StaticResource AccountConfigurationField}">
 <ItemsControl.GroupStyle><GroupStyle HeaderTemplate="{StaticResource AccountConfigurationGroup}"/></ItemsControl.GroupStyle>
-</ItemsControl></ScrollViewer></DockPanel></Border></TabItem>
-<TabItem Header="原神"><Border Style="{StaticResource Panel}" IsEnabled="{Binding IsIdle}" Margin="0" Padding="20,6,8,8">
+</ItemsControl></Border></DockPanel></local:FurinaPanel></ScrollViewer></TabItem>
+<TabItem Header="原神"><ScrollViewer x:Name="GenshinPageScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" IsEnabled="{Binding IsIdle}" Margin="0" Padding="20,6,8,8">
 <DockPanel DataContext="{Binding GenshinConfiguration}" IsVisibleChanged="GenshinSourceVisibilityChanged" Margin="0,14,0,0">
 <StackPanel DockPanel.Dock="Top" Margin="0,0,16,10">
 <Grid IsEnabled="{Binding CanEditWorkspace}"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
@@ -298,7 +319,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/>
 </StackPanel>
 <TabControl x:Name="GenshinSettingsTabs" Background="Transparent" BorderThickness="0" Padding="0,4,0,0" ItemContainerStyle="{StaticResource PillTab}">
-<TabItem Header="任务设置"><ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
+<TabItem Header="任务设置"><Border Padding="0,0,16,20">
 <StackPanel IsEnabled="{Binding CanEditWorkspace}">
 <TextBlock Text="基础设置" Style="{StaticResource H2}" Margin="0,8,0,4"/>
 <TextBlock Text="在这里设置任务开关、地区、秘境和树脂次数。队伍及战斗、脚本细节请在 BetterGI 中调整。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
@@ -310,9 +331,9 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <ItemsControl.GroupStyle><GroupStyle HeaderTemplate="{StaticResource AccountConfigurationGroup}"/></ItemsControl.GroupStyle>
 </ItemsControl>
 <TextBlock Text="BetterGI 关闭时，已连接字段在停止编辑约 1 秒后自动写入。资源次数按账号保存，轮到该账号执行时同步到 BetterGI，结束后恢复。任务执行由 BetterGI 负责，详细配置在原软件调整。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-<Border Style="{StaticResource Panel}" Margin="0,14,0,0">
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" Margin="0,14,0,0">
 <StackPanel>
-<TextBlock Text="详细设置 · BetterGI" Style="{StaticResource H2}"/>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="详细设置 · BetterGI" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="打开 BetterGI 后选择当前账号对应的一条龙档案。队伍、战斗策略和脚本参数在源项目中调整；保存后这里自动读回。" Style="{StaticResource Small}" Margin="0,4,0,8"/>
 <ItemsControl x:Name="GenshinDetailedFields" ItemsSource="{Binding DetailedPlanParameters}">
 <ItemsControl.ItemTemplate><DataTemplate><TextBlock Style="{StaticResource Small}" Margin="0,2,0,0"><Run Text="{Binding Title, Mode=OneWay}"/><Run Text="："/><Run Text="{Binding Current, Mode=OneWay}"/></TextBlock></DataTemplate></ItemsControl.ItemTemplate>
@@ -320,7 +341,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Button Content="打开 BetterGI 详细设置" Command="{Binding Source.OpenCommand}" IsEnabled="{Binding Source.CanOpen}" HorizontalAlignment="Left" Margin="0,10,0,0"/>
 <TextBlock Text="尚未连接时，请先保存基础设置并点击「连接 BetterGI」。" Style="{StaticResource Small}" Margin="0,6,0,0"/>
 </StackPanel>
-</Border>
+</local:FurinaPanel>
 <Expander Header="BetterGI 安装级共享树脂设置" Visibility="{Binding Source.HasBinding, Converter={StaticResource Visible}}" Margin="0,12,0,0">
 <StackPanel Margin="0,6,0,0">
 <TextBlock Text="同一安装的所有档案共享以下设置。此处只读。" Style="{StaticResource Small}"/>
@@ -333,11 +354,11 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
 <TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/>
 </StackPanel></Expander>
-</StackPanel></ScrollViewer></TabItem>
+</StackPanel></Border></TabItem>
 <TabItem Header="登录验收" Visibility="{Binding IsLoginVerificationAvailable, Converter={StaticResource Visible}}">
-<ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0,0,16,20">
+<Border Padding="0,0,16,20">
 <StackPanel IsVisibleChanged="GenshinLoginVisibilityChanged" IsEnabled="{Binding DataContext.CanOperateWorkspace, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,12,0,0">
-<TextBlock Text="原神账号登录验收" Style="{StaticResource H2}"/>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="原神账号登录验收" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="从「启动 furina」打开 VIvian 并确认 Windows 授权，退出 BetterGI 后开始验收。程序会自动启动或接入已核验的原神国服客户端，按顺序登录所选账号。只核对登录与入场，结束后保留游戏客户端。" Style="{StaticResource Small}"/>
 <StackPanel IsEnabled="{Binding IsIdle}" Margin="0,10,0,0">
 <TextBlock Style="{StaticResource Small}"><Run Text="第一个账号 · "/><Run Text="{Binding SelectedAccount.Name, Mode=OneWay}"/></TextBlock>
@@ -354,19 +375,19 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </StackPanel>
 <Button Content="取消登录验收" Command="{Binding CancelLoginCommand}" Visibility="{Binding IsVerifyingLogin, Converter={StaticResource Visible}}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 <TextBlock Text="{Binding LoginStatus}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
-</StackPanel></ScrollViewer></TabItem>
+</StackPanel></Border></TabItem>
 </TabControl>
-</DockPanel></Border></TabItem>
-<TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel MaxWidth="900" HorizontalAlignment="Left">
+</DockPanel></local:FurinaPanel></ScrollViewer></TabItem>
+<TabItem Header="绝区零"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
 <StackPanel Orientation="Horizontal"><TextBlock Text="绝区零" Style="{StaticResource H1}"/><TextBlock Text="ゼンレスゾーンゼロ" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock DataContext="{Binding Engines[2]}" Text="{Binding Version, StringFormat=由 {0} 接管入场和日常任务。}" Style="{StaticResource Lead}"/>
-<Border Style="{StaticResource Panel}" DataContext="{Binding Engines[2]}"><StackPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" DataContext="{Binding Engines[2]}"><StackPanel>
 <TextBlock Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontSize="18" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding DetectedVersion}" Style="{StaticResource Small}" Margin="0,6,0,0"/>
-<TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></Border>
-<Border Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}">
+<TextBlock Text="{Binding Evidence}" Style="{StaticResource Small}"/></StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}">
 <StackPanel DataContext="{Binding Accounts}">
-<TextBlock Text="账号与任务" Style="{StaticResource H2}"/>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="账号与任务" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <WrapPanel Margin="0,0,0,10">
 <ComboBox x:Name="ZenlessTaskAccountPicker" Width="200" ItemsSource="{Binding ZenlessRows}" SelectedItem="{Binding SelectedZenless}" DisplayMemberPath="Name" AutomationProperties.Name="选择绝区零账号" Margin="0,0,8,0"/>
 <CheckBox Content="加入日常批次" IsEnabled="{Binding HasZenlessAccount}" IsChecked="{Binding ZenlessAutoRun}" VerticalAlignment="Center" Margin="0,0,8,0"/>
@@ -374,26 +395,26 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Button Content="管理绝区零账号" Click="OpenZenlessAccounts"/>
 </WrapPanel>
 <ContentControl x:Name="ZenlessGameTaskEditor" Content="{Binding}" ContentTemplate="{StaticResource ZenlessTaskEditor}"/>
-</StackPanel></Border>
+</StackPanel></local:FurinaPanel>
 </StackPanel></ScrollViewer></TabItem>
 </TabControl></Grid></TabItem>
 
 <!-- ============ 账号管理 ============ -->
-<TabItem x:Name="AccountManagementTab" Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}" IsEnabled="{Binding IsIdle}"><StackPanel MaxWidth="1050">
-<StackPanel Orientation="Horizontal"><TextBlock Text="账号管理" Style="{StaticResource H1}"/><TextBlock Text="アカウント" Style="{StaticResource Kana}"/></StackPanel>
+<TabItem x:Name="AccountManagementTab" Header="账号管理" Tag="&#xE77B;"><ScrollViewer Style="{StaticResource Page}" IsEnabled="{Binding IsIdle}"><StackPanel Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left">
+<StackPanel Orientation="Horizontal"><TextBlock x:Name="AccountPageHeading" Text="账号管理" Style="{StaticResource H1}"/><TextBlock Text="アカウント" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="各游戏的登录档案独立保存。选择游戏后可查看该游戏的账号和可用操作。" Style="{StaticResource Lead}"/>
 <TabControl x:Name="AccountTabs" Background="Transparent" BorderThickness="0" Padding="0,14,0,0" ItemContainerStyle="{StaticResource PillTab}">
 <TabItem Header="崩坏：星穹铁道">
 <StackPanel DataContext="{Binding Accounts}" IsEnabled="{Binding DataContext.CanOperateWorkspace, RelativeSource={RelativeSource AncestorType=Window}}">
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="扫描登录账号" Style="{StaticResource H2}"/>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="扫描登录账号" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="打开测试版时先完成管理员授权；扫描会自动返回登录界面并展开保存账号。图像只在本机内存处理，不上传或自动保存原图。" Style="{StaticResource Small}"/>
 <WrapPanel Margin="0,12,0,0"><Button x:Name="ScanStarRailAccountsButton" Style="{StaticResource Primary}" Content="扫描登录账号" Command="{Binding ScanCommand}" Margin="0,0,8,8"/>
 <Button Content="导入登录截图" Command="{Binding ImportCommand}" Margin="0,0,8,8"/><Button Content="刷新" Command="{Binding ReloadCommand}" Margin="0,0,8,8"/></WrapPanel>
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="星铁账号与运行顺序" Style="{StaticResource H2}"/>
+</StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="星铁账号与运行顺序" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="勾选账号并调整列表顺序。在游戏管理保存各账号任务设置，随后从首页启动。" Style="{StaticResource Small}"/>
 <ListBox x:Name="StarRailAccountList" Style="{StaticResource AccountChoiceList}" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}">
 <ListBox.ItemTemplate><DataTemplate><Border Style="{StaticResource AccountChoiceCard}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -408,8 +429,8 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
 <Button Content="保存备注和勾选" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
 <TextBlock Text="备注只改 VIvian 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel><TextBlock Text="最近星铁批次" Style="{StaticResource H2}"/>
+</StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel><local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="最近星铁批次" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <ListBox ItemsSource="{Binding RecentBatches}" SelectedItem="{Binding SelectedBatch}" BorderThickness="0" Background="Transparent"><ListBox.ItemTemplate><DataTemplate>
 <StackPanel Orientation="Horizontal" Margin="0,4,0,4"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:MM-dd HH:mm}}" Width="110"/>
 <TextBlock Text="{Binding Mode}" Width="90"/><TextBlock Text="{Binding State}" Width="100"/><TextBlock Text="{Binding Detail}"/></StackPanel>
@@ -418,12 +439,12 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <ItemsControl ItemsSource="{Binding BatchResults}"><ItemsControl.ItemTemplate><DataTemplate>
 <StackPanel Margin="0,4,0,8"><TextBlock Text="{Binding AccountName}" FontWeight="Bold"/>
 <TextBlock Text="{Binding Result}" Style="{StaticResource Small}"/><TextBlock Text="{Binding Detail}" Style="{StaticResource Small}"/></StackPanel>
-</DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></Border>
+</DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></local:FurinaPanel>
 </StackPanel></TabItem>
 <TabItem Header="原神">
 <StackPanel DataContext="{Binding GenshinConfiguration}" IsEnabled="{Binding CanEditWorkspace}">
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="导入登录账号" Style="{StaticResource H2}"/>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="导入登录账号" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="导入显示脱敏账号的登录截图或照片。图像在本机识别。" Style="{StaticResource Small}"/>
 <WrapPanel Margin="0,12,0,0">
 <Button x:Name="ImportGenshinButton" Style="{StaticResource Primary}" Content="导入登录截图" Command="{Binding ImportCommand}" Margin="0,0,8,8"/>
@@ -433,10 +454,10 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Button Content="刷新" Command="{Binding ReloadCommand}" Margin="0,0,8,8"/>
 </WrapPanel>
 <TextBlock Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite"/>
-</StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
+</StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
 <DockPanel><TextBlock DockPanel.Dock="Right" Text="{Binding SelectedForDaily.Count, StringFormat=已勾选 {0} 个}" Style="{StaticResource Small}"/>
-<TextBlock Text="原神账号与运行顺序" Style="{StaticResource H2}"/></DockPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="原神账号与运行顺序" Style="{StaticResource RibbonText}"/></local:FurinaPlaque></DockPanel>
 <TextBlock Text="勾选并排序后，从首页原神卡片启动。账号任务在游戏管理中设置。" Style="{StaticResource Small}"/>
 <ListBox x:Name="GenshinAccountList" Style="{StaticResource AccountChoiceList}" ItemsSource="{Binding Accounts}" SelectedItem="{Binding SelectedAccount}">
 <ListBox.ItemTemplate><DataTemplate>
@@ -469,26 +490,26 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Button x:Name="BindGenshinLoginButton" Content="绑定登录截图" Command="{Binding BindLoginScreenshotCommand}" IsEnabled="{Binding CanBindLoginScreenshot}" Margin="0,0,8,0"/>
 <Button Content="打开任务配置" Tag="{x:Static core:GameId.Genshin}" Click="OpenGameSettings"/>
 </WrapPanel>
-</StackPanel></Border>
+</StackPanel></local:FurinaPanel>
 </StackPanel></TabItem>
 <TabItem Header="绝区零">
-<Border Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}"><StackPanel DataContext="{Binding Accounts}">
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" IsEnabled="{Binding CanEditWorkspace}"><StackPanel DataContext="{Binding Accounts}">
 <DockPanel LastChildFill="True" Margin="0,0,0,6">
 <WrapPanel DockPanel.Dock="Right">
 <Button Content="刷新源档案" Command="{Binding ReloadZenlessCommand}"/>
 </WrapPanel>
 <TextBlock Text="绝区零账号" Style="{StaticResource H2}" VerticalAlignment="Center"/>
 </DockPanel>
-<ListBox x:Name="ZenlessAccountList" ItemsSource="{Binding ZenlessRows}" SelectedItem="{Binding SelectedZenless}"
-         Margin="0,8,0,8" MinHeight="50">
-<ListBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal">
-<TextBlock Text="{Binding Name}" FontWeight="Bold"/>
-<TextBlock Margin="8,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}">
+<ListBox x:Name="ZenlessAccountList" Style="{StaticResource AccountChoiceList}" ItemsSource="{Binding ZenlessRows}" SelectedItem="{Binding SelectedZenless}"
+>
+<ListBox.ItemTemplate><DataTemplate><Border Style="{StaticResource AccountChoiceCard}"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel>
+<TextBlock Text="{Binding Name}" FontWeight="Bold" Foreground="{StaticResource Navy}"/>
+<TextBlock Text="{Binding LastResult, StringFormat=上次结果：{0}, TargetNullValue=上次结果：暂无记录}" Style="{StaticResource Small}"/></StackPanel>
+<TextBlock Grid.Column="1" Margin="8,0"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}">
 <Setter Property="Text" Value="未加入批次"/>
 <Style.Triggers><DataTrigger Binding="{Binding AutoRun}" Value="True"><Setter Property="Text" Value="已加入批次"/></DataTrigger></Style.Triggers>
 </Style></TextBlock.Style></TextBlock>
-<TextBlock Text="{Binding LastResult}" Style="{StaticResource Small}"/>
-</StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox>
+</Grid></Border></DataTemplate></ListBox.ItemTemplate></ListBox>
 <WrapPanel Margin="0,0,0,8">
 <Button x:Name="ImportZenlessScreenshotButton" Content="导入登录截图" Command="{Binding ImportZenlessScreenshotCommand}" Margin="0,0,8,0"/>
 <Button Content="新增账号" Command="{Binding AddZenlessCommand}" Margin="0,0,8,0"/>
@@ -505,12 +526,12 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </WrapPanel>
 <Separator Margin="0,6,0,8"/>
 <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ZenlessTaskEditor}"/>
-</StackPanel></Border>
+</StackPanel></local:FurinaPanel>
 </TabItem>
 </TabControl>
 </StackPanel></ScrollViewer></TabItem>
 <!-- ============ 运行日志 ============ -->
-<TabItem x:Name="RunLogTab" Header="运行日志" Tag="&#xE9D2;"><Grid Margin="40,34,40,20" Background="{StaticResource Furina.PanelBrush}" DataContext="{Binding Queue}">
+<TabItem x:Name="RunLogTab" Header="运行日志" Tag="&#xE9D2;"><Grid Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left" Margin="24,22,24,20" Background="Transparent" DataContext="{Binding Queue}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="运行日志" Style="{StaticResource H1}"/><TextBlock Text="きろく" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，VIvian 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>
@@ -520,15 +541,15 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBlock Text="{Binding LogCleanupHint}" Foreground="{StaticResource DangerText}" Margin="0,4,0,10"/>
 <Button x:Name="ConfirmRunCleanupButton" Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding CanAcknowledge}" HorizontalAlignment="Left"/></StackPanel></Border>
 <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<DockPanel Margin="0,0,10,0"><TextBlock DockPanel.Dock="Top" Text="历史" Style="{StaticResource H2}"/>
-<ListView x:Name="RunHistoryList" ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" Margin="0,0,10,0" Padding="14"><DockPanel><TextBlock DockPanel.Dock="Top" Text="历史" Style="{StaticResource H2}"/>
+<ListView x:Name="RunHistoryList" Background="Transparent" BorderThickness="0" ItemsSource="{Binding Runs}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate>
 <Border BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="4,8,4,10"><StackPanel>
 <TextBlock Text="{Binding When}" Foreground="{StaticResource Sakura}" FontSize="13"/><TextBlock Text="{Binding Summary}" Margin="0,2,0,0"/>
 <TextBlock Text="{Binding RunId, StringFormat=RunId {0:D}}" Style="{StaticResource Small}" FontSize="12"/></StackPanel></Border>
-</DataTemplate></ListView.ItemTemplate></ListView></DockPanel>
-<DockPanel Grid.Column="1" Margin="10,0,0,0"><TextBlock DockPanel.Dock="Top" Text="日志" Style="{StaticResource H2}"/>
+</DataTemplate></ListView.ItemTemplate></ListView></DockPanel></local:FurinaPanel>
+<local:FurinaPanel Grid.Column="1" Style="{StaticResource Panel}" Margin="10,0,0,0" Padding="14"><DockPanel><TextBlock DockPanel.Dock="Top" Text="日志" Style="{StaticResource H2}"/>
 <TextBlock DockPanel.Dock="Bottom" Text="{Binding Status}" Style="{StaticResource Small}" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite"/>
-<ListBox ItemsSource="{Binding LogLines}" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" LineHeight="18"/></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel></Grid>
+<ListBox Background="Transparent" BorderThickness="0" ItemsSource="{Binding LogLines}" FontFamily="Consolas, Microsoft YaHei UI" VirtualizingPanel.IsVirtualizing="True" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" FontSize="12" LineHeight="18"/></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel></local:FurinaPanel></Grid>
 <Expander Grid.Row="3" Margin="0,14,0,0"><Expander.Header><TextBlock Text="模拟队列：只用于检验调度、停止与清理逻辑，不会启动游戏" Foreground="{StaticResource Muted}"/></Expander.Header>
 <Grid Margin="0,10,0,0" IsEnabled="{Binding CanOperateWorkspace}"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <ItemsControl ItemsSource="{Binding Games}" IsEnabled="{Binding IsIdle}"><ItemsControl.ItemTemplate><DataTemplate>
@@ -545,10 +566,10 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </Grid></TabItem>
 
 <!-- ============ 引擎与环境 ============ -->
-<TabItem x:Name="EngineEnvironmentTab" Header="引擎与环境" Tag="&#xE950;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding CanEditWorkspace}" MaxWidth="980" HorizontalAlignment="Left">
+<TabItem x:Name="EngineEnvironmentTab" Header="引擎与环境" Tag="&#xE950;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding CanEditWorkspace}" Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="引擎与环境" Style="{StaticResource H1}"/><TextBlock Text="エンジン" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="VIvian 启动时会自动找到三款引擎并核对固定版本。只有自动发现失败时才需要手动填写目录。检查全程只读，不会运行任何程序。" Style="{StaticResource Lead}"/>
-<ItemsControl x:Name="EngineSettingsList" ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Border Style="{StaticResource Panel}"><StackPanel>
+<ItemsControl x:Name="EngineSettingsList" ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <Ellipse Width="10" Height="10" Fill="{Binding Accent}" VerticalAlignment="Center" Margin="0,0,12,0"/>
 <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="18" FontWeight="SemiBold"/><TextBlock Grid.Column="2" Text="{Binding Compatibility}" Foreground="{Binding StateBrush}" FontWeight="SemiBold"/></Grid>
@@ -567,15 +588,15 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <StackPanel><TextBlock Text="{Binding Title}" FontWeight="SemiBold"/><TextBlock Text="{Binding Status}" Foreground="{Binding Brush}" FontSize="13"/></StackPanel>
 <TextBlock Grid.Column="1" Text="{Binding Note}" Style="{StaticResource Small}" Margin="10,0,0,0"/>
 </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
-</StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+</StackPanel></local:FurinaPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 <WrapPanel Margin="0,4,0,14"><Button Content="自动填入已发现目录" Command="{Binding AutoDiscoverCommand}" Margin="0,0,10,8"/><Button Style="{StaticResource Primary}" Content="保存路径并检查" Command="{Binding SaveCommand}" Margin="0,0,10,8"/><Button Content="重新检查" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="放弃未保存的修改" Command="{Binding ReloadCommand}" Margin="0,0,10,8"/></WrapPanel>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="星铁官方发行包" Style="{StaticResource H2}"/>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="星铁官方发行包" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="VIvian 用官方 March7thAssistant_full.zip（v2026.10.31）的 SHA-256 核对安装目录里的 m7a.exe。不解压，不运行；位置会被记住，每次启动自动核对。" Style="{StaticResource Small}" Margin="0,0,0,10"/>
 <DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseReleaseArchive" Margin="8,0,0,0"/><TextBox Text="{Binding ReleaseArchivePath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="官方发行包路径" ToolTip="官方发行包文件路径"/></DockPanel>
 <WrapPanel Margin="0,10,0,0"><Button Content="核对发行包" Command="{Binding VerifyReleaseCommand}"/></WrapPanel>
 <TextBlock Text="{Binding ReleaseStatus}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-</StackPanel></Border>
+</StackPanel></local:FurinaPanel>
 <Expander Header="旧版星铁画面实测" Visibility="{Binding LegacyRealTestVisibility}"><StackPanel>
 <TextBlock Text="{Binding ManualTestStateText}" Style="{StaticResource Small}"/>
 <TextBlock Text="{Binding LastRealResultText}" Style="{StaticResource Small}"/>
@@ -588,50 +609,73 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </StackPanel></ScrollViewer></TabItem>
 
 <!-- ============ 资源与更新 ============ -->
-<TabItem Header="资源与更新" Tag="&#xE8B7;"><ScrollViewer Style="{StaticResource Page}"><StackPanel MaxWidth="900" HorizontalAlignment="Left">
+<TabItem Header="资源与更新" Tag="&#xE8B7;"><ScrollViewer Style="{StaticResource Page}"><StackPanel Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="资源与更新" Style="{StaticResource H1}"/><TextBlock Text="リソース" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="界面角色、头像和游戏横幅来自你自己的素材文件夹；引擎版本固定为已核对的版本。" Style="{StaticResource Lead}"/>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="界面素材" Style="{StaticResource H2}"/>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="界面素材" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="{Binding Theme.Folder, StringFormat=素材文件夹：{0}}" Style="{StaticResource Small}"/>
 <TextBlock Text="放入以下文件后重新打开 VIvian 即可生效（GIF 会自动播放）：" Margin="0,10,0,4"/>
 <TextBlock Text="character.gif / .png：首页左侧的大角色，点击会打开 AI 助手" Style="{StaticResource Small}"/>
 <TextBlock Text="assistant.gif / .png：AI 助手头像和提示栏小人（不放则使用 character）" Style="{StaticResource Small}"/>
 <TextBlock Text="banner-genshin / banner-starrail / banner-zzz（.png/.jpg）：游戏横幅；background.png：背景" Style="{StaticResource Small}"/>
 <TextBlock Text="theme.json：{ &quot;assistantName&quot;: &quot;助手名字&quot;, &quot;title&quot;: &quot;窗口标题&quot; }" Style="{StaticResource Small}"/>
-<WrapPanel Margin="0,12,0,0"><Button Content="创建并复制素材文件夹路径" Click="CopyThemeFolder" IsEnabled="{Binding CanOperateWorkspace}"/></WrapPanel></StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="引擎版本" Style="{StaticResource H2}"/>
+<WrapPanel Margin="0,12,0,0"><Button Content="创建并复制素材文件夹路径" Click="CopyThemeFolder" IsEnabled="{Binding CanOperateWorkspace}"/></WrapPanel></StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="引擎版本" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <ItemsControl ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><Grid Margin="0,0,0,6"><TextBlock Text="{Binding Name}"/><TextBlock Text="{Binding Version}" Style="{StaticResource Small}" HorizontalAlignment="Right"/></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-<TextBlock Text="引擎更新与回滚尚未开放：换版本前需要重新核对配置格式与任务接口，避免写坏你的设置。" Style="{StaticResource Small}" Margin="0,8,0,0"/></StackPanel></Border>
+<TextBlock Text="引擎更新与回滚尚未开放：换版本前需要重新核对配置格式与任务接口，避免写坏你的设置。" Style="{StaticResource Small}" Margin="0,8,0,0"/></StackPanel></local:FurinaPanel>
 </StackPanel></ScrollViewer></TabItem>
 
 <!-- ============ 设置中心 ============ -->
-<TabItem Header="设置中心" Tag="&#xE713;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding CanEditWorkspace}" MaxWidth="900" HorizontalAlignment="Left">
-<StackPanel Orientation="Horizontal"><TextBlock Text="设置中心" Style="{StaticResource H1}"/><TextBlock Text="せってい" Style="{StaticResource Kana}"/></StackPanel>
+<TabItem Header="设置中心" Tag="&#xE713;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding CanEditWorkspace}" Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left">
+<StackPanel Orientation="Horizontal"><TextBlock x:Name="SettingsPageHeading" Text="设置中心" Style="{StaticResource H1}"/><TextBlock Text="せってい" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="{Binding VersionText}" Style="{StaticResource Lead}" Margin="0,6,0,2"/>
 <TextBlock Text="{Binding DataDirectoryText}" Style="{StaticResource Small}" Margin="0,0,0,20"/>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="偏好" Style="{StaticResource H2}"/>
+<UniformGrid Columns="{DynamicResource Furina.SettingsColumns}" Margin="0,0,-10,0">
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" Margin="0,0,10,10"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="偏好" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <DockPanel Margin="0,6,0,12"><TextBlock Text="日志保留天数（3–90）" VerticalAlignment="Center" Margin="0,0,12,0"/><TextBox Text="{Binding LogRetentionDays, UpdateSourceTrigger=PropertyChanged}" Width="80" HorizontalAlignment="Left" AutomationProperties.Name="日志保留天数"/></DockPanel>
-<CheckBox IsChecked="{Binding IncludeRunHistory}" Content="诊断包中包含运行记录（只有状态与原因代码）" AutomationProperties.Name="诊断包包含运行记录" Margin="0,0,0,14"/>
-<WrapPanel><Button Style="{StaticResource Primary}" Content="保存设置" Command="{Binding SavePreferencesCommand}"/></WrapPanel></StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="诊断" Style="{StaticResource H2}"/>
+<CheckBox IsChecked="{Binding IncludeRunHistory}" Content="诊断包中包含运行记录" AutomationProperties.Name="诊断包包含运行记录" Margin="0,0,0,4"/><TextBlock Text="只有状态与原因代码" Style="{StaticResource Small}" Margin="22,0,0,14"/>
+<WrapPanel><Button Style="{StaticResource Primary}" Content="保存设置" Command="{Binding SavePreferencesCommand}"/></WrapPanel></StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" Margin="0,0,10,10"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="诊断" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="导出本地 ZIP：版本、引擎检查、运行记录与最近日志。用户名、计算机名、口令与令牌已去除；不含数据库、上游配置或账号信息，也不会自动上传。" Style="{StaticResource Small}" Margin="0,0,0,12"/>
 <WrapPanel><Button Content="导出诊断包" Command="{Binding ExportDiagnosticsCommand}" Margin="0,0,10,8"/><Button Content="复制导出文件夹路径" Click="CopyExportsPath" Margin="0,0,10,8"/><Button Content="复制日志文件夹路径" Click="CopyLogsPath" Margin="0,0,10,8"/></WrapPanel>
-<TextBlock Text="{Binding ExportStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/></StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
+<TextBlock Text="{Binding ExportStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/></StackPanel></local:FurinaPanel>
+</UniformGrid>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="基础自检记录" Style="{StaticResource H2}"/><Button Grid.Column="1" Content="刷新" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" Margin="0"/></Grid>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="基础自检记录" Style="{StaticResource RibbonText}"/></local:FurinaPlaque><Button Grid.Column="1" Content="刷新" Command="{Binding ReloadCommand}" IsEnabled="{Binding IsIdle}" Margin="0"/></Grid>
 <TextBlock Text="这里不是游戏任务历史。时间为 UTC。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
 <ListView ItemsSource="{Binding History}" MaxHeight="240" Background="{StaticResource Surface}" HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListView.ItemTemplate><DataTemplate><StackPanel Margin="0,6"><TextBlock Text="{Binding StartedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss} UTC}" Foreground="{StaticResource Sakura}" FontSize="13"/><TextBlock Text="{Binding Summary}" Style="{StaticResource Small}"/></StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
-</StackPanel></Border>
-<Border Style="{StaticResource Panel}"><StackPanel>
-<TextBlock Text="关于" Style="{StaticResource H2}"/>
+</StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="关于" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="furina 是三款开源自动化工具的统一控制中心：BetterGI v0.66.0、March7thAssistant v2026.10.31、ZenlessZoneZero-OneDragon v2.6.0。识别、战斗和寻路由它们完成，furina 负责配置、编排和结果核验。" Style="{StaticResource Small}"/>
 <TextBlock Text="以普通用户权限运行，不会静默提权；引擎只从官方 GitHub Release 获取；不要把引擎放在符号链接或目录联接后面。OneDragon 官方要求安装路径只含英文字母、数字、下划线和连字符。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-<TextBlock Text="本程序与游戏官方无关，不收集游戏密码，不自动上传诊断信息。游戏自动化存在账号处罚风险，furina 不承诺零风险，也不会绕过反作弊。" Foreground="{StaticResource Warn}" FontSize="13" Margin="0,8,0,0"/></StackPanel></Border>
+<TextBlock Text="本程序与游戏官方无关，不收集游戏密码，不自动上传诊断信息。游戏自动化存在账号处罚风险，furina 不承诺零风险，也不会绕过反作弊。" Foreground="{StaticResource Warn}" FontSize="13" Margin="0,8,0,0"/></StackPanel></local:FurinaPanel>
+</StackPanel></ScrollViewer></TabItem>
+<TabItem x:Name="TaskOverviewTab" Header="任务计划" Tag="&#xE787;"><ScrollViewer Style="{StaticResource Page}"><StackPanel Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left">
+<TextBlock Text="任务计划" Style="{StaticResource H1}"/>
+<TextBlock Text="查看当前选择与运行状态。各账号的任务在游戏管理中设置，运行顺序在账号管理中调整。" Style="{StaticResource Lead}"/>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="当前批次" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
+<TextBlock Style="{StaticResource Small}" Margin="0,0,0,8"><Run Text="已勾选账号："/><Run Text="{Binding SelectedAccountsText, Mode=OneWay}"/></TextBlock>
+<TextBlock Text="{Binding BatchStatus}" Style="{StaticResource Small}" AutomationProperties.LiveSetting="Polite"/>
+<TextBlock Text="{Binding RunStateText, StringFormat=运行状态：{0}}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+<TextBlock Text="确认配置后，请回到首页启动日常。" Style="{StaticResource Small}" Margin="0,4,0,0"/>
+</StackPanel></local:FurinaPanel>
+<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
+<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="最近运行" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
+<TextBlock Text="计划确认与修改可在 AI 助手中进行；这里展示已有运行信息。" Style="{StaticResource Small}" Margin="0,0,0,12"/>
+<TextBlock Text="还没有运行记录。"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Small}"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding RecentRuns.Count}" Value="0"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+<ItemsControl ItemsSource="{Binding RecentRuns}"><ItemsControl.ItemTemplate><DataTemplate><Border BorderBrush="#BDD0EB" BorderThickness="0,0,0,1" Padding="0,8"><StackPanel>
+<TextBlock Text="{Binding Game}" Style="{StaticResource H2}"/>
+<TextBlock Text="{Binding Result}" Style="{StaticResource Small}"/>
+<TextBlock Style="{StaticResource Small}" Margin="0,4,0,0"><Run Text="{Binding When, Mode=OneWay}"/><Run Text=" · "/><Run Text="{Binding Duration, Mode=OneWay}"/></TextBlock>
+</StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+</StackPanel></local:FurinaPanel>
 </StackPanel></ScrollViewer></TabItem>
 </TabControl>
 

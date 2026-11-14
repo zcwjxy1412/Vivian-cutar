@@ -4,7 +4,7 @@ Title="芙宁娜 · AI 助手" Width="460" Height="720" MinWidth="360" MinHeight
 ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" ShowActivated="False" Topmost="False" FontFamily="{StaticResource Furina.BodyFontFamily}" FontSize="14"
 Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOptions.BitmapScalingMode="HighQuality">
 <Window.Resources>
-<Style TargetType="TextBlock"><Setter Property="Foreground" Value="{StaticResource Furina.TextBrush}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
+<Style TargetType="TextBlock"><Setter Property="FontFamily" Value="Microsoft YaHei UI"/><Setter Property="FontSize" Value="14"/><Setter Property="Foreground" Value="{StaticResource Furina.TextBrush}"/><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="LineHeight" Value="22"/></Style>
 <Style TargetType="Button" BasedOn="{StaticResource Furina.SecondaryButtonStyle}"/>
 <Style TargetType="TextBox" BasedOn="{StaticResource Furina.InputStyle}"/>
 <DataTemplate x:Key="AvatarArt"><Grid IsHitTestVisible="False">
@@ -12,17 +12,17 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <Image RenderOptions.BitmapScalingMode="HighQuality" Source="{Binding Uri}" Visibility="{Binding StaticVisibility}" Stretch="Uniform"/>
 <local:Mascot Visibility="{Binding FallbackVisibility}"/></Grid></DataTemplate>
 </Window.Resources>
-<local:FurinaPanel Style="{StaticResource Furina.PanelStyle}" Background="#D7E9FF" Padding="0" Margin="8" BorderBrush="{StaticResource Furina.GoldBrush}" BorderThickness="1.5">
+<Border Background="#EAF1FF" Padding="1.5" Margin="8" BorderBrush="{StaticResource Furina.GoldBrush}" BorderThickness="1" CornerRadius="18">
 <Grid SizeChanged="OnContentSizeChanged"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<Border Background="#183477" CornerRadius="17,17,0,0" Padding="12,7" MouseLeftButtonDown="DragHeader">
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><local:FurinaOrnament Kind="Surf" Grid.ColumnSpan="3" Height="24" VerticalAlignment="Bottom" Margin="0,0,0,-7" Opacity="0.55"/>
-<local:FurinaOrnament Width="40" Height="44" Margin="0,0,8,0"/>
-<StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="#FFFFFF" FontSize="22" FontWeight="SemiBold"/>
+<Border Background="#183477" CornerRadius="16,16,0,0" Padding="12,7" MouseLeftButtonDown="DragHeader">
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<local:FurinaOrnament x:Name="AssistantCrown" RenderOptions.BitmapScalingMode="HighQuality" WaterImage="{Binding Theme.Crown}" Width="40" Height="44" Margin="0,0,8,0"/>
+<StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding Name}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="#FFFFFF" FontFamily="STZhongsong, SimSun, Microsoft YaHei UI" FontSize="22" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding StatusLine}" Foreground="#D6E5FF" FontSize="12"/></StackPanel>
-<Grid Grid.Column="2" Width="102"><local:FurinaOrnament Kind="Halo" WaterImage="{Binding Theme.WaterFrame}" Width="70" Height="70" HorizontalAlignment="Left" Margin="-6,-6,0,-6"/><ContentPresenter Width="64" Height="58" HorizontalAlignment="Left" Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>
+<Grid Grid.Column="2" Width="102"><ContentPresenter Width="64" Height="58" HorizontalAlignment="Left" Content="{Binding Avatar}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>
 <Button Content="×" Click="CloseWindow" ToolTip="收起对话，仅取消模型请求" Width="30" Height="30" MinHeight="30" Padding="0" FontSize="22" HorizontalAlignment="Right" Background="#284CAD" Foreground="White" BorderBrush="#D7BC79" AutomationProperties.Name="收起助手"/>
 </Grid></Grid></Border>
-<StackPanel Grid.Row="1" Margin="14,7,14,5">
+<StackPanel Grid.Row="1" Margin="14,8,14,4">
 <WrapPanel><Button Content="进入聊天" Click="EnterChat" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
 <Button Content="停止任务" Click="StopLocally" Style="{StaticResource Furina.DangerButtonStyle}" IsEnabled="{Binding StopSource.CanStopAll, RelativeSource={RelativeSource AncestorType=Window}, FallbackValue=False, TargetNullValue=False}" MinHeight="32" Padding="10,4" Margin="0,0,6,6"/>
 <Button Content="取消请求" Command="{Binding CancelRequestCommand}" IsEnabled="{Binding IsBusy}" MinHeight="32" Padding="10,4" Margin="0,0,0,6"/></WrapPanel>
@@ -34,7 +34,7 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <Button Content="接口设置" Command="{Binding ToggleSettingsCommand}" HorizontalAlignment="Left" MinHeight="28" Padding="10,2" Margin="0,0,0,4"/>
 
 </StackPanel>
-<ScrollViewer x:Name="SettingsScroll" Visibility="{Binding SettingsVisibility}" Grid.Row="1" Panel.ZIndex="1" Margin="14,0,14,0" Background="#E7EEFF" VerticalScrollBarVisibility="Auto">
+<ScrollViewer x:Name="SettingsScroll" Visibility="{Binding SettingsVisibility}" Grid.Row="1" Panel.ZIndex="1" Margin="14,0,14,0" Background="#EAF1FF" VerticalScrollBarVisibility="Auto">
 <Border Style="{StaticResource Furina.PanelStyle}" Background="{StaticResource Furina.SoftBrush}" Padding="12"><StackPanel>
 <TextBlock Text="AI 接口" FontWeight="SemiBold"/>
 <TextBlock Text="接口地址" FontSize="12"/><TextBox Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="接口地址"/>
@@ -45,29 +45,29 @@ Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOp
 <CheckBox Content="允许生成待确认的星铁运行计划" IsChecked="{Binding EnableScheduleProposals}" Visibility="{Binding ScheduleSettingsVisibility}"/>
 <TextBlock Text="{Binding SettingsStatus}" Foreground="{StaticResource Furina.MutedTextBrush}" FontSize="12"/>
 </StackPanel></Border></ScrollViewer>
-<ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="12,8">
+<ScrollViewer x:Name="ChatScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="14,8">
 <ItemsControl ItemsSource="{Binding Messages}"><ItemsControl.ItemTemplate><DataTemplate>
 <Grid Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<ContentPresenter Width="38" Height="42" Margin="0,0,8,0" VerticalAlignment="Top" Visibility="{Binding AvatarVisibility}" Content="{Binding DataContext.Avatar, RelativeSource={RelativeSource AncestorType=Window}}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>
-<Border Grid.Column="1" HorizontalAlignment="{Binding Align}" MaxWidth="390" BorderThickness="1" BorderBrush="#A5BCEF" CornerRadius="5,16,16,16" Padding="12,9">
+<ContentPresenter Width="32" Height="36" Margin="0,0,8,0" VerticalAlignment="Top" Visibility="{Binding AvatarVisibility}" Content="{Binding DataContext.Avatar, RelativeSource={RelativeSource AncestorType=Window}}" ContentTemplate="{StaticResource AvatarArt}" IsHitTestVisible="False"/>
+<Border Grid.Column="1" HorizontalAlignment="{Binding Align}" MaxWidth="390" BorderThickness="1" BorderBrush="#A5BCEF" CornerRadius="5,14,14,14" Padding="12,10">
 <Border.Style><Style TargetType="Border" BasedOn="{StaticResource Furina.MessageBubbleStyle}"><Style.Triggers><DataTrigger Binding="{Binding FromUser}" Value="True"><Setter Property="Background" Value="#D5E2FF"/></DataTrigger></Style.Triggers></Style></Border.Style>
-<StackPanel><TextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="#142651"/>
+<StackPanel><TextBlock Text="{Binding Text}" FontFamily="Microsoft YaHei UI" FontSize="14" LineHeight="22" TextWrapping="Wrap" Foreground="#142651"/>
 <ItemsControl ItemsSource="{Binding Proposals}"><ItemsControl.ItemTemplate><DataTemplate>
 <Border Style="{StaticResource Furina.PanelStyle}" Padding="10" Margin="0,10,0,0"><StackPanel>
 <TextBlock Text="{Binding Title}" FontWeight="Bold" TextWrapping="Wrap"/><TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" TextWrapping="Wrap" ToolTip="{Binding TargetText}"/>
-<TextBlock Text="{Binding Lines}" FontSize="13"/><TextBlock Text="{Binding State}" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}"/>
+<TextBlock Text="{Binding Lines}" FontFamily="Microsoft YaHei UI" FontSize="13" TextWrapping="Wrap"/><TextBlock Text="{Binding State}" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}"/>
 <Button Content="{Binding ButtonText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" Style="{StaticResource Furina.PrimaryButtonStyle}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
 </StackPanel></Border></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 </StackPanel></Border></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 </ScrollViewer>
-<Border Grid.Row="2" Background="#D7E9FF" Padding="14,4,14,10"><Grid><local:FurinaOrnament Kind="Surf" Height="48" VerticalAlignment="Bottom" Margin="-12,0,-12,-8"/><StackPanel>
+<Border Grid.Row="2" Background="#EAF1FF" Padding="14,4,14,12"><Grid><StackPanel>
 <Expander x:Name="QuickCommandsExpander" Header="快捷指令" IsExpanded="True" Margin="0,0,0,6"><ScrollViewer MaxHeight="36" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><ItemsControl ItemsSource="{Binding QuickCommands}"><ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
 <ItemsControl.ItemTemplate><DataTemplate><Button Content="{Binding}" Command="{Binding DataContext.QuickCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" MinHeight="28" FontSize="12" Padding="8,4" Margin="0,0,6,6"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer></Expander>
-<local:FurinaPanel Background="#D7E9FF" BorderBrush="#D7BC79" BorderThickness="1.5" CornerRadius="16" Padding="6,2,6,6"><StackPanel>
+<Border Background="#F7FAFF" BorderBrush="#9CB6DD" BorderThickness="1" CornerRadius="14" Padding="6,3,6,6"><StackPanel>
 <!-- The shared template also applies Padding as host margin; keep this height-capped editor's inset small. -->
-<TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Padding="8,3" MinHeight="44" MaxHeight="72" Background="#F6FAFF" BorderBrush="#F6FAFF" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="输入你的问题">
+<TextBox x:Name="InputBox" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" Padding="8,3" MinHeight="44" MaxHeight="72" Background="#F7FAFF" BorderBrush="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" AutomationProperties.Name="输入你的问题">
 <TextBox.InputBindings><KeyBinding Key="Enter" Modifiers="Control" Command="{Binding SendCommand}"/></TextBox.InputBindings></TextBox>
 <DockPanel Margin="0,8,0,0"><Button x:Name="SendButton" DockPanel.Dock="Right" Content="➤" ToolTip="发送（Ctrl+Enter）" AutomationProperties.Name="发送" Command="{Binding SendCommand}" Style="{StaticResource Furina.PrimaryButtonStyle}" Padding="12,4" MinHeight="32"/>
-<TextBlock Text="Enter 换行 · Ctrl+Enter 发送" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}" VerticalAlignment="Center"/></DockPanel></StackPanel></local:FurinaPanel>
+<TextBlock Text="Enter 换行 · Ctrl+Enter 发送" FontSize="12" Foreground="{StaticResource Furina.MutedTextBrush}" VerticalAlignment="Center"/></DockPanel></StackPanel></Border>
 </StackPanel></Grid></Border>
-</Grid></Grid></local:FurinaPanel></Window>
+</Grid></Grid></Border></Window>

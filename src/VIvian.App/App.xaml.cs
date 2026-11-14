@@ -600,8 +600,31 @@ public partial class App : Application
         var tabs = FindTabControl(window) ?? throw new InvalidOperationException("TabControl not found");
         var headers = tabs.Items.OfType<System.Windows.Controls.TabItem>().Select(t => t.Header as string).ToArray();
         if (!headers.Contains("账号管理") || !headers.Contains("游戏管理") ||
-            headers.Contains("日常任务") || headers.Contains("任务计划"))
+            headers.Contains("日常任务") || !headers.Contains("任务计划"))
             throw new InvalidOperationException("Account workflow pages do not match the home-start layout");
+
+        if (window is not MainWindow main) throw new InvalidOperationException("Missing main window");
+        tabs.SelectedItem = main.TaskOverviewTab;
+        window.UpdateLayout();
+        var overview = ReadOnlyPageNodes(main.TaskOverviewTab).ToArray();
+        if (!Equals(main.TaskOverviewTab.Header, "任务计划") || !main.TaskOverviewTab.IsSelected ||
+            overview.Any(node => node is System.Windows.Input.ICommandSource or
+                System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.Primitives.Selector ||
+                node is UIElement element && element.InputBindings.Count != 0) ||
+            !overview.OfType<System.Windows.Controls.TextBlock>().Any(text => text.Text == "确认配置后，请回到首页启动日常。"))
+            throw new InvalidOperationException("Task overview must remain read-only with home-start guidance");
+        tabs.SelectedIndex = 0;
+        window.UpdateLayout();
+        if (!main.DailyRunButton.IsVisible || !ReferenceEquals(main.DailyRunButton.Command, vm.OneClickCommand))
+            throw new InvalidOperationException("Daily execution entry must remain on the home page");
+
+        // Inspect page content, not ScrollViewer template buttons that only scroll.
+        static IEnumerable<DependencyObject> ReadOnlyPageNodes(DependencyObject node)
+        {
+            yield return node;
+            foreach (var child in LogicalTreeHelper.GetChildren(node).OfType<DependencyObject>())
+                foreach (var descendant in ReadOnlyPageNodes(child)) yield return descendant;
+        }
 
         if (RealExecutionPolicy.IsM5DailyTest)
         {
@@ -610,7 +633,6 @@ public partial class App : Application
                 throw new InvalidOperationException("Home start did not require selected accounts");
         }
 
-        if (window is not MainWindow main) throw new InvalidOperationException("Missing main window");
         if (RealExecutionPolicy.IsM5DailyTest)
         {
             if (!main.StatusActionButton.IsVisible || !Equals(main.StatusActionButton.Content, "前往账号管理"))
@@ -692,14 +714,29 @@ public partial class App : Application
             throw new InvalidOperationException("The Zenless game page is missing the shared task editor");
         main.GameTabs.SelectedIndex = 0;
         window.UpdateLayout();
-        var starRailSettingsWidth = ((main.GameTabs.SelectedItem as System.Windows.Controls.TabItem)?.Content
-            as System.Windows.Controls.Border)?.ActualWidth ?? 0;
+        var starRailPanel = MeasureSettingsPanel(main.StarRailPageScroll);
         main.GameTabs.SelectedIndex = 1;
-        window.UpdateLayout();
-        var genshinSettings = (main.GameTabs.SelectedItem as System.Windows.Controls.TabItem)?.Content as System.Windows.Controls.Border;
-        if (starRailSettingsWidth <= 0 || genshinSettings is null ||
-            Math.Abs(starRailSettingsWidth - genshinSettings.ActualWidth) > 1)
-            throw new InvalidOperationException("Star Rail and Genshin must use the same full-width configuration panel");
+        var genshinPanel = MeasureSettingsPanel(main.GenshinPageScroll);
+        if (Math.Abs(starRailPanel.Outer - genshinPanel.Outer) > 1 ||
+            Math.Abs(starRailPanel.Left - genshinPanel.Left) > 1 ||
+            Math.Abs((starRailPanel.Inner - genshinPanel.Inner) - (starRailPanel.Viewport - genshinPanel.Viewport)) > 1)
+            throw new InvalidOperationException("Configuration scroll containers must align; panel width differences must match their viewports");
+
+        (double Outer, double Left, double Inner, double Viewport) MeasureSettingsPanel(System.Windows.Controls.ScrollViewer scroll)
+        {
+            window.UpdateLayout();
+            window.Dispatcher.Invoke(() => { }, DispatcherPriority.Render);
+            var left = scroll.TranslatePoint(new Point(), window).X;
+            if (scroll.VerticalScrollBarVisibility != System.Windows.Controls.ScrollBarVisibility.Auto ||
+                scroll.Content is not System.Windows.Controls.Border panel ||
+                !scroll.IsMeasureValid || !scroll.IsArrangeValid || !panel.IsMeasureValid || !panel.IsArrangeValid ||
+                !double.IsFinite(scroll.ActualWidth) || scroll.ActualWidth <= 0 || !double.IsFinite(left) ||
+                !double.IsFinite(panel.ActualWidth) || panel.ActualWidth <= 0 ||
+                !double.IsFinite(scroll.ViewportWidth) || scroll.ViewportWidth <= 0 ||
+                Math.Abs(panel.ActualWidth - scroll.ViewportWidth) > 1)
+                throw new InvalidOperationException("Configuration panel must fill its finite, laid-out Auto scroll viewport");
+            return (scroll.ActualWidth, left, panel.ActualWidth, scroll.ViewportWidth);
+        }
         var genshin = vm.GenshinConfiguration;
         if (genshin.SelectedAccount is not { Enabled: true, LoginState: "recognized" })
             throw new InvalidOperationException("The first selected Genshin account must be the enabled recognized fixture");

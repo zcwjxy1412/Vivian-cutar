@@ -154,7 +154,7 @@ public sealed class AssistantViewModel : ObservableObject
         CancelRequestCommand = new(CancelRequest);
         QuickCommand = new(text => { Input = text ?? ""; SendCommand.Execute(null); });
         Add(false, $"旅行者，欢迎回来！我是{theme.AssistantName}。\n我可以帮你查看三款游戏的任务和配置、解释每个参数、把你的要求整理成修改提案（你确认后才会写入），以及查看运行结果。\n" +
-            (_endpoint.IsComplete ? "有什么需要我帮忙的吗？" : "先点右上角的齿轮，填好 AI 接口地址、模型和密钥就能开始聊天啦。"));
+            (_endpoint.IsComplete ? "有什么需要我帮忙的吗？" : "先点左侧的「接口设置」，填好 AI 接口地址、模型和密钥就能开始聊天啦。"));
     }
 
     private void Add(bool fromUser, string text, IReadOnlyList<ProposalCard>? cards = null) =>

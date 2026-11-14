@@ -4,7 +4,7 @@ using System.Windows.Media;
 
 namespace VIvian.App;
 
-// Vector-only decorative chrome. The declared solid background is the darkest glass stop,
+// Decorative glass chrome with optional artwork. The declared solid background is the darkest glass stop,
 // so text contrast auditing stays conservative even though the painted surface is lighter.
 public class FurinaPanel : Border
 {
@@ -15,26 +15,22 @@ public class FurinaPanel : Border
     {
         base.OnRender(dc);
         if (ActualWidth < 20 || ActualHeight < 20) return;
-        var r = new Rect(3, 3, ActualWidth - 6, ActualHeight - 6);
+        var r = new Rect(1.5, 1.5, ActualWidth - 3, ActualHeight - 3);
+        var radius = Math.Max(0, CornerRadius.TopLeft - 1.5);
         var glass = new LinearGradientBrush();
         glass.StartPoint = new Point(0, 0); glass.EndPoint = new Point(.25, 1);
         glass.GradientStops.Add(new(Colors.White, 0));
-        glass.GradientStops.Add(new(Color.FromRgb(231, 238, 255), .25));
-        glass.GradientStops.Add(new(Color.FromRgb(215, 233, 255), 1));
-        dc.DrawRoundedRectangle(glass, new Pen(Brushes.White, 2), r, 16, 16);
-        dc.DrawRoundedRectangle(null, new Pen(new SolidColorBrush(Color.FromRgb(130, 168, 235)), 1.5),
-            new Rect(6, 6, ActualWidth - 12, ActualHeight - 12), 13, 13);
-        dc.DrawRoundedRectangle(null, new Pen(new SolidColorBrush(Color.FromArgb(140, 255, 255, 255)), 2),
-            new Rect(8, 8, ActualWidth - 16, ActualHeight - 16), 12, 12);
+        glass.GradientStops.Add(new(Color.FromRgb(240, 245, 255), .18));
+        glass.GradientStops.Add(new(Color.FromRgb(220, 234, 255), .75));
+        glass.GradientStops.Add(new(Color.FromRgb(231, 239, 255), 1));
+        dc.DrawRoundedRectangle(glass, new Pen(Brushes.White, 1.5), r, radius, radius);
+        dc.DrawRoundedRectangle(null, new Pen(new SolidColorBrush(Color.FromArgb(100, 115, 153, 221)), 1),
+            new Rect(4, 4, ActualWidth - 8, ActualHeight - 8), Math.Max(0, radius - 2.5), Math.Max(0, radius - 2.5));
         var gold = new Pen(new SolidColorBrush(Color.FromRgb(215, 188, 121)), 1.2);
-        dc.DrawLine(gold, new Point(18, 2), new Point(48, 2));
-        dc.DrawLine(gold, new Point(2, 18), new Point(2, 45));
-        dc.DrawLine(gold, new Point(ActualWidth - 18, ActualHeight - 2), new Point(ActualWidth - 48, ActualHeight - 2));
-        // Gold fleuron stays in the top bevel, clear of reading content.
-        dc.DrawEllipse(Brushes.White, gold, new Point(ActualWidth - 23, 5), 3, 2);
-        dc.DrawLine(gold, new Point(ActualWidth - 36, 5), new Point(ActualWidth - 30, 5));
+        dc.DrawLine(gold, new Point(18, 1), new Point(Math.Min(58, ActualWidth - 18), 1));
+        dc.DrawLine(gold, new Point(ActualWidth - 18, ActualHeight - 1), new Point(Math.Max(18, ActualWidth - 58), ActualHeight - 1));
         if (CornerArt is not null && ActualWidth >= 140)
-            dc.DrawImage(CornerArt, new Rect(ActualWidth - 74, -16, 68, 68));
+            dc.DrawImage(CornerArt, new Rect(ActualWidth - 46, 5, 38, Math.Min(38, ActualHeight - 10)));
     }
 }
 
@@ -85,9 +81,11 @@ public sealed class FurinaOrnament : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         if (ActualWidth <= 0 || ActualHeight <= 0) return;
-        if (Kind == "Halo" && WaterImage is not null)
+        if (Kind is "Halo" or "Crown" && WaterImage is { Width: > 0, Height: > 0 })
         {
-            dc.DrawImage(WaterImage, new Rect(0, 0, ActualWidth, ActualHeight));
+            var scale = Math.Min(ActualWidth / WaterImage.Width, ActualHeight / WaterImage.Height);
+            var w = WaterImage.Width * scale; var h = WaterImage.Height * scale;
+            dc.DrawImage(WaterImage, new Rect((ActualWidth - w) / 2, (ActualHeight - h) / 2, w, h));
             return;
         }
         dc.PushTransform(new ScaleTransform(ActualWidth / 100, ActualHeight / 100));

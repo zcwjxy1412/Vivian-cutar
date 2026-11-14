@@ -12,6 +12,25 @@ public sealed class ThemeAssetsTests : IDisposable
     public ThemeAssetsTests() => Directory.CreateDirectory(External);
 
     [Fact]
+    public void CourtArtworkUsesExternalThenBundledAndRemainsOptional()
+    {
+        var missing = new ThemeAssets(External, Bundled);
+        Assert.Null(missing.Crown);
+        Assert.Null(missing.RunMedallion);
+        Directory.CreateDirectory(Bundled);
+        foreach (var name in new[] { "crown.png", "run-medallion.png" })
+            File.WriteAllBytes(Path.Combine(Bundled, name), [1]);
+        var bundled = new ThemeAssets(External, Bundled);
+        Assert.Equal(Path.Combine(Bundled, "crown.png"), bundled.Crown);
+        Assert.Equal(Path.Combine(Bundled, "run-medallion.png"), bundled.RunMedallion);
+        foreach (var name in new[] { "crown.png", "run-medallion.png" })
+            File.WriteAllBytes(Path.Combine(External, name), [1]);
+        var overridden = new ThemeAssets(External, Bundled);
+        Assert.Equal(Path.Combine(External, "crown.png"), overridden.Crown);
+        Assert.Equal(Path.Combine(External, "run-medallion.png"), overridden.RunMedallion);
+    }
+
+    [Fact]
     public void MissingAssetsKeepVectorFallbackAndUseCurrentBrand()
     {
         var theme = new ThemeAssets(External, Bundled);

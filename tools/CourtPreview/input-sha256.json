@@ -1,0 +1,17 @@
+{
+  "Markup/MainWindow.xaml": "2bb301b428fb48c3dcf2f26596d084d9ed6259e61e63e8e1b188339efc9981d7",
+  "Markup/AssistantWindow.xaml": "a5451710e67b5af90d42be6dee6a396d4ab095b7b10aa5579be6457cb737895c",
+  "Markup/App.xaml": "dfc8732967de8f8fa6b9051827454e6165f99d8c83fff0eb4da2b826fd77c0e2",
+  "Assets/Furina/crown.png": "3a3a8fbbcfd0a8334b61c314426782f251eb2d0531095bb79d88b3988b46f600",
+  "Assets/Furina/furina-avatar.png": "8842bd31e2d016cd20288c0c4dfb10c6c002c2c10edbe17ef45531eb604a6508",
+  "Assets/Furina/furina-main.png": "0086c8c5540aafd071d54e1f115794926cabdf588e15766afabf734cea5fa2ec",
+  "Assets/Furina/game-genshin.png": "e4008e8bb6d68816e3ba61aef8397fba4f7ae6d1ac9b3e4317c5b68a0f6f5a30",
+  "Assets/Furina/game-hsr.png": "90162be76300cd2126373cdae91b985013f0e0292406185f4eebd67bbb2b817e",
+  "Assets/Furina/game-zzz.png": "9f96211262ca05d806c7cb4fde336b5b6e92454334ff3f52d0a3901da18f464b",
+  "Assets/Furina/run-medallion.png": "4c8a3d0a14650894d4acae7fc6f86531c5b3777751fdb433d014db419f7f2b23",
+  "Assets/Furina/scene-background.png": "4fdd1cab3e44805baaa4844482c32698c0492f7870551d5f74ad24172c84e280",
+  "Assets/Furina/water-corner.png": "485a9c163f3928299a58b30b706bb39b96a859bdf9946651a5d8181efa1d2bb9",
+  "Assets/Furina/water-foreground.png": "899d9e1596b616463d17f303be136bc282a1401892c5122808b98a058a62c8db",
+  "Assets/Furina/water-frame.png": "74af4f2e99642b463737282f1651a65bf418b7863e205ee15ed30e6d06a71cf7",
+  "Markup/Theme.xaml": "8df66548c4af5ccd060f8507c481de2e3de2730cf591eb1b82e567d62a4ba9f2"
+}

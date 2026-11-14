@@ -86,6 +86,9 @@ public partial class MainWindow : Window
         var middle = width - (compact ? 72 : 176) - character - controls - 40;
         SetValue(IsCompactLayoutProperty, compact);
         Resources["Furina.NavigationWidth"] = new GridLength(compact ? 72 : 176);
+        Resources["Furina.PageWidth"] = Math.Min(1100.0, width - (compact ? 72 : 176) - 112);
+        Resources["Furina.FieldWidth"] = Math.Min(780.0, (double)Resources["Furina.PageWidth"] - 64);
+        Resources["Furina.SettingsColumns"] = compact ? 1 : 2;
         Resources["Furina.CharacterWidth"] = new GridLength(character);
         Resources["Furina.ControlsWidth"] = new GridLength(controls);
         Resources["Furina.GameBannerWidth"] = new GridLength(middle >= 640 ? 240 : 156);

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using VIvian.Core;
 using VIvian.Core.Engines;
+using VIvian.Infrastructure.Engines;
 
 namespace VIvian.Infrastructure.Assistant;
 
@@ -18,6 +19,12 @@ public sealed class StarRailAccountConfigurationProvider(LocalDatabase database,
     {
         using var desktop = acquireReadLease?.Invoke();
         return (await LoadAsync(target, ct).ConfigureAwait(false)).View;
+    }
+
+    internal async Task<AccountConfigurationView> ReadForExecutionAsync(AccountConfigurationTarget target, CancellationToken ct)
+    {
+        using var desktop = acquireReadLease?.Invoke();
+        return (await LoadAsync(target, ct, forExecution: true).ConfigureAwait(false)).View;
     }
 
     public async Task<AccountConfigurationProposal> ProposeAsync(AccountConfigurationTarget target, string revision,
@@ -59,7 +66,7 @@ public sealed class StarRailAccountConfigurationProvider(LocalDatabase database,
         return new(Revision(current.Account, revision, current.Effective), proposal.Id);
     }
 
-    private async Task<Current> LoadAsync(AccountConfigurationTarget target, CancellationToken ct)
+    private async Task<Current> LoadAsync(AccountConfigurationTarget target, CancellationToken ct, bool forExecution = false)
     {
         if (target.Game != Game || target.AccountId == Guid.Empty)
             throw new ArgumentException("目标游戏和账号不匹配。");
@@ -81,8 +88,22 @@ public sealed class StarRailAccountConfigurationProvider(LocalDatabase database,
         var reason = legacy ? LegacyReadOnly : !account.Enabled ? "该账号已停用。"
             : effective.Values.Any(v => v.Value is not null && v.Schema.Access == ParameterAccess.VerifiedReadWrite)
                 ? null : "固定版本配置中没有已核对的可写字段。";
-        var view = new AccountConfigurationView(target, account.Name, Revision(account, settings.Revision, upstream), effective.Values, reason);
+        var confirmation = forExecution ? ExecutionConfirmation(upstream) : upstream;
+        var view = new AccountConfigurationView(target, account.Name, Revision(account, settings.Revision, confirmation), effective.Values, reason);
         return new(account, settings, effective, view);
+    }
+
+    private static ConfigurationSnapshot ExecutionConfirmation(ConfigurationSnapshot snapshot)
+    {
+        var bytes = File.ReadAllBytes(snapshot.Path);
+        if (Convert.ToHexString(SHA256.HashData(bytes)) != snapshot.Revision) throw new SettingsConflictException();
+        var text = new UTF8Encoding(false, true).GetString(bytes);
+        var location = YamlScalarEditor.Locate(YamlScalarEditor.Lines(text), "last_run_timestamp");
+        // Pinned upstream records successful daily completion here. Keep every other byte frozen, including
+        // unregistered resource settings; configuration-edit proposals still use the original whole-file revision.
+        if (location is not null && System.Text.RegularExpressions.Regex.IsMatch(location.Value, @"\A[0-9]+(?:\.[0-9]+)?\z"))
+            text = YamlScalarEditor.Replace(text, location, "0");
+        return snapshot with { Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))) };
     }
 
     private static void RequireWritable(Current current, string revision)

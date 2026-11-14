@@ -30,7 +30,7 @@ public sealed class FurinaWindowLayoutTests
         }) { IsBackground = true };
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
-        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "Window content render timed out.");
+        Assert.True(thread.Join(TimeSpan.FromSeconds(120)), "Window content render timed out.");
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
@@ -71,6 +71,7 @@ public sealed class FurinaWindowLayoutTests
                 main.Width = width; main.Height = height; main.UpdateHomeLayout();
                 Assert.Equal(width < 1280, main.IsCompactLayout);
                 Render(home, width, height, Path.Combine(output, $"home-content-{width}x{height}.png"));
+                AssertMedallionTextContrast((Button)main.FindName("DailyRunButton"), Path.Combine(root, "src", "VIvian.App", "Assets", "Furina", "run-medallion.png"));
                 Assert.Equal(width < 1500 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
                 var stopBounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
                 Assert.True(stopBounds.Bottom <= height && stopBounds.Right <= width, $"Stop clipped: {stopBounds}");
@@ -105,6 +106,39 @@ public sealed class FurinaWindowLayoutTests
                 Render(home, 1600, 900, Path.Combine(output, $"page-{tab}-1600x900.png"));
                 AuditOffscreenText(home);
             }
+            // Every navigation page and each game/account subpage at a fixed physical budget.
+            foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                var width = (int)(1920 / scale); var height = (int)(1000 / scale);
+                main.Width = width; main.Height = height; main.UpdateHomeLayout();
+                VisualTreeHelper.SetRootDpi(main, new DpiScale(scale, scale));
+                for (int tab = 0; tab < navigation.Items.Count; tab++)
+                {
+                    navigation.SelectedIndex = tab;
+                    var children = tab == 1 ? (TabControl)main.FindName("GameTabs")
+                        : tab == 2 ? (TabControl)main.FindName("AccountTabs") : null;
+                    for (int child = 0; child < (children?.Items.Count ?? 1); child++)
+                    {
+                        if (children is not null) children.SelectedIndex = child;
+                        Render(home, width, height, Path.Combine(output, $"court-page-{tab}-sub-{child}-dpi-{scale * 100:0}.png"), scale);
+                        AuditOffscreenText(home);
+                        var stop = (Button)main.FindName("PersistentStopButton");
+                        var bounds = stop.TransformToAncestor(home).TransformBounds(new Rect(stop.RenderSize));
+                        Assert.True(new Rect(0, 0, width, height).Contains(bounds), $"Stop clipped on page {tab}/{child} at {scale}: {bounds}");
+                        if (tab == 1 && child < 2)
+                        {
+                            var pageScroll = (ScrollViewer)main.FindName(child == 0 ? "StarRailPageScroll" : "GenshinPageScroll");
+                            pageScroll.ScrollToBottom(); home.UpdateLayout();
+                            Assert.True(Math.Abs(pageScroll.VerticalOffset - pageScroll.ScrollableHeight) < 1, "Game page bottom is unreachable.");
+                            Render(home, width, height, Path.Combine(output, $"court-page-{tab}-sub-{child}-dpi-{scale * 100:0}-bottom.png"), scale);
+                            pageScroll.ScrollToTop(); home.UpdateLayout();
+                        }
+                    }
+                    if (children is not null) children.SelectedIndex = 0;
+                }
+            }
+            VisualTreeHelper.SetRootDpi(main, new DpiScale(1, 1));
+            main.Width = 1600; main.Height = 900; main.UpdateHomeLayout();
             navigation.SelectedIndex = 0;
             vm.ReportAssistantInputBlocked("测试提示：运行中暂不能进入聊天。");
             FlushBindings();
@@ -281,6 +315,38 @@ public sealed class FurinaWindowLayoutTests
 
     private static void FlushBindings() => System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
         () => { }, System.Windows.Threading.DispatcherPriority.DataBind);
+
+    private static void AssertMedallionTextContrast(Button button, string path)
+    {
+        var image = new FormatConvertedBitmap(new BitmapImage(new Uri(path)), PixelFormats.Bgra32, null, 0);
+        var stride = image.PixelWidth * 4;
+        var pixels = new byte[stride * image.PixelHeight];
+        image.CopyPixels(pixels, stride, 0);
+        // Use both actual text bounds: fixed font sizes occupy different image regions at 168/218 DIP.
+        var core = Assert.IsType<StackPanel>(button.Template.FindName("Core", button));
+        var art = Assert.IsType<FurinaOrnament>(button.Template.FindName("MedallionArt", button));
+        foreach (var text in core.Children.OfType<TextBlock>())
+        {
+            var bounds = new Rect(text.TranslatePoint(new Point(), art), text.RenderSize);
+            var left = (int)Math.Floor(bounds.Left / art.ActualWidth * image.PixelWidth);
+            var right = (int)Math.Ceiling(bounds.Right / art.ActualWidth * image.PixelWidth);
+            var top = (int)Math.Floor(bounds.Top / art.ActualHeight * image.PixelHeight);
+            var bottom = (int)Math.Ceiling(bounds.Bottom / art.ActualHeight * image.PixelHeight);
+            Assert.InRange(left, 0, image.PixelWidth - 1); Assert.InRange(right, left + 1, image.PixelWidth);
+            Assert.InRange(top, 0, image.PixelHeight - 1); Assert.InRange(bottom, top + 1, image.PixelHeight);
+            for (int y = top; y < bottom; y++)
+            for (int x = left; x < right; x++)
+            {
+                var offset = y * stride + x * 4;
+                // White behind translucent artwork is a conservative upper bound on luminance.
+                var alpha = pixels[offset + 3] / 255.0;
+                byte Composite(byte channel) => (byte)Math.Round(channel * alpha + 255 * (1 - alpha));
+                var color = Color.FromRgb(Composite(pixels[offset + 2]), Composite(pixels[offset + 1]), Composite(pixels[offset]));
+                Assert.True(ContrastAudit.Ratio(Colors.White, color) >= 4.5,
+                    $"Medallion text {text.Text} at {button.ActualWidth} DIP has bright background at {x},{y}.");
+            }
+        }
+    }
 
     private static void AssertInputLinesVisible(TextBox input)
     {

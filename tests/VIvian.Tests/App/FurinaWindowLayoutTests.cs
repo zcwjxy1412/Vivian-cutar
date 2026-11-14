@@ -386,6 +386,12 @@ public sealed class FurinaWindowLayoutTests
                     FlushBindings();
                     var path = Path.Combine(output, $"court-DEMO-page-{page}-sub-{sub}-{width}x{height}");
                     Render(surface, width, height, path + "-part-00.png", scale);
+                    var headingName = page switch { 1 => "GamePageHeading", 2 => "AccountPageHeading", 6 => "SettingsPageHeading", _ => null };
+                    if (headingName is not null)
+                    {
+                        var heading = (TextBlock)main.FindName(headingName);
+                        Assert.InRange(heading.TranslatePoint(new Point(), surface).X, (width < 1280 ? 112 : 216) - 1, (width < 1280 ? 112 : 216) + 1);
+                    }
                     if (page == 1 && sub == 1)
                         Assert.True(((ItemsControl)main.FindName("GenshinPlanFields")).Items.Count > 0, "DEMO Genshin form did not load fields.");
                     var scroll = page == 1 ? ((TabItem)tabs!.SelectedItem).Content as ScrollViewer

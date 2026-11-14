@@ -180,7 +180,7 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
         var at = DateTimeOffset.UtcNow;
         var rule = acceptance ? BetterGiContract.PinnedTag + "/acceptance" : BetterGiContract.PinnedTag;
         await database.PublishAsync(new(result.RunId, childBatchId ?? result.RunId, GameId.Genshin, rule,
-            IsSimulation: false, RunPhase.Finished, outcome, cleanup, reason, at), CancellationToken.None).ConfigureAwait(false);
+            IsSimulation: false, clean ? RunPhase.Finished : RunPhase.Blocked, outcome, cleanup, reason, at), CancellationToken.None).ConfigureAwait(false);
         await database.AppendEventsAsync([new(result.RunId, at, RunEventKind.Progress, detail + " 运行报告 " + result.ReportPath)],
             CancellationToken.None)
             .ConfigureAwait(false);

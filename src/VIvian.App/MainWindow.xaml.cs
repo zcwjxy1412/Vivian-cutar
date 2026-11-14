@@ -60,7 +60,7 @@ public partial class MainWindow : Window
                     Serilog.Log.Warning("F10 stop key unavailable: owned by another program");
                 viewModel.StopKeyText = _hotkey.IsRegistered
                     ? "游戏全屏时也可以按 F10 立即停止。"
-                    : "F10 已被其他程序占用（例如星铁助手窗口开着），请用 VIvian 里的“紧急停止”按钮。";
+                    : "F10 已被其他程序占用（例如星铁助手窗口开着），请用 furina 里的“紧急停止”按钮。";
             }
             viewModel.PropertyChanged += (_, e) =>
             {

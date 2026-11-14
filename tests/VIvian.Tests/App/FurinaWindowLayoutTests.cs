@@ -34,6 +34,16 @@ public sealed class FurinaWindowLayoutTests
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var nested in Descendants(child)) yield return nested;
+        }
+    }
+
     private static void InspectWindows()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -64,6 +74,10 @@ public sealed class FurinaWindowLayoutTests
             var vm = new MainViewModel(db, db, db, db, paths, queue, supervisor, accounts,
                 new MultiAccountOrchestrator(db, null!), new GamePathProvider());
             main = new MainWindow(vm);
+            Assert.Equal(256, Assert.IsAssignableFrom<BitmapSource>(main.Icon).PixelWidth);
+            var repair = (Expander)main.FindName("ReleaseRepairExpander");
+            Assert.False(repair.IsExpanded);
+            ((TextBlock)main.FindName("PrivilegeValue")).Text = "管理员：打开时已授权，批次内不再弹窗";
             Assert.Equal(4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);
             var home = (FrameworkElement)main.Content;
             foreach (var (width, height) in new[] { (1600, 900), (1280, 800), (1440, 900), (960, 500) })
@@ -71,6 +85,10 @@ public sealed class FurinaWindowLayoutTests
                 main.Width = width; main.Height = height; main.UpdateHomeLayout();
                 Assert.Equal(width < 1280, main.IsCompactLayout);
                 Render(home, width, height, Path.Combine(output, $"home-content-{width}x{height}.png"));
+                var label = (TextBlock)main.FindName("PrivilegeLabel");
+                var value = (TextBlock)main.FindName("PrivilegeValue");
+                Assert.True(label.TranslatePoint(new Point(label.ActualWidth, 0), home).X <= value.TranslatePoint(new Point(), home).X);
+                Assert.Equal(3, Descendants(home).OfType<FurinaRoundedClipBorder>().Count());
                 AssertMedallionTextContrast((Button)main.FindName("DailyRunButton"), Path.Combine(root, "src", "VIvian.App", "Assets", "Furina", "run-medallion.png"));
                 Assert.Equal(1536, Assert.IsAssignableFrom<BitmapSource>(((FurinaOrnament)main.FindName("BrandCrown")).WaterImage).PixelWidth);
                 Assert.Equal(width < 1500 ? 2 : 4, ((System.Windows.Controls.Primitives.UniformGrid)main.FindName("HomeSummary")).Columns);                var stop = (Button)main.FindName("PersistentStopButton");
@@ -107,6 +125,18 @@ public sealed class FurinaWindowLayoutTests
                 Render(home, 1600, 900, Path.Combine(output, $"page-{tab}-1600x900.png"));
                 AuditOffscreenText(home);
             }
+            navigation.SelectedItem = main.FindName("EngineEnvironmentTab");
+            repair.IsExpanded = true;
+            Render(home, 1600, 900, Path.Combine(output, "release-repair-expanded.png"));
+            Assert.Contains(Descendants(repair).OfType<Button>(), button => ReferenceEquals(button.Command, vm.VerifyReleaseCommand));
+            Assert.Contains(Descendants(repair).OfType<TextBox>(), box => System.Windows.Data.BindingOperations.GetBinding(box, TextBox.TextProperty)?.Path.Path == "ReleaseArchivePath");
+            var engineScroll = (ScrollViewer)((TabItem)navigation.SelectedItem).Content;
+            engineScroll.ScrollToBottom(); home.UpdateLayout();
+            Render(home, 1600, 900, Path.Combine(output, "release-repair-expanded-bottom.png"));
+            repair.IsExpanded = false;
+            engineScroll.ScrollToBottom(); home.UpdateLayout();
+            Render(home, 1600, 900, Path.Combine(output, "release-repair-collapsed-bottom.png"));
+            engineScroll.ScrollToTop();
             // Every navigation page and each game/account subpage at a fixed physical budget.
             foreach (var scale in new[] { 1.0, 1.25, 1.5, 2.0 })
             {

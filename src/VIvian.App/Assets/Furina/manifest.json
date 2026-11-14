@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "source": "Native image generation; reference artwork, not application screenshots",
   "generatedOn": "2026-11-14",
   "assets": [
@@ -89,6 +89,14 @@
       "height": 1254,
       "bytes": 1865082,
       "sha256": "4c8a3d0a14650894d4acae7fc6f86531c5b3777751fdb433d014db419f7f2b23",
+      "transparent": true
+    },
+    {
+      "file": "furina-app.png",
+      "width": 256,
+      "height": 256,
+      "bytes": 103688,
+      "sha256": "1e6601ea0c3b532ec9822c7ba2dab4d439a73fdd86fa771851e9b509d4fdf256",
       "transparent": true
     }
   ]

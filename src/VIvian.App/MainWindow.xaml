@@ -1,6 +1,6 @@
 <Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 xmlns:local="clr-namespace:VIvian.App" xmlns:core="clr-namespace:VIvian.Core;assembly=VIvian.Core" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
-Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight="500" Background="{StaticResource Furina.StageBrush}" Foreground="{StaticResource Text}" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" RenderOptions.BitmapScalingMode="HighQuality">
+Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight="500" Background="{StaticResource Furina.StageBrush}" Foreground="{StaticResource Text}" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" RenderOptions.BitmapScalingMode="HighQuality">
 <Window.Resources>
 <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Furina.RunButtonSize">176</sys:Double>
 <sys:Double xmlns:sys="clr-namespace:System;assembly=System.Runtime" x:Key="Furina.PageWidth">1100</sys:Double>
@@ -180,14 +180,14 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Border Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="12" Margin="0,0,0,7" ClipToBounds="True"><Grid>
 <Grid.ColumnDefinitions><ColumnDefinition Width="{DynamicResource Furina.GameBannerWidth}"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <!-- Banner: user image if supplied, otherwise a game-coloured plate with the title -->
-<Border CornerRadius="13,0,0,13" MinHeight="68">
-<Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="{Binding BannerFrom}" Offset="0"/><GradientStop Color="{Binding BannerTo}" Offset="1"/></LinearGradientBrush></Border.Background>
+<local:FurinaRoundedClipBorder x:Name="GameBannerClip" CornerRadius="12" MinHeight="68">
+<local:FurinaRoundedClipBorder.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="{Binding BannerFrom}" Offset="0"/><GradientStop Color="{Binding BannerTo}" Offset="1"/></LinearGradientBrush></local:FurinaRoundedClipBorder.Background>
 <Grid><Image RenderOptions.BitmapScalingMode="HighQuality" Source="{Binding Banner.Uri}" Stretch="Uniform" Visibility="{Binding Banner.StaticVisibility}"/>
 <Image RenderOptions.BitmapScalingMode="HighQuality" gif:AnimationBehavior.SourceUri="{Binding Banner.Uri}" Stretch="Uniform" Visibility="{Binding Banner.GifVisibility}"/>
 <Rectangle IsHitTestVisible="False"><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#F0102050" Offset="0"/><GradientStop Color="#D9102050" Offset="0.5"/><GradientStop Color="#30102050" Offset="0.85"/><GradientStop Color="#00102050" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
 <StackPanel Margin="12,0,0,0" Width="{DynamicResource Furina.BannerTextWidth}" HorizontalAlignment="Left" VerticalAlignment="Center">
 <TextBlock Text="{Binding Name}" Foreground="White" FontFamily="STZhongsong, SimSun, Microsoft YaHei UI" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
-<TextBlock Text="{Binding Tagline}" Foreground="#E6ECFF" FontFamily="Segoe UI" FontSize="10" TextWrapping="Wrap"/></StackPanel></Grid></Border>
+<TextBlock Text="{Binding Tagline}" Foreground="#E6ECFF" FontFamily="Segoe UI" FontSize="10" TextWrapping="Wrap"/></StackPanel></Grid></local:FurinaRoundedClipBorder>
 <StackPanel Grid.Column="1" Margin="10,6,6,6" VerticalAlignment="Center">
 <DockPanel><Ellipse Width="9" Height="9" Fill="{Binding StateBrush}" Margin="0,0,8,0" VerticalAlignment="Center"/>
 <TextBlock DockPanel.Dock="Right" Text="{Binding RunHint}" Style="{StaticResource Small}" FontSize="12" TextWrapping="NoWrap" Margin="8,0,0,0"/>
@@ -251,7 +251,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Grid Margin="0,2,0,8"><TextBlock Text="任务引擎"/><TextBlock Text="{Binding RunStateText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
 <Grid Margin="0,0,0,8"><TextBlock Text="配置同步"/><TextBlock Text="{Binding ConfigSyncText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
 <Grid Margin="0,0,0,8"><TextBlock Text="游戏检测"/><TextBlock Text="{Binding InstalledText}" Foreground="{StaticResource Ok}" FontWeight="SemiBold" HorizontalAlignment="Right"/></Grid>
-<Grid><TextBlock Text="运行权限"/><TextBlock Text="{Binding PrivilegeText}" Foreground="{StaticResource Muted}" FontSize="13" HorizontalAlignment="Right"/></Grid>
+<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock x:Name="PrivilegeLabel" Text="运行权限" Margin="0,0,10,0" VerticalAlignment="Top"/><TextBlock x:Name="PrivilegeValue" Grid.Column="1" Text="{Binding PrivilegeText}" Foreground="{StaticResource Muted}" FontSize="13" TextAlignment="Right" TextWrapping="Wrap"/></Grid>
 </StackPanel></local:FurinaPanel></StackPanel></ScrollViewer>
 
 <!-- Tip bar with the small assistant -->
@@ -359,7 +359,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <Border Padding="0,0,16,20">
 <StackPanel IsVisibleChanged="GenshinLoginVisibilityChanged" IsEnabled="{Binding DataContext.CanOperateWorkspace, RelativeSource={RelativeSource AncestorType=Window}}" Margin="0,12,0,0">
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="原神账号登录验收" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
-<TextBlock Text="从「启动 furina」打开 VIvian 并确认 Windows 授权，退出 BetterGI 后开始验收。程序会自动启动或接入已核验的原神国服客户端，按顺序登录所选账号。只核对登录与入场，结束后保留游戏客户端。" Style="{StaticResource Small}"/>
+<TextBlock Text="从「启动 furina」打开 furina 并确认 Windows 授权，退出 BetterGI 后开始验收。程序会自动启动或接入已核验的原神国服客户端，按顺序登录所选账号。只核对登录与入场，结束后保留游戏客户端。" Style="{StaticResource Small}"/>
 <StackPanel IsEnabled="{Binding IsIdle}" Margin="0,10,0,0">
 <TextBlock Style="{StaticResource Small}"><Run Text="第一个账号 · "/><Run Text="{Binding SelectedAccount.Name, Mode=OneWay}"/></TextBlock>
 <WrapPanel Margin="0,4,0,8">
@@ -428,7 +428,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TextBox Width="180" Margin="0,0,8,0" Text="{Binding SelectedRow.Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="所选星铁账号备注"/>
 <Button Content="上移" Command="{Binding MoveUpCommand}" Margin="0,0,8,0"/><Button Content="下移" Command="{Binding MoveDownCommand}" Margin="0,0,8,0"/>
 <Button Content="保存备注和勾选" Command="{Binding SaveNameCommand}" Margin="0,0,8,0"/><Button Style="{StaticResource DangerButton}" Content="删除所选账号" Command="{Binding DeleteCommand}"/></WrapPanel>
-<TextBlock Text="备注只改 VIvian 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
+<TextBlock Text="备注只改 furina 档案名称；删除不会清除游戏客户端的已保存账号。" Style="{StaticResource Small}" Margin="0,8,0,0"/>
 </StackPanel></local:FurinaPanel>
 <local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel><local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="最近星铁批次" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <ListBox ItemsSource="{Binding RecentBatches}" SelectedItem="{Binding SelectedBatch}" BorderThickness="0" Background="Transparent"><ListBox.ItemTemplate><DataTemplate>
@@ -534,7 +534,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <TabItem x:Name="RunLogTab" Header="运行日志" Tag="&#xE9D2;"><Grid Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left" Margin="24,22,24,20" Background="Transparent" DataContext="{Binding Queue}">
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="运行日志" Style="{StaticResource H1}"/><TextBlock Text="きろく" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，VIvian 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>
+<TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，furina 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>
 <Border Grid.Row="1" Background="{StaticResource DangerBack}" CornerRadius="10" Padding="16,12" Margin="0,0,0,14">
 <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
 <StackPanel><TextBlock Text="有运行无法确认已清理。在你确认之前，新的任务不会启动。" Foreground="{StaticResource DangerText}" FontWeight="SemiBold"/>
@@ -568,7 +568,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <!-- ============ 引擎与环境 ============ -->
 <TabItem x:Name="EngineEnvironmentTab" Header="引擎与环境" Tag="&#xE950;"><ScrollViewer Style="{StaticResource Page}"><StackPanel IsEnabled="{Binding CanEditWorkspace}" Width="{DynamicResource Furina.PageWidth}" HorizontalAlignment="Left">
 <StackPanel Orientation="Horizontal"><TextBlock Text="引擎与环境" Style="{StaticResource H1}"/><TextBlock Text="エンジン" Style="{StaticResource Kana}"/></StackPanel>
-<TextBlock Text="VIvian 启动时会自动找到三款引擎并核对固定版本。只有自动发现失败时才需要手动填写目录。检查全程只读，不会运行任何程序。" Style="{StaticResource Lead}"/>
+<TextBlock Text="furina 启动时会自动找到三款引擎并核对固定版本。只有自动发现失败时才需要手动填写目录。检查全程只读，不会运行任何程序。" Style="{StaticResource Lead}"/>
 <ItemsControl x:Name="EngineSettingsList" ItemsSource="{Binding Engines}"><ItemsControl.ItemTemplate><DataTemplate><local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
 <Ellipse Width="10" Height="10" Fill="{Binding Accent}" VerticalAlignment="Center" Margin="0,0,12,0"/>
@@ -590,13 +590,13 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 </Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></Expander>
 </StackPanel></local:FurinaPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
 <WrapPanel Margin="0,4,0,14"><Button Content="自动填入已发现目录" Command="{Binding AutoDiscoverCommand}" Margin="0,0,10,8"/><Button Style="{StaticResource Primary}" Content="保存路径并检查" Command="{Binding SaveCommand}" Margin="0,0,10,8"/><Button Content="重新检查" Command="{Binding CheckEnginesCommand}" Margin="0,0,10,8"/><Button Content="放弃未保存的修改" Command="{Binding ReloadCommand}" Margin="0,0,10,8"/></WrapPanel>
-<local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
-<local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="星铁官方发行包" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
-<TextBlock Text="VIvian 用官方 March7thAssistant_full.zip（v2026.10.31）的 SHA-256 核对安装目录里的 m7a.exe。不解压，不运行；位置会被记住，每次启动自动核对。" Style="{StaticResource Small}" Margin="0,0,0,10"/>
-<DockPanel><Button DockPanel.Dock="Right" Content="浏览…" Click="BrowseReleaseArchive" Margin="8,0,0,0"/><TextBox Text="{Binding ReleaseArchivePath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="官方发行包路径" ToolTip="官方发行包文件路径"/></DockPanel>
-<WrapPanel Margin="0,10,0,0"><Button Content="核对发行包" Command="{Binding VerifyReleaseCommand}"/></WrapPanel>
-<TextBlock Text="{Binding ReleaseStatus}" Style="{StaticResource Small}" Margin="0,8,0,0"/>
-</StackPanel></local:FurinaPanel>
+<Expander x:Name="ReleaseRepairExpander" Header="安装核验与修复" IsExpanded="False" Margin="0,0,0,12">
+<StackPanel Margin="0,8,0,0">
+<TextBlock Text="星铁安装核验与运行前检查保持启用。发行包缺失或校验失败时，可在这里选择官方文件重新核对；不会解压或运行发行包。" Style="{StaticResource Small}" Margin="0,0,0,8"/>
+<DockPanel><Button DockPanel.Dock="Right" Content="选择发行包…" Click="BrowseReleaseArchive" Margin="8,0,0,0"/><TextBox Text="{Binding ReleaseArchivePath, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="官方发行包路径" ToolTip="官方发行包文件路径"/></DockPanel>
+<Button Content="重新核对" Command="{Binding VerifyReleaseCommand}" HorizontalAlignment="Left" Margin="0,8,0,0"/>
+</StackPanel></Expander>
+<TextBlock x:Name="ReleaseRepairSummary" Text="{Binding ReleaseStatus}" Style="{StaticResource Small}" Margin="0,0,0,12"/>
 <Expander Header="旧版星铁画面实测" Visibility="{Binding LegacyRealTestVisibility}"><StackPanel>
 <TextBlock Text="{Binding ManualTestStateText}" Style="{StaticResource Small}"/>
 <TextBlock Text="{Binding LastRealResultText}" Style="{StaticResource Small}"/>
@@ -615,7 +615,7 @@ Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight
 <local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><TextBlock Text="界面素材" Style="{StaticResource RibbonText}"/></local:FurinaPlaque>
 <TextBlock Text="{Binding Theme.Folder, StringFormat=素材文件夹：{0}}" Style="{StaticResource Small}"/>
-<TextBlock Text="放入以下文件后重新打开 VIvian 即可生效（GIF 会自动播放）：" Margin="0,10,0,4"/>
+<TextBlock Text="放入以下文件后重新打开 furina 即可生效（GIF 会自动播放）：" Margin="0,10,0,4"/>
 <TextBlock Text="character.gif / .png：首页左侧的大角色，点击会打开 AI 助手" Style="{StaticResource Small}"/>
 <TextBlock Text="assistant.gif / .png：AI 助手头像和提示栏小人（不放则使用 character）" Style="{StaticResource Small}"/>
 <TextBlock Text="banner-genshin / banner-starrail / banner-zzz（.png/.jpg）：游戏横幅；background.png：背景" Style="{StaticResource Small}"/>

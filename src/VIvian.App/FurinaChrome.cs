@@ -122,3 +122,42 @@ public sealed class FurinaOrnament : FrameworkElement
         dc.Pop();
     }
 }
+
+
+// Border.CornerRadius paints a rounded background but does not clip its child visuals.
+// Apply a uniform-radius clip to the complete banner (images, gradient overlay and text).
+public sealed class FurinaRoundedClipBorder : Border
+{
+    static FurinaRoundedClipBorder() => CornerRadiusProperty.OverrideMetadata(typeof(FurinaRoundedClipBorder),
+        new FrameworkPropertyMetadata(new CornerRadius(), FrameworkPropertyMetadataOptions.AffectsArrange | FrameworkPropertyMetadataOptions.AffectsRender));
+
+    protected override Geometry GetLayoutClip(Size layoutSlotSize)
+    {
+        var radius = Math.Min(CornerRadius.TopLeft, Math.Min(RenderSize.Width, RenderSize.Height) / 2);
+        var clip = new RectangleGeometry(new Rect(RenderSize), radius, radius);
+        clip.Freeze();
+        return clip;
+    }
+}
+
+public static class FurinaAppIcon
+{
+    // A file beside the executable avoids hard-coded assembly names in pack URIs.
+    public static ImageSource? Image { get; } = Load(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "Furina", "furina-app.png"));
+    internal static ImageSource? Load(string path)
+    {
+        try
+        {
+            if (!System.IO.File.Exists(path)) return null;
+            var image = new System.Windows.Media.Imaging.BitmapImage();
+            image.BeginInit(); image.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            image.UriSource = new Uri(path); image.EndInit(); image.Freeze();
+            return image;
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or NotSupportedException or FormatException)
+        {
+            System.Diagnostics.Trace.TraceWarning("Application icon could not be loaded: {0}", ex.GetType().Name);
+            return null;
+        }
+    }
+}

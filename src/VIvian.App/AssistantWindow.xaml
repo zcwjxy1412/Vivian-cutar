@@ -1,6 +1,6 @@
 <Window x:Class="VIvian.App.AssistantWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 xmlns:local="clr-namespace:VIvian.App" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
-Title="芙宁娜 · AI 助手" Width="460" Height="720" MinWidth="360" MinHeight="460" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+Icon="{x:Static local:FurinaAppIcon.Image}" Title="芙宁娜 · AI 助手" Width="460" Height="720" MinWidth="360" MinHeight="460" WindowStyle="None" AllowsTransparency="True" Background="Transparent"
 ResizeMode="CanResizeWithGrip" ShowInTaskbar="False" ShowActivated="False" Topmost="False" FontFamily="{StaticResource Furina.BodyFontFamily}" FontSize="14"
 Foreground="{StaticResource Furina.TextBrush}" UseLayoutRounding="True" RenderOptions.BitmapScalingMode="HighQuality">
 <Window.Resources>

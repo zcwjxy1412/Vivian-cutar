@@ -34,6 +34,113 @@ public sealed class FurinaWindowLayoutTests
         if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
     }
 
+    private static void InspectStatusActions(MainWindow main, MainViewModel vm, string fixture, string output)
+    {
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
+        const System.Reflection.BindingFlags hidden = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var message = (Button)main.FindName("StatusMessageButton");
+        var recheck = (Button)main.FindName("RecheckStatusButton");
+        Assert.True(ToolTipService.GetShowOnDisabled(recheck));
+        ((FrameworkElement)main.Content).Measure(new Size(1600, 900));
+        ((FrameworkElement)main.Content).Arrange(new Rect(0, 0, 1600, 900));
+        vm.ShowStatus("DEMO 未分类错误"); FlushBindings();
+        Assert.False(message.IsEnabled);
+        main.RunStatusActionAsync().GetAwaiter().GetResult();
+        Assert.Equal("DEMO 未分类错误", vm.Status);
+        foreach (var (name, action, check) in new[] {
+            ("RecoverDesktopCommand", HomeStatusAction.RecoverDesktop, false),
+            ("RestoreConfigurationCommand", HomeStatusAction.RestoreConfiguration, false),
+            ("CheckEnginesCommand", HomeStatusAction.None, true) })
+        {
+            var field = typeof(MainViewModel).GetField("<" + name + ">k__BackingField", hidden)!;
+            var original = field.GetValue(vm);
+            var release = new TaskCompletionSource(); var calls = 0;
+            var command = new AsyncCommand(async () => { calls++; await release.Task; vm.ShowStatus("DEMO 仍需人工核对", HomeStatusAction.ReviewRuns); }, ex => throw ex);
+            field.SetValue(vm, command);
+            try
+            {
+                vm.ShowStatus("DEMO 等待处理", action); FlushBindings();
+                var pending = main.RunStatusActionAsync(check);
+                Assert.False(pending.IsCompleted);
+                Assert.True(main.IsStatusActionRunning);
+                FlushBindings(); Assert.False(recheck.IsEnabled); Assert.False(message.IsEnabled);
+                main.RunStatusActionAsync(check).GetAwaiter().GetResult();
+                Assert.Equal(1, calls); Assert.Equal("DEMO 等待处理", vm.Status);
+                release.SetResult();
+                for (int i = 0; i < 20 && !pending.IsCompleted; i++) FlushBindings();
+                Assert.True(pending.IsCompleted); pending.GetAwaiter().GetResult();
+                Assert.False(main.IsStatusActionRunning); Assert.Equal("DEMO 仍需人工核对", vm.Status);
+                FlushBindings(); Assert.True(message.IsEnabled); Assert.False(recheck.IsEnabled);
+                main.RunStatusActionAsync(recheck: true).GetAwaiter().GetResult();
+                Assert.Equal("DEMO 仍需人工核对", vm.Status);
+            }
+            finally { release.TrySetResult(); field.SetValue(vm, original); }
+        }
+        var checkField = typeof(MainViewModel).GetField("<CheckEnginesCommand>k__BackingField", hidden)!;
+        var savedCheck = checkField.GetValue(vm);
+        try
+        {
+            vm.ShowStatus("DEMO 未分类错误");
+            checkField.SetValue(vm, new AsyncCommand(() => Task.FromException(new IOException("DEMO failure")),
+                _ => vm.ShowStatus("DEMO 检查失败，需人工核对", HomeStatusAction.RestoreConfiguration)));
+            main.RunStatusActionAsync(recheck: true).GetAwaiter().GetResult();
+            Assert.False(main.IsStatusActionRunning);
+            Assert.Equal("DEMO 检查失败，需人工核对", vm.Status);
+            FlushBindings(); Assert.True(message.IsEnabled);
+        }
+        finally { checkField.SetValue(vm, savedCheck); }
+        // Real command + real recovery manager, with only an isolated corrupt recovery record.
+        var recovery = Path.Combine(fixture, "configuration-recovery", "temporary-config-recovery.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(recovery)!);
+        File.WriteAllText(recovery, "{DEMO invalid recovery json");
+        try
+        {
+            vm.ShowStatus("DEMO 临时配置待恢复", HomeStatusAction.RestoreConfiguration);
+            for (int attempt = 0; attempt < 2; attempt++)
+            {
+                var pending = main.RunStatusActionAsync();
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (!pending.IsCompleted && DateTime.UtcNow < deadline) { FlushBindings(); Thread.Sleep(1); }
+                Assert.True(pending.IsCompleted); pending.GetAwaiter().GetResult();
+                FlushBindings();
+                Assert.Contains("恢复记录无法读取", vm.Status);
+                Assert.Equal(HomeStatusAction.RestoreConfiguration, vm.StatusAction);
+                Assert.True(message.IsEnabled); Assert.False(main.IsStatusActionRunning);
+                Assert.True(File.Exists(recovery));
+            }
+        }
+        finally { File.Delete(recovery); }
+        Render((FrameworkElement)main.Content, 1600, 900, Path.Combine(output, "status-recovery-blocked.png"));
+        vm.ShowStatus("DEMO 待清理", HomeStatusAction.ReviewRuns);
+        Assert.Equal("查看运行日志", vm.StatusActionText);
+        vm.Queue.Unresolved.Add(new RunRow(Guid.NewGuid(), "DEMO 未确认记录", "DEMO", true, true));
+        typeof(ObservableObject).GetMethod("Raise", hidden)!.Invoke(vm.Queue, [nameof(QueueViewModel.HasUnresolved)]);
+        FlushBindings(); Assert.Equal("核对待清理记录", ((Button)main.FindName("StatusActionButton")).Content);
+        main.RunStatusActionAsync().GetAwaiter().GetResult();
+        Assert.Same(main.FindName("RunLogTab"), ((TabControl)main.FindName("Navigation")).SelectedItem);
+        Assert.Single(vm.Queue.Unresolved); // Navigation never acknowledges cleanup.
+        Render((FrameworkElement)main.Content, 1600, 900, Path.Combine(output, "status-pending-cleanup.png"));
+        Assert.Equal(Visibility.Visible, ((FrameworkElement)main.FindName("PendingRunCleanupPanel")).Visibility);
+        vm.Queue.Unresolved.Clear();
+        typeof(ObservableObject).GetMethod("Raise", hidden)!.Invoke(vm.Queue, [nameof(QueueViewModel.HasUnresolved)]);
+        FlushBindings(); Assert.Equal("查看运行日志", ((Button)main.FindName("StatusActionButton")).Content);
+        vm.ShowStatus("DEMO 选择账号", HomeStatusAction.SelectStarRailAccounts); FlushBindings();
+        main.RunStatusActionAsync().GetAwaiter().GetResult();
+        Assert.Same(main.FindName("AccountManagementTab"), ((TabControl)main.FindName("Navigation")).SelectedItem);
+        typeof(MainViewModel).GetProperty("BatchRunning")!.SetValue(vm, true); FlushBindings();
+        Assert.False(recheck.IsEnabled); Assert.False(message.IsEnabled);
+        ((TabControl)main.FindName("Navigation")).SelectedItem = main.FindName("HomeTab");
+        main.RunStatusActionAsync().GetAwaiter().GetResult();
+        Assert.Same(main.FindName("HomeTab"), ((TabControl)main.FindName("Navigation")).SelectedItem);
+        typeof(MainViewModel).GetProperty("BatchRunning")!.SetValue(vm, false);
+        typeof(MainViewModel).GetMethod("Busy", hidden)!.Invoke(vm, [true]); FlushBindings();
+        Assert.False(recheck.IsEnabled);
+        typeof(MainViewModel).GetMethod("Busy", hidden)!.Invoke(vm, [false]);
+        vm.ShowStatus("就绪 · DEMO 状态入口检查完成"); FlushBindings();
+        SynchronizationContext.SetSynchronizationContext(previousContext);
+    }
+
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
     {
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
@@ -74,6 +181,9 @@ public sealed class FurinaWindowLayoutTests
             var vm = new MainViewModel(db, db, db, db, paths, queue, supervisor, accounts,
                 new MultiAccountOrchestrator(db, null!), new GamePathProvider());
             main = new MainWindow(vm);
+            Assert.NotNull(main.FindName("StatusMessageButton"));
+            Assert.NotNull(main.FindName("RecheckStatusButton"));
+            InspectStatusActions(main, vm, fixture.FullName, output);
             Assert.Equal(256, Assert.IsAssignableFrom<BitmapSource>(main.Icon).PixelWidth);
             var repair = (Expander)main.FindName("ReleaseRepairExpander");
             Assert.False(repair.IsExpanded);

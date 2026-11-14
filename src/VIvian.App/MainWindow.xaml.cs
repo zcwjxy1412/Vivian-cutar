@@ -178,9 +178,38 @@ public partial class MainWindow : Window
 
     private void OpenEngineSettings(object sender, RoutedEventArgs e) => Navigation.SelectedItem = EngineEnvironmentTab;
 
-    private void OpenStatusAction(object sender, RoutedEventArgs e)
+    public static readonly DependencyProperty IsStatusActionRunningProperty = DependencyProperty.Register(
+        nameof(IsStatusActionRunning), typeof(bool), typeof(MainWindow), new PropertyMetadata(false));
+    public bool IsStatusActionRunning => (bool)GetValue(IsStatusActionRunningProperty);
+
+    private async void OpenStatusAction(object sender, RoutedEventArgs e) => await RunStatusActionAsync();
+    private async void RecheckStatus(object sender, RoutedEventArgs e) => await RunStatusActionAsync(recheck: true);
+
+    internal async Task RunStatusActionAsync(bool recheck = false)
     {
-        if (DataContext is not MainViewModel { IsIdle: true } vm) return;
+        if (IsStatusActionRunning || DataContext is not MainViewModel { IsIdle: true, CanStopAll: false, CanOperateWorkspace: true } vm) return;
+        if (recheck && vm.HasStatusAction) return; // A read-only recheck must not overwrite an outstanding recovery action.
+        var action = vm.StatusAction;
+        var command = recheck ? vm.CheckEnginesCommand : action switch
+        {
+            HomeStatusAction.RecoverDesktop => vm.RecoverDesktopCommand,
+            HomeStatusAction.RestoreConfiguration => vm.RestoreConfigurationCommand,
+            _ => null,
+        };
+        if (command is not null)
+        {
+            if (!command.CanExecute(null)) return;
+            SetValue(IsStatusActionRunningProperty, true);
+            try { await command.ExecuteAsync(); }
+            finally { SetValue(IsStatusActionRunningProperty, false); }
+            // Existing commands own the result and any human confirmation. Never infer success here.
+            return;
+        }
+        NavigateStatusAction(vm);
+    }
+
+    private void NavigateStatusAction(MainViewModel vm)
+    {
         FrameworkElement target;
         switch (vm.StatusAction)
         {
@@ -194,7 +223,9 @@ public partial class MainWindow : Window
                 break;
             case HomeStatusAction.ReviewRuns:
                 Navigation.SelectedItem = RunLogTab;
-                target = vm.Queue.HasUnresolved && vm.Queue.CanAcknowledge ? ConfirmRunCleanupButton : RunHistoryList;
+                target = vm.Queue.HasUnresolved
+                    ? vm.Queue.CanAcknowledge ? ConfirmRunCleanupButton : PendingRunCleanupPanel
+                    : RunHistoryList;
                 break;
             case HomeStatusAction.SelectAccounts:
             case HomeStatusAction.SelectGenshinAccounts:

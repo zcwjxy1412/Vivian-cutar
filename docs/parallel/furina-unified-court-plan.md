@@ -19,4 +19,4 @@
 - [x] 所有页面及小尺寸离屏检查，修复真实布局问题。
 - [x] 独立审查、最终回归、固定前后证据；以草稿PR交总控。
 
-最终产品80d47ba，默认/M5各1270通过，整套DeepSeek两轮无确认阻断。详见 `furina-unified-court-acceptance.md`；真实界面验收由总控安排。
+已审查美术产品80d47ba，默认/M5各1270通过，整套DeepSeek两轮无确认阻断。总控反馈后补充产品ff02d0b：一句入口文案修正和DEMO截图夹具，未获额外DeepSeek复审。最新验证及图证详见 `furina-unified-court-acceptance.md`；真实界面与视觉评分由总控安排。

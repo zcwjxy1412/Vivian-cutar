@@ -40,7 +40,7 @@
 
 ## 固定候选与独立审查
 
-产品提交 `80d47ba396292f5424505209caf91b8a744fcc28`（实现 `229ee5e` + 实际图片绑定断言/明确高质量采样）。默认与 M5 全量均 1270/1270（零失败、零跳过），最终 TRX 位于 `artifacts/tests-b/court-results/court-default-final.trx` 与 `court-m5-final.trx`。两套构建各固定117张离屏图，分别在 `court-after-80d47ba-default/` 和 `court-after-80d47ba-m5/`；修改前60张。11项资产清单散列全部一致。
+已获完整复审的美术产品提交为 `80d47ba396292f5424505209caf91b8a744fcc28`（实现 `229ee5e` + 实际图片绑定断言/明确高质量采样）。该提交默认与 M5 全量均 1270/1270（零失败、零跳过），TRX 位于 `artifacts/tests-b/court-results/court-default-final.trx` 与 `court-m5-final.trx`。两套构建各固定117张离屏图，分别在 `court-after-80d47ba-default/` 和 `court-after-80d47ba-m5/`；修改前60张。11项资产清单散列全部一致。
 
 本任务 DeepSeek 共两轮：首审实际整套差异，复审更新后的整套差异与拥有源/测试证据。最终没有已确认的阻断缺陷。证据位于 `artifacts/tests-b/court-deepseek-{first|final}-{request|response}.json`。
 
@@ -51,3 +51,26 @@
 - 复审叙述中曾提出命名冲突，随后在同一答复中自行撤销；两个窗口名字不同、模板名明确，编译及实际 FindName 断言通过。复审把视觉85/70误写为对比度百分比，本报告不采纳：85/70是既定视觉验收评分，并非对比度单位。徽章文字使用4.5:1，横幅渐变仍保留实机检查。
 
 原安装、账号库及回滚目录均未改；交总控安排真实界面验收。
+
+## 总控反馈后的补充（未获第三轮复审）
+
+最终交付产品为 `ff02d0bf26621f90abcc2d2d2c59d9b084843140`。相对已审查的 `80d47ba`，只有以下实现/夹具差异，另有交接文档：
+
+1. `AssistantViewModel.cs` 一句欢迎语：把不存在的“右上角的齿轮”改为实际的“左侧的「接口设置」”。
+2. `FurinaWindowLayoutTests.cs` 增加隔离合成展示状态和连续分段截图：每款游戏3个 DEMO 账号；星铁/原神使用生产参数目录的默认值，绝区零展示全部常用任务但未连接源档案、保持只读；加入 DEMO 日志、最近运行和自检记录。夹具用反射填充显示状态以绕开会读取/写入源文件的选择器回调；不读真实账号秘密、不调用任务命令。随后显式刷新绑定并断言原神表单已有字段。
+
+两轮 DeepSeek 额度已用完，遵照总控要求不调用第三轮；**上述补充未获 DeepSeek 复审，不能把80d47ba的审查结论扩展成ff02d0b全差异已审查。** 补充后最终默认/M5全量均1270/1270通过（零失败、零跳过），TRX分别为 `artifacts/tests-b/court-results/court-default-delivery.trx`、`court-m5-delivery.trx`。
+
+补充图采用 `court-DEMO-page-<页>-sub-<子页>-<1600x900|960x500>-part-<分段>.png`，宽屏100%、小窗口200%。每页底部和合成内容都明确标记 DEMO；分段重叠15%，连续覆盖滚动内容。新增88张，连同原117张共205张/构建，固定在 `court-after-ff02d0b-default/`、`court-after-ff02d0b-m5/` 并附散列清单。
+
+| 代表内容 | 图文件（上述固定目录内） |
+|---|---|
+| 星铁完整任务表单 | `court-DEMO-page-1-sub-0-1600x900-part-00..05.png` |
+| 原神基础任务和详细字段 | `court-DEMO-page-1-sub-1-1600x900-part-*.png` |
+| 绝区零常用任务 | `court-DEMO-page-1-sub-2-1600x900-part-01.png` |
+| 三游账号列表 | `court-DEMO-page-2-sub-0..2-1600x900-part-*.png` |
+| 有内容的运行日志 | `court-DEMO-page-3-sub-0-1600x900-part-00.png` |
+| 设置、自检记录与关于 | `court-DEMO-page-6-sub-0-1600x900-part-00..01.png` |
+| 修正后的助手欢迎语 | `assistant-reference-460x720.png` |
+
+仍有明确美术差距：非首页主要是统一蓝色面板与普通表单，留白、装饰精细度和整体层次仍弱于原参考图。截图仅支持逐页人工检查，不是85/70评分达标证据；此交付是供总控检查与安排实机验收的草稿候选。

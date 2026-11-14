@@ -8,7 +8,8 @@ public delegate Task<MultiAccountOutcome> ExecutionPlanBatchRunner(ExecutionPlan
 
 /// <summary>Owns accepted work independently of chat lifetime; game delegates retain their existing desktop leases.</summary>
 public sealed class PersistentExecutionPlanCoordinator(IExecutionPlanStore store,
-    ExecutionPlanBatchRunner executeBatch, Action? stopActive = null, CancellationToken hostStopping = default)
+    ExecutionPlanBatchRunner executeBatch, Action? stopActive = null, CancellationToken hostStopping = default,
+    Func<ExecutionPlanItemReceipt, CancellationToken, Task>? validateBeforeExecution = null)
 {
     private readonly SemaphoreSlim _submission = new(1, 1);
     private readonly object _gate = new();
@@ -87,8 +88,14 @@ public sealed class PersistentExecutionPlanCoordinator(IExecutionPlanStore store
                 await store.StartItemAsync(id, item.Item.Ordinal, CancellationToken.None).ConfigureAwait(false);
                 Exception? registrationFailure = null;
                 ExecutionPlanItemResult result;
+                var inReadOnlyPreflight = true;
                 try
                 {
+                    stop.Token.ThrowIfCancellationRequested();
+                    // This callback must only inspect conditions/configuration. It cannot register or start work.
+                    if (validateBeforeExecution is not null)
+                        await validateBeforeExecution(item, stop.Token).ConfigureAwait(false);
+                    inReadOnlyPreflight = false;
                     stop.Token.ThrowIfCancellationRequested();
                     var batch = await executeBatch(item, async (runId, token) =>
                     {
@@ -103,6 +110,8 @@ public sealed class PersistentExecutionPlanCoordinator(IExecutionPlanStore store
                         clean ? CleanupState.Confirmed : CleanupState.Unconfirmed, batch.ConfigurationRestored,
                         !clean ? ReasonCodes.CleanupUnconfirmed : success ? ReasonCodes.Completed : ReasonCodes.NoCompletionEvidence);
                 }
+                catch (ExecutionPlanPreflightException) when (inReadOnlyPreflight)
+                { result = new(RunOutcome.Failed, CleanupState.NotRequired, true, ReasonCodes.PreflightError); }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested)
                 { result = new(RunOutcome.Cancelled, CleanupState.Unconfirmed, false, ReasonCodes.UserStop); }
                 catch (Exception)

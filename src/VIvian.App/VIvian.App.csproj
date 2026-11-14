@@ -4,6 +4,7 @@
 <OutputType>WinExe</OutputType><UseWPF>true</UseWPF>
 <EnableWindowsTargeting>true</EnableWindowsTargeting>
 <ApplicationManifest>app.manifest</ApplicationManifest>
+<ApplicationIcon>Assets\Furina\furina-app.ico</ApplicationIcon>
     <!-- M5 real-execution builds ask for administrator rights once, when VIvian is opened. Star Rail and
          March7thAssistant run elevated; an elevated VIvian lets a whole multi-account batch run without a UAC
          prompt per account. Development builds stay asInvoker. -->
@@ -23,5 +24,6 @@
 </ItemGroup>
 <ItemGroup>
 <Content Include="Assets\Furina\*.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+<Content Include="Assets\Furina\furina-app.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 </ItemGroup>
 </Project>

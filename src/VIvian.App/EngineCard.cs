@@ -102,7 +102,7 @@ public sealed class EngineCard(GameId id, string name, string engine, string gly
     public string Execution => !CanOperateWorkspace ? "隔离验收中，此游戏卡片仅供查看。"
         : HomeRewardWired ? "按账号管理的勾选顺序执行已保存的任务和消耗设置；启用合成时先合成树脂，再领取每日奖励。"
         : GenshinDailyWired
-        ? "可以执行：零树脂日常。开始前会检查固定发行包和账号计划。"
+        ? "按已保存的账号任务和消耗设置执行；开始前核对固定安装及账号，结束后确认清理和配置恢复。"
         : Id == GameId.ZenlessZoneZero && RealExecutionPolicy.IsUnifiedInstall
         ? (CanRunForReal
             ? "导入登录截图并勾选账号后，Vivian 会在登录界面核对账号，再由 OneDragon 执行源档案中的任务。"

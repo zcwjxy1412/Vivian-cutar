@@ -553,9 +553,9 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         SelectedEngine = Engines[0];
     }
 
-    public Task InitializeAsync(bool autoPrepare = true) => InitializeCoreAsync(autoPrepare);
+    public Task InitializeAsync(bool autoPrepare = true, bool verifyRelease = false) => InitializeCoreAsync(autoPrepare, verifyRelease);
 
-    private async Task InitializeCoreAsync(bool autoPrepare = false)
+    private async Task InitializeCoreAsync(bool autoPrepare = false, bool verifyRelease = false)
     {
         var settings = await Task.Run(() => _settings.LoadSettingsAsync());
         foreach (var value in settings)
@@ -572,14 +572,18 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         await RefreshLastRunsAsync();
         if (autoPrepare) await AutoDiscoverAsync(persist: true);
         await CheckEnginesCoreAsync();
-        if (autoPrepare && RealExecutionPolicy.IsM5DailyTest)
+        if ((autoPrepare || verifyRelease) && RealExecutionPolicy.IsM5DailyTest)
         {
-            var archive = @"E:\auto agent game\March7thAssistant_full-v2026.10.31.zip";
+            var archive = string.IsNullOrWhiteSpace(ReleaseArchivePath)
+                ? @"E:\auto agent game\March7thAssistant_full-v2026.10.31.zip" : ReleaseArchivePath;
             if (File.Exists(archive))
             {
                 ReleaseArchivePath = archive;
                 await VerifyReleaseAsync();
             }
+        }
+        if (autoPrepare && RealExecutionPolicy.IsM5DailyTest)
+        {
             // An interrupted earlier run may have left a temporary change: restore it before anything else.
             if (_control.HasPendingConfigurationRestore) await RestoreConfigurationAsync();
             if (!string.IsNullOrWhiteSpace(Engines.Single(e => e.Id == GameId.StarRail).InstallPath))

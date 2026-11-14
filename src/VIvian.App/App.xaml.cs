@@ -18,6 +18,16 @@ namespace VIvian.App;
 
 public partial class App : Application
 {
+    internal static void RegisterGenshinDailyServices(IServiceCollection services, bool rewardAcceptance)
+    {
+        if (!RealExecutionPolicy.IsM5DailyTest || !RealExecutionPolicy.IsUnifiedInstall) return;
+        services.AddSingleton<GenshinDailyRecovery>(BetterGiAccountBatch.RecoverSavedDailyAsync);
+        // This is the existing native saved-plan runner, not the unverified legacy CLI adapter.
+        // It revalidates the pinned installation, account identity and cleanup on every run.
+        if (!rewardAcceptance)
+            services.AddSingleton<GenshinDailyBatch>(BetterGiAccountBatch.ExecuteSavedDailyAsync);
+    }
+
     private IHost? _host;
     private SingleInstanceGuard? _instance;
     private WindowActivation? _activation;
@@ -233,12 +243,7 @@ public partial class App : Application
                     sp.GetRequiredService<ILoginSwitchDriver>(), sp.GetRequiredService<IInputHostSession>()));
                 services.AddSingleton<IScanWindowShield, MainWindowScanShield>();
                 services.AddSingleton<AccountViewModel>();
-                if (RealExecutionPolicy.IsM5DailyTest && RealExecutionPolicy.IsUnifiedInstall)
-                {
-                    services.AddSingleton<GenshinDailyRecovery>(BetterGiAccountBatch.RecoverSavedDailyAsync);
-                    if (reward is null && BetterGiContract.LaunchContractVerified && BetterGiContract.CompletionSignalsVerified)
-                        services.AddSingleton<GenshinDailyBatch>(BetterGiAccountBatch.ExecuteSavedDailyAsync);
-                }
+                RegisterGenshinDailyServices(services, reward is not null);
                 services.AddSingleton<MainViewModel>();
                 services.AddSingleton<MainWindow>();
             }).Build();
@@ -268,7 +273,8 @@ public partial class App : Application
                     BetterGiAccountBatch.VerifySavedDailyAsync));
             try
             {
-                await vm.InitializeAsync(autoPrepare: !_smoke && reward is null && acceptanceProfile is null);
+                await vm.InitializeAsync(autoPrepare: !_smoke && reward is null && acceptanceProfile is null,
+                    verifyRelease: acceptanceProfile is not null);
             }
             catch (Exception ex) when (!_smoke && reward is null && !DatabaseVersionTooNew.TryRead(ex, out _, out _))
             {

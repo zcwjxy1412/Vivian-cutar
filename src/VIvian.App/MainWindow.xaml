@@ -262,11 +262,23 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 <ContentPresenter Content="{Binding AssistantArt}" ContentTemplate="{StaticResource Art}"/></Button>
 <Border DockPanel.Dock="Left" Background="{StaticResource Navy}" CornerRadius="12" Padding="12,4" VerticalAlignment="Center" Margin="0,0,14,0">
 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE946;" Style="{StaticResource Icon}" Foreground="White" Margin="0,0,6,0"/><TextBlock Text="提示" Foreground="White" FontWeight="Bold"/></StackPanel></Border>
-<StackPanel VerticalAlignment="Center">
+<StackPanel x:Name="StatusRecoveryPanel" VerticalAlignment="Center">
+<StackPanel.Style><Style TargetType="StackPanel"><Style.Triggers>
+<DataTrigger Binding="{Binding IsIdle}" Value="False"><Setter Property="IsEnabled" Value="False"/></DataTrigger>
+<DataTrigger Binding="{Binding CanStopAll}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger>
+<DataTrigger Binding="{Binding CanOperateWorkspace}" Value="False"><Setter Property="IsEnabled" Value="False"/></DataTrigger>
+<DataTrigger Binding="{Binding IsStatusActionRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger>
+</Style.Triggers></Style></StackPanel.Style>
+<Button x:Name="StatusMessageButton" Click="OpenStatusAction" IsEnabled="{Binding HasStatusAction}" HorizontalContentAlignment="Left" ToolTip="{Binding StatusActionText}" AutomationProperties.Name="{Binding Status}">
+<Button.Style><Style TargetType="Button"><Setter Property="Cursor" Value="Hand"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Outline" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" Padding="1"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Outline" Property="BorderBrush" Value="{StaticResource Navy}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Cursor" Value="Arrow"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></Button.Style>
 <TextBlock Text="{Binding Status}" FontSize="13" TextWrapping="Wrap" MaxHeight="60" TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}" AutomationProperties.LiveSetting="Polite"/>
+</Button>
+<WrapPanel>
 <Button x:Name="StatusActionButton" Content="{Binding StatusActionText}" Click="OpenStatusAction"
-        Visibility="{Binding HasStatusAction, Converter={StaticResource Visible}}" IsEnabled="{Binding IsIdle}"
-        HorizontalAlignment="Left" Margin="0,5,0,0" Padding="10,4"/>
+        Visibility="{Binding HasStatusAction, Converter={StaticResource Visible}}"
+        HorizontalAlignment="Left" Margin="0,5,8,0" Padding="10,4"/>
+<Button x:Name="RecheckStatusButton" Content="重新检查（只读）" Click="RecheckStatus" ToolTip="重新核验已填写的引擎目录；不会启动游戏、确认清理或自动重试日常。先处理当前提示，再重新检查。" ToolTipService.ShowOnDisabled="True" Margin="0,5,0,0" Padding="10,4"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding HasStatusAction}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+</WrapPanel>
 </StackPanel></DockPanel></Border>
 </Grid></TabItem>
 
@@ -535,10 +547,12 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
 <StackPanel><StackPanel Orientation="Horizontal"><TextBlock Text="运行日志" Style="{StaticResource H1}"/><TextBlock Text="きろく" Style="{StaticResource Kana}"/></StackPanel>
 <TextBlock Text="每次运行的结果和清理状态分开记录。结果写“未知”时，表示没有找到足够的完成证据，furina 不会把它当作成功。" Style="{StaticResource Lead}"/></StackPanel>
-<Border Grid.Row="1" Background="{StaticResource DangerBack}" CornerRadius="10" Padding="16,12" Margin="0,0,0,14">
+<Border x:Name="PendingRunCleanupPanel" Focusable="True" Grid.Row="1" Background="{StaticResource DangerBack}" CornerRadius="10" Padding="16,12" Margin="0,0,0,14">
 <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
 <StackPanel><TextBlock Text="有运行无法确认已清理。在你确认之前，新的任务不会启动。" Foreground="{StaticResource DangerText}" FontWeight="SemiBold"/>
 <TextBlock Text="{Binding LogCleanupHint}" Foreground="{StaticResource DangerText}" Margin="0,4,0,10"/>
+<TextBlock Text="请先核对下列待处理记录及相关游戏、引擎和命令行窗口；确认全部关闭后，再点击确认。此入口不会替你确认清理。" Foreground="{StaticResource DangerText}" TextWrapping="Wrap" Margin="0,0,0,6"/>
+<ScrollViewer MaxHeight="90" VerticalScrollBarVisibility="Auto"><ItemsControl ItemsSource="{Binding Unresolved}"><ItemsControl.ItemTemplate><DataTemplate><TextBlock Text="{Binding Summary}" TextWrapping="Wrap" Foreground="{StaticResource DangerText}" Margin="0,2"/></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></ScrollViewer>
 <Button x:Name="ConfirmRunCleanupButton" Content="我已确认，全部已关闭" Command="{Binding AcknowledgeCommand}" IsEnabled="{Binding CanAcknowledge}" HorizontalAlignment="Left"/></StackPanel></Border>
 <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
 <local:FurinaPanel CornerArt="{Binding DataContext.Theme.WaterCorner, RelativeSource={RelativeSource AncestorType=Window}}" Style="{StaticResource Panel}" Margin="0,0,10,0" Padding="14"><DockPanel><TextBlock DockPanel.Dock="Top" Text="历史" Style="{StaticResource H2}"/>

@@ -73,9 +73,9 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
     public bool HasStatusAction => StatusAction != HomeStatusAction.None;
     public string StatusActionText => StatusAction switch
     {
-        HomeStatusAction.RecoverDesktop => "前往核对桌面交接",
-        HomeStatusAction.RestoreConfiguration => "前往恢复临时配置",
-        HomeStatusAction.ReviewRuns => "前往运行日志",
+        HomeStatusAction.RecoverDesktop => "检查并恢复桌面交接",
+        HomeStatusAction.RestoreConfiguration => "恢复临时配置",
+        HomeStatusAction.ReviewRuns => Queue.HasUnresolved ? "核对待清理记录" : "查看运行日志",
         HomeStatusAction.SelectAccounts or HomeStatusAction.SelectGenshinAccounts or HomeStatusAction.SelectStarRailAccounts or HomeStatusAction.SelectZenlessAccounts => "前往账号管理",
         HomeStatusAction.ConfigureBetterGi => "前往设置 BetterGI 路径",
         _ => "",
@@ -474,6 +474,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         _oneShotConsumed = RealExecutionPolicy.IsOneShotScreenTest && File.Exists(OneShotMarker);
         Queue.PropertyChanged += (_, e) =>
         {
+            if (e.PropertyName == nameof(QueueViewModel.HasUnresolved)) Raise(nameof(StatusActionText));
             if (e.PropertyName is nameof(QueueViewModel.IsRunning) or nameof(QueueViewModel.IsIdle) or nameof(QueueViewModel.HasUnresolved))
             { RaiseAdmission(); RaiseHome(); }
         };

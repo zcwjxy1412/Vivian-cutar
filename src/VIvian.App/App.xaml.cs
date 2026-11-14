@@ -644,7 +644,7 @@ public partial class App : Application
         tabs.SelectedIndex = 0;
         vm.ShowStatus("上一次桌面操作待恢复。", HomeStatusAction.RecoverDesktop);
         window.UpdateLayout();
-        if (!main.StatusActionButton.IsVisible || !Equals(main.StatusActionButton.Content, "前往核对桌面交接"))
+        if (!main.StatusActionButton.IsVisible || !Equals(main.StatusActionButton.Content, "检查并恢复桌面交接"))
             throw new InvalidOperationException("Missing desktop recovery shortcut next to the error");
         var broughtIntoView = false;
         void OnRecoveryTarget(object sender, RequestBringIntoViewEventArgs args) => broughtIntoView = true;

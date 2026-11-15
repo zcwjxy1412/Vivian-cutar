@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,6 +13,19 @@ namespace VIvian.Infrastructure.Engines.BetterGi;
 internal enum GenshinLaunchWindowState
 {
     Missing, Minimized, IncompatibleViewport, Background,
+}
+
+// A launch may ask Windows for foreground once. Polling must not toggle TOPMOST or fight the shell.
+internal sealed class GenshinLaunchActivation
+{
+    private bool _requested;
+    public bool TryRequest(GenshinLaunchWindowState state, Action<bool> request)
+    {
+        if (_requested || state is not (GenshinLaunchWindowState.Minimized or GenshinLaunchWindowState.Background)) return false;
+        _requested = true;
+        request(state == GenshinLaunchWindowState.Minimized);
+        return true;
+    }
 }
 
 internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterGiProgram, GenshinLoginTemplates templates,
@@ -36,6 +49,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(timeout);
         var windowState = GenshinLaunchWindowState.Missing;
+        var activation = new GenshinLaunchActivation();
         try
         {
             EnsureDesktopAvailable();
@@ -67,8 +81,12 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
                 var owned = IsVerifiedClientWindow(hwnd, client);
                 var minimized = owned && WindowsNative.IsIconic(hwnd);
                 windowState = ClassifyLaunchWindow(owned, minimized, owned && !minimized && TryFindWindow(hwnd) is not null);
-                if (windowState is GenshinLaunchWindowState.Minimized or GenshinLaunchWindowState.Background)
-                    StarRailWindow.BringToFront(hwnd);
+                activation.TryRequest(windowState, restore =>
+                {
+                    if (restore) WindowsNative.ShowWindow(hwnd, WindowsNative.SwRestore);
+                    var accepted = WindowsNative.SetForegroundWindow(hwnd);
+                    Trace.WriteLine($"Genshin launch foreground request: {windowState}, accepted={accepted}");
+                });
                 await Task.Delay(450, limit.Token).ConfigureAwait(false);
             }
         }
@@ -78,7 +96,7 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             {
                 GenshinLaunchWindowState.Minimized => "本轮原神窗口仍处于最小化。",
                 GenshinLaunchWindowState.IncompatibleViewport => "本轮原神窗口的可用画面不符合 16∶9 要求。",
-                GenshinLaunchWindowState.Background => "本轮原神窗口未取得前台焦点。",
+                GenshinLaunchWindowState.Background => "本轮原神窗口未取得前台焦点；请点击原神窗口并保持前台后重试。",
                 _ => "未找到归属本轮原神客户端的窗口。",
             };
             throw new InvalidOperationException("等待原神前台窗口超时，已停止登录。" + detail);
@@ -283,9 +301,28 @@ internal sealed class GenshinWindowsLoginDesktop(string gamePath, string betterG
             }
             else view = view with { CaptureFailure = capture.Accept ? LoginScanFailure.CaptureFailed : capture.Failure };
         }
-        if (!_active || FindForeground() != window) view = view with { Window = null };
+        view = RevalidateCapturedFrame(view, _active ? FindForeground() : null);
+        if (view.View == GenshinView.Unknown || view.Window is null) _pixels = null;
         _readAt = observed;
         return _current = view;
+    }
+
+    internal static GenshinDesktopFrame RevalidateCapturedFrame(GenshinDesktopFrame captured, StarRailWindowInfo? current)
+    {
+        if (captured.Window is not { } before || current is null || before.Handle != current.Handle ||
+            before.ProcessId != current.ProcessId || before.ProcessStartedAt != current.ProcessStartedAt)
+        {
+            Trace.WriteLine("Genshin capture rejected: foreground unavailable or client window identity changed");
+            return new(null, GenshinView.Unknown, [], null, VisualDiagnostic: "采集结束时原神不在前台，或客户端窗口身份无法核对。");
+        }
+        if (before != current)
+        {
+            // Geometry can change during OCR. Discard all coordinates/proof; only a fresh frame may drive input.
+            Trace.WriteLine("Genshin viewport changed during capture; discarding frame for a fresh read");
+            return new(current, GenshinView.Unknown, [], null, CaptureFailure: LoginScanFailure.CaptureFailed,
+                VisualDiagnostic: "窗口尺寸或位置在采集期间变化，正在重新读取画面。");
+        }
+        return captured;
     }
 
     public bool TryInput(GenshinDesktopFrame frame, GenshinInput input, ScreenRegion? point)

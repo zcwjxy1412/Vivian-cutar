@@ -1,4 +1,4 @@
-using VIvian.Core.Accounts;
+﻿using VIvian.Core.Accounts;
 using VIvian.Core.Engines;
 using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Engines;
@@ -372,7 +372,7 @@ public sealed class GenshinDesktopLoginDriver : IGenshinLoginSwitchDriver
                 var frame = await _desktop.ReadAsync(timeoutSource.Token).ConfigureAwait(false);
                 if (frame.Window is not { ProcessStartedAt: not null } window || window.Handle == IntPtr.Zero ||
                     window.ProcessId <= 0 || _window is { } expected && !SameWindow(expected, window))
-                    throw new LoginInterruptedException("原神窗口不在前台，或客户端身份已经变化。");
+                    throw new LoginInterruptedException(frame.VisualDiagnostic ?? "原神窗口不在前台，或客户端身份已经变化。");
                 _window = window;
                 last = frame;
                 if (frame.View == GenshinView.NeedsUser)

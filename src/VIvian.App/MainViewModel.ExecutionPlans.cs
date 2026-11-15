@@ -186,6 +186,26 @@ public sealed partial class MainViewModel
         ShowStatus(BatchStatus, action);
     }
 
+    internal async Task SetPersistentPlanCompletionWithBatchAsync(Guid id, ExecutionPlanReceipt? receipt)
+    {
+        SetPersistentPlanCompletion(id, receipt);
+        if (SafePreflightFailure(receipt) is not null || receipt?.Items.FirstOrDefault(x =>
+            x.Result is { Outcome: not RunOutcome.Success }) is not { } failed) return;
+        try
+        {
+            var batch = await Accounts.Database.LoadBatchAsync(failed.ChildBatchId);
+            if (batch is null || batch.Game != failed.Item.Game || string.IsNullOrWhiteSpace(batch.Detail)) return;
+            var text = $"{RunPresentation.GameName(failed.Item.Game)} · {failed.Item.AccountName}：{batch.Detail} " +
+                $"已完成 {receipt.Items.Count(x => x.State == ExecutionPlanItemState.Succeeded)} 项；后续 {receipt.Items.Count(x => x.State == ExecutionPlanItemState.Skipped)} 项未执行。重试时只选择尚未完成的账号。";
+            SetBatchStatus(text, HomeStatusAction.ShowFailureDetails);
+            ShowStatus(text, HomeStatusAction.ShowFailureDetails);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or Microsoft.Data.Sqlite.SqliteException or System.IO.InvalidDataException)
+        {
+            Serilog.Log.Warning("Could not read failed child batch detail: {ErrorType}", ex.GetType().Name);
+        }
+    }
+
     // Called while the existing home operation gate is held. Local daily execution does not depend on AI opt-in.
     private async Task<int?> RunPersistentHomePlanAsync(IReadOnlyList<GameAccount> selected)
     {
@@ -215,10 +235,10 @@ public sealed partial class MainViewModel
             BatchStatus = $"计划 {plan.PlanId:D} 已保存，按已勾选账号顺序执行。";
             await _persistentPlans.WhenIdleAsync();
             var receipt = await Accounts.Database.ReadAsync(plan.PlanId);
-            SetPersistentPlanCompletion(plan.PlanId, receipt);
+            await SetPersistentPlanCompletionWithBatchAsync(plan.PlanId, receipt);
             if (receipt is null || receipt.Items.Any(x => x.Result is { } result &&
                     (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
-                BlockPersistentPlans($"计划 {plan.PlanId:D} 的清理或配置恢复未确认。");
+                BlockPersistentPlans(BatchStatus + " 清理或配置恢复仍未确认。");
             return receipt?.State == ExecutionPlanState.Succeeded ? 0 : 1;
         }
         catch
@@ -260,10 +280,10 @@ public sealed partial class MainViewModel
         {
             await _persistentPlans!.WhenIdleAsync();
             var receipt = await Accounts.Database.ReadAsync(id);
-            SetPersistentPlanCompletion(id, receipt);
+            await SetPersistentPlanCompletionWithBatchAsync(id, receipt);
             if (receipt is null || receipt.Items.Any(x => x.Result is { } result &&
                     (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
-                BlockPersistentPlans($"计划 {id:D} 的清理或配置恢复未确认。");
+                BlockPersistentPlans(BatchStatus + " 清理或配置恢复仍未确认。");
         }
         catch (Exception)
         { BlockPersistentPlans($"计划 {id:D} 的持久记录未完成，已禁止继续。"); }

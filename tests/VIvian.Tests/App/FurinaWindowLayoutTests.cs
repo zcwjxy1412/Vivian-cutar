@@ -183,6 +183,17 @@ public sealed class FurinaWindowLayoutTests
             Assert.Equal(index, ((TabControl)main.FindName("GameTabs")).SelectedIndex);
         }
         ((TabControl)main.FindName("Navigation")).SelectedItem = main.FindName("HomeTab");
+        var loginFailure = failed with { Result = new(RunOutcome.Failed, CleanupState.Confirmed, true, ReasonCodes.NoCompletionEvidence) };
+        var loginReceipt = receipt with { Items = [loginFailure], ReasonCode = ReasonCodes.NoCompletionEvidence };
+        vm.Accounts.Database.SaveBatchAsync(new(loginFailure.ChildBatchId, planItem.Game, DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow, "stopped", null, "DEMO 登录画面失去前台；游戏清理已确认。")).GetAwaiter().GetResult();
+        var detailTask = vm.SetPersistentPlanCompletionWithBatchAsync(plan.PlanId, loginReceipt);
+        var detailDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (!detailTask.IsCompleted && DateTime.UtcNow < detailDeadline) { FlushBindings(); Thread.Sleep(1); }
+        Assert.True(detailTask.IsCompleted); detailTask.GetAwaiter().GetResult();
+        Assert.Contains("登录画面失去前台", vm.Status);
+        Assert.Contains("游戏清理已确认", vm.Status);
+        Assert.Equal(HomeStatusAction.ShowFailureDetails, vm.StatusAction);
         vm.ShowStatus("就绪 · DEMO 状态入口检查完成"); FlushBindings();
         SynchronizationContext.SetSynchronizationContext(previousContext);
     }

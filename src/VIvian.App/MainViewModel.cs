@@ -80,6 +80,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         HomeStatusAction.ConfigureBetterGi or HomeStatusAction.RepairEnginePaths => "修复安装路径",
         HomeStatusAction.ConfigureEngines => "选择安装目录",
         HomeStatusAction.ReviewPlanConfiguration => "打开受影响账号设置",
+        HomeStatusAction.ShowFailureDetails => "查看失败详情",
         HomeStatusAction.ReloadSettings => "重载最新配置",
         HomeStatusAction.ApplyConfiguration => "保存待应用配置",
         HomeStatusAction.ConfirmCleanup => "确认并解除清理阻塞",
@@ -1486,7 +1487,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
 
 internal enum HomeStatusAction
 {
-    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, SelectZenlessAccounts, ConfigureBetterGi, RepairEnginePaths, ConfigureEngines, ReloadSettings, ApplyConfiguration, ConfirmCleanup, ExportDiagnostics, ReviewPlanConfiguration,
+    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, SelectZenlessAccounts, ConfigureBetterGi, RepairEnginePaths, ConfigureEngines, ReloadSettings, ApplyConfiguration, ConfirmCleanup, ExportDiagnostics, ReviewPlanConfiguration, ShowFailureDetails,
 }
 
 /// <summary>Turns exceptions into actionable Chinese messages. Never shows stack traces or file contents.</summary>

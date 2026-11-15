@@ -219,6 +219,9 @@ public partial class MainWindow : Window
         FrameworkElement target;
         switch (vm.StatusAction)
         {
+            case HomeStatusAction.ShowFailureDetails:
+                MessageBox.Show(this, vm.Status, "本次任务失败详情", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
             case HomeStatusAction.RecoverDesktop:
                 Navigation.SelectedItem = HomeTab;
                 target = RecoverDesktopButton;

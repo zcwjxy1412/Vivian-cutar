@@ -1,4 +1,4 @@
-using VIvian.Core.Accounts;
+﻿using VIvian.Core.Accounts;
 using VIvian.Infrastructure.Accounts;
 using VIvian.Infrastructure.Engines.BetterGi;
 using Xunit;
@@ -100,6 +100,68 @@ public sealed class GenshinDesktopLoginTests
         Assert.False(file.IsAsync);
         Assert.True(file.CanRead);
         Assert.False(file.CanWrite);
+    }
+
+    [Fact]
+    public void LaunchForegroundRequestIsOneShotAndNeverConsumesAnUnverifiedWindow()
+    {
+        var activation = new GenshinLaunchActivation();
+        var calls = new List<bool>();
+        Assert.False(activation.TryRequest(GenshinLaunchWindowState.Missing, calls.Add));
+        Assert.False(activation.TryRequest(GenshinLaunchWindowState.IncompatibleViewport, calls.Add));
+        Assert.Empty(calls);
+        Assert.True(activation.TryRequest(GenshinLaunchWindowState.Minimized, calls.Add));
+        for (var i = 0; i < 300; i++)
+            Assert.False(activation.TryRequest(GenshinLaunchWindowState.Background, calls.Add));
+        Assert.Equal(new[] { true }, calls);
+        var nextLaunch = new GenshinLaunchActivation();
+        Assert.True(nextLaunch.TryRequest(GenshinLaunchWindowState.Background, calls.Add));
+        Assert.Equal(new[] { true, false }, calls);
+    }
+
+    [Fact]
+    public void CaptureGeometryChangeDiscardsInputEvidenceButRetainsVerifiedClientForFreshRead()
+    {
+        var captured = Frame(GenshinView.Card, A.NormalizedPhone);
+        var moved = Window with { OriginX = 50, ClientWidth = 2560, ClientHeight = 1440 };
+        var retry = GenshinWindowsLoginDesktop.RevalidateCapturedFrame(captured, moved);
+        Assert.Equal(moved, retry.Window); Assert.Equal(GenshinView.Unknown, retry.View);
+        Assert.Empty(retry.Rows); Assert.Null(retry.Main); Assert.Null(retry.Secondary); Assert.Null(retry.Uid);
+        Assert.Equal(LoginScanFailure.CaptureFailed, retry.CaptureFailure);
+        Assert.Same(captured, GenshinWindowsLoginDesktop.RevalidateCapturedFrame(captured, Window));
+        Assert.Null(GenshinWindowsLoginDesktop.RevalidateCapturedFrame(captured, null).Window);
+        Assert.Null(GenshinWindowsLoginDesktop.RevalidateCapturedFrame(captured, moved with { ProcessId = 999 }).Window);
+        Assert.Null(GenshinWindowsLoginDesktop.RevalidateCapturedFrame(captured, moved with { ProcessStartedAt = Window.ProcessStartedAt!.Value.AddSeconds(1) }).Window);
+    }
+
+    [Fact]
+    public async Task GeometryRetryNeverClicksStaleCaptureAndThenAcceptsFreshLoginCard()
+    {
+        var card = Frame(GenshinView.Card, A.NormalizedPhone);
+        var moved = Window with { OriginX = 50 };
+        var stale = GenshinWindowsLoginDesktop.RevalidateCapturedFrame(card, moved);
+        var desktop = new Desktop(stale, card with { Window = moved });
+        var driver = new GenshinDesktopLoginDriver(desktop, TimeSpan.Zero);
+        var outcome = await driver.EnsureLoginAsync(Policy, default);
+        Assert.True(outcome.Ok); Assert.Equal(2, desktop.ReadCalls); Assert.Empty(desktop.Actions);
+    }
+
+    [Theory]
+    [InlineData("stale")]
+    [InlineData("different-reference")]
+    [InlineData("missing-window")]
+    public void RejectedInputFramesStopBeforeAnyNativeWindowOrInputCall(string reason)
+    {
+        var desktop = new GenshinWindowsLoginDesktop("unused", "unused", null!, stopOwnedClient: false);
+        var frame = Frame(GenshinView.Card, A.NormalizedPhone);
+        if (reason == "missing-window") frame = frame with { Window = null };
+        const System.Reflection.BindingFlags fields = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        typeof(GenshinWindowsLoginDesktop).GetField("_current", fields)!.SetValue(desktop, frame);
+        typeof(GenshinWindowsLoginDesktop).GetField("_readAt", fields)!.SetValue(desktop,
+            System.Diagnostics.Stopwatch.GetTimestamp() - (reason == "stale" ? System.Diagnostics.Stopwatch.Frequency * 4 : 0));
+        var input = reason == "different-reference" ? frame with { } : frame;
+        Assert.False(desktop.TryInput(input, GenshinInput.EnterAccount, new ScreenRegion(1, 1, 2, 2)));
+        Assert.Null(typeof(GenshinWindowsLoginDesktop).GetField("_current", fields)!.GetValue(desktop));
     }
 
     private static readonly StarRailWindowInfo Window = new((IntPtr)123, 45, "", 1920, 1080, 0, 0, DateTimeOffset.UtcNow);

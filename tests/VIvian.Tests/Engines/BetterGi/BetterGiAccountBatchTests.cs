@@ -12,6 +12,54 @@ namespace VIvian.Tests.Engines.BetterGi;
 public sealed class BetterGiAccountBatchTests
 {
     [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task InitialLoginFailurePreservesFailureAndRequiresActualClientCleanup(bool clean, bool throws)
+    {
+        await using var fixture = new BetterGiFixture();
+        var path = Path.Combine(fixture.Root, "test.db");
+        var database = new LocalDatabase(path);
+        await database.InitializeAsync();
+        var account = await Add(database, path, "A", "130****01", """{"dailyRewards":"true"}""");
+        var driver = new LoginDriver { FailLogin = true, Clean = clean, ThrowOnStop = throws };
+        var outcome = await new BetterGiAccountBatch(database, driver).ExecuteAsync([account],
+            (_, _, _) => throw new InvalidOperationException("runner must not start"), null, default);
+        Assert.False(outcome.GameCleanupConfirmed);
+        Assert.Equal(0, driver.Stops);
+
+        var final = await BetterGiAccountBatch.CompleteFailedCleanupAsync(outcome, driver);
+        Assert.Equal(1, driver.Stops);
+        Assert.Equal(clean, final.GameCleanupConfirmed);
+        Assert.True(final.EngineCleanupConfirmed);
+        Assert.True(final.ConfigurationRestored);
+        Assert.Equal(RunOutcome.Failed, final.Outcome);
+        Assert.False(final.Completed);
+        Assert.Equal(0, final.Succeeded);
+        Assert.Equal(1, final.Failed);
+        Assert.Contains("合成登录失败", final.Detail);
+        Assert.Contains(throws ? "合成清理异常" : clean ? "合成清理成功" : "合成清理失败", final.Detail);
+        var history = Assert.Single(await database.LoadBatchResultsAsync(final.BatchId));
+        Assert.Null(history.RunId);
+        Assert.Equal("login_screen_failed", history.Result);
+        Assert.Contains("合成登录失败", Assert.Single(await database.LoadRecentBatchesAsync()).Detail);
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task ClientCleanupCannotOverrideUnresolvedEngineOrConfiguration(bool engineClean, bool restored)
+    {
+        var original = new MultiAccountOutcome(Guid.NewGuid(), false, 0, 1, "任务阶段失败",
+            HostCleanupConfirmed: false, Outcome: RunOutcome.Indeterminate,
+            EngineCleanupConfirmed: engineClean, ConfigurationRestored: restored);
+        var final = await BetterGiAccountBatch.CompleteFailedCleanupAsync(original, new LoginDriver());
+        Assert.True(final.GameCleanupConfirmed);
+        Assert.Equal(original, final with { GameCleanupConfirmed = original.GameCleanupConfirmed, Detail = original.Detail });
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task EachAccountUsesItsOwnFrozenPlanAndTheNextWaitsForRestoration(bool restored)
@@ -132,10 +180,15 @@ public sealed class BetterGiAccountBatchTests
     {
         public int Ensures { get; private set; }
         public int Returns { get; private set; }
+        public int Stops { get; private set; }
+        public bool FailLogin { get; init; }
+        public bool Clean { get; init; } = true;
+        public bool ThrowOnStop { get; init; }
 
         public Task<LoginSwitchOutcome> EnsureLoginAsync(SwitchPolicy policy, CancellationToken cancellationToken)
         {
             Ensures++;
+            if (FailLogin) return Task.FromResult(LoginSwitchOutcome.Fail(LoginSwitchStage.FindingWindow, "合成登录失败"));
             return Done();
         }
 
@@ -147,7 +200,14 @@ public sealed class BetterGiAccountBatchTests
             return Done();
         }
 
-        public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken) => Done();
+        public Task<LoginSwitchOutcome> StopGameAsync(CancellationToken cancellationToken)
+        {
+            Stops++;
+            Assert.False(cancellationToken.IsCancellationRequested);
+            if (ThrowOnStop) throw new IOException("合成清理异常");
+            return Task.FromResult(Clean ? LoginSwitchOutcome.Success(LoginSwitchStage.Done, "合成清理成功")
+                : LoginSwitchOutcome.Fail(LoginSwitchStage.Failed, "合成清理失败"));
+        }
 
         private static Task<LoginSwitchOutcome> Done() =>
             Task.FromResult(LoginSwitchOutcome.Success(LoginSwitchStage.Done, "合成身份确认"));

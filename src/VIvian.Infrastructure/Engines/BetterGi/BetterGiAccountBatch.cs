@@ -120,9 +120,24 @@ public sealed class BetterGiAccountBatch(LocalDatabase database, IGenshinLoginSw
             }
             if (outcome.Completed) return outcome;
 
-            var cleanup = await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false);
-            return outcome with { GameCleanupConfirmed = cleanup.Ok, Detail = outcome.Detail + " " + cleanup.Detail };
+            return await CompleteFailedCleanupAsync(outcome, driver).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
+    }
+
+    internal static async Task<MultiAccountOutcome> CompleteFailedCleanupAsync(MultiAccountOutcome outcome,
+        IGenshinLoginSwitchDriver driver)
+    {
+        try
+        {
+            var cleanup = await driver.StopGameAsync(CancellationToken.None).ConfigureAwait(false);
+            // Client cleanup cannot establish engine cleanup or configuration restoration.
+            return outcome with { GameCleanupConfirmed = cleanup.Ok, Detail = outcome.Detail + " " + cleanup.Detail };
+        }
+        catch (Exception ex)
+        {
+            return outcome with { GameCleanupConfirmed = false,
+                Detail = outcome.Detail + " 原神客户端清理异常，退出未确认：" + ex.Message };
+        }
     }
 
     public static async Task<Guid?> RecoverSavedDailyAsync(string profileDirectory, CancellationToken ct) =>

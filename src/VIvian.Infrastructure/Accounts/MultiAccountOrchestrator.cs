@@ -99,7 +99,9 @@ public sealed class MultiAccountOrchestrator
                 await RecordAsync(batch, accounts[0], prepared.NeedsUser ? "needs_user" : "login_screen_failed",
                     prepared.Detail, cancellationToken);
                 return await FinishAsync(batch with { State = "failed",
-                    Detail = "无法把游戏带到登录界面（已保存账号选择）：" + prepared.Detail }, false, 0, 1, cancellationToken);
+                    Detail = "无法把游戏带到登录界面（已保存账号选择）：" + prepared.Detail }, false, 0, 1, cancellationToken,
+                    gameClean: false, outcome: RunOutcome.Failed, engineClean: engineClean,
+                    configurationRestored: configurationRestored);
             }
 
             for (var index = 0; index < accounts.Count; index++)

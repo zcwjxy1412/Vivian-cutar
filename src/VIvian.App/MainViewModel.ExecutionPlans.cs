@@ -34,7 +34,9 @@ public sealed partial class MainViewModel
         _planReader = new(Accounts.Database, _control);
         _persistentPlans = new(Accounts.Database,
             (item, beforeRun, ct) => OnPlanDispatcherAsync(() => RunPersistentItemAsync(item, beforeRun, ct)),
-            () => { if (Queue.IsRunning) Queue.EmergencyStop(); });
+            () => { if (Queue.IsRunning) Queue.EmergencyStop(); },
+            validateBeforeExecution: (item, ct) => OnPlanDispatcherAsync(async () =>
+            { await ValidatePersistentItemAsync(item.Item, ct); return true; }));
     }
 
     Task<ExecutionPlanPreparation> IExecutionPlanService.PrepareAsync(IReadOnlyList<ExecutionPlanRequestItem> items, CancellationToken ct) =>
@@ -116,9 +118,21 @@ public sealed partial class MainViewModel
     {
         ct.ThrowIfCancellationRequested();
         var card = Engines.Single(x => x.Id == item.Game);
-        if (!PersistentPlanReady || !card.CanRunForReal) throw new InvalidOperationException("计划运行条件已变化。");
+        if (!PersistentPlanReady || !card.CanRunForReal) throw new ExecutionPlanPreflightException("计划运行条件已变化。");
         var current = await _planReader.ReadAsync(new(item.Game, item.AccountId), item.Ordinal, card.InstallPath, ct);
-        if (current != item) throw new InvalidOperationException("账号、任务或资源配置版本已变化，请重新确认。");
+        if (current != item) throw new ExecutionPlanPreflightException("账号、任务或资源配置版本已变化，请重新确认。");
+    }
+
+    internal static string PersistentPlanCompletionText(Guid id, ExecutionPlanReceipt? receipt)
+    {
+        if (receipt?.ReasonCode == ReasonCodes.PreflightError &&
+            receipt.Items.Any(x => x.RunIds.Count == 0 && x.Result is
+                { Outcome: RunOutcome.Failed, Cleanup: CleanupState.NotRequired, ConfigurationRestored: true,
+                    ReasonCode: ReasonCodes.PreflightError }) &&
+            !receipt.Items.Any(x => x.Result is { } result &&
+                (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
+            return $"计划 {id:D} 已停止：条件或配置已变化，受影响项目尚未启动。请检查账号与任务配置，重新确认后再开始。";
+        return $"计划 {id:D}：{receipt?.State.ToString() ?? "回执不可用"}；可按编号查回。";
     }
 
     // Called while the existing home operation gate is held. Local daily execution does not depend on AI opt-in.
@@ -143,7 +157,7 @@ public sealed partial class MainViewModel
             BatchStatus = $"计划 {plan.PlanId:D} 已保存，按已勾选账号顺序执行。";
             await _persistentPlans.WhenIdleAsync();
             var receipt = await Accounts.Database.ReadAsync(plan.PlanId);
-            BatchStatus = $"计划 {plan.PlanId:D}：{receipt?.State.ToString() ?? "回执不可用"}；可按编号查回。";
+            BatchStatus = PersistentPlanCompletionText(plan.PlanId, receipt);
             if (receipt is null || receipt.Items.Any(x => x.Result is { } result &&
                     (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
                 BlockPersistentPlans($"计划 {plan.PlanId:D} 的清理或配置恢复未确认。");
@@ -160,7 +174,8 @@ public sealed partial class MainViewModel
     private async Task<MultiAccountOutcome> RunPersistentItemAsync(ExecutionPlanItemReceipt receipt,
         Func<Guid, CancellationToken, Task> beforeRun, CancellationToken ct)
     {
-        await ValidatePersistentItemAsync(receipt.Item, ct);
+        // Initial validation is the coordinator's read-only preflight. Checks under each adapter's lease
+        // remain execution-stage checks: a rejection there must never imply cleanup is unnecessary.
         var item = receipt.Item;
         var account = (await Accounts.Database.LoadAccountsAsync(item.Game, ct)).Single(x => x.Id == item.AccountId);
         var install = Engines.Single(x => x.Id == item.Game).InstallPath;
@@ -187,8 +202,7 @@ public sealed partial class MainViewModel
         {
             await _persistentPlans!.WhenIdleAsync();
             var receipt = await Accounts.Database.ReadAsync(id);
-            BatchStatus = receipt is null ? $"计划 {id:D} 回执暂不可读取。" :
-                $"计划 {id:D}：{receipt.State}。按计划编号可查回逐项结果。";
+            BatchStatus = PersistentPlanCompletionText(id, receipt);
             if (receipt is null || receipt.Items.Any(x => x.Result is { } result &&
                     (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
                 BlockPersistentPlans($"计划 {id:D} 的清理或配置恢复未确认。");

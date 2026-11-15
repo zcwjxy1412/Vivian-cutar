@@ -2,6 +2,10 @@ namespace VIvian.Core.Execution;
 
 public sealed record ExecutionPlanRequestItem(GameId Game, Guid AccountId);
 
+/// <summary>A known condition/revision rejection. Only the coordinator's separate read-only preflight
+/// boundary may classify this as no cleanup required; the same exception during execution is unsafe.</summary>
+public sealed class ExecutionPlanPreflightException(string message) : InvalidOperationException(message);
+
 /// <summary>All labels and revisions are read by the host, never trusted from model output.</summary>
 public sealed record ExecutionPlanItem(int Ordinal, GameId Game, Guid AccountId, string AccountName,
     string TaskId, string ConfigurationRevision, long TaskPlanRevision, string ResourcePolicy, string ResourceSummary);

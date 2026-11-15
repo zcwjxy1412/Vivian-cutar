@@ -283,7 +283,8 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory, recovery: true);
         var result = await Task.Run(_control.RestorePendingConfiguration);
         ShowRestore(result);
-        Status = result.Detail;
+        ShowStatus(result.Detail, result.State == RestoreState.Blocked || _control.HasPendingConfigurationRestore
+            ? HomeStatusAction.RestoreConfiguration : HomeStatusAction.None);
         RefreshTemporaryConfigurationNeeds();
     }
 
@@ -324,7 +325,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
             catch (Exception ex) when (ex is IOException or InvalidDataException or InvalidOperationException
                 or UnauthorizedAccessException or TimeoutException or JsonException or Microsoft.Data.Sqlite.SqliteException)
             {
-                Status = "原神桌面交接待确认：" + ex.Message;
+                ShowStatus("原神桌面交接待确认：" + ex.Message, HomeStatusAction.RecoverDesktop);
                 return;
             }
             if (recovered is { } runId)
@@ -356,7 +357,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         ShowRestore(restore);
         if (restore.State == RestoreState.Blocked || _control.HasPendingConfigurationRestore)
         {
-            Status = restore.Detail;
+            ShowStatus(restore.Detail, HomeStatusAction.RecoverDesktop);
             return;
         }
         desktop.ConfirmClean();

@@ -34,7 +34,7 @@ public sealed class SavedExecutionPlanReader(LocalDatabase database, IConfigurat
         if (request.Game == GameId.StarRail)
         {
             var view = await new StarRailAccountConfigurationProvider(database, configuration, () => installRoot, () => false)
-                .ReadAsync(new(request.Game, account.Id), ct);
+                .ReadForExecutionAsync(new(request.Game, account.Id), ct);
             if (view.WriteUnavailableReason is not null) throw new InvalidOperationException(view.WriteUnavailableReason);
             string? Value(string key) => view.Values.SingleOrDefault(x => x.Schema.Path == key)?.Value;
             var fuel = Value("use_fuel"); var reserve = Value("use_reserved_trailblaze_power");

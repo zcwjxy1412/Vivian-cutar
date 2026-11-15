@@ -1,4 +1,4 @@
-using VIvian.Core;
+﻿using VIvian.Core;
 using VIvian.Core.Execution;
 using VIvian.Infrastructure;
 using VIvian.Infrastructure.Accounts;
@@ -37,6 +37,9 @@ public sealed class ExecutionPlanPreflightTests : IDisposable
         Assert.Empty(await db.ReadUnresolvedAsync());
         var message = VIvian.App.MainViewModel.PersistentPlanCompletionText(plan.PlanId, receipt);
         Assert.Contains("尚未启动", message);
+        Assert.Contains("synthetic", message);
+        Assert.Contains("星铁", message);
+        Assert.Contains("1 项", message);
         Assert.Contains("重新确认", message);
         Assert.DoesNotContain("清理", message);
         Assert.Equal(ExecutionPlanDisposition.Existing, (await coordinator.SubmitAsync(plan)).Disposition);
@@ -73,6 +76,50 @@ public sealed class ExecutionPlanPreflightTests : IDisposable
         var next = Plan(); await coordinator.SubmitAsync(next); await coordinator.WhenIdleAsync();
         Assert.Equal(stage == "unknown_preflight" ? 0 : 1, calls);
         Assert.Equal(ReasonCodes.CleanupUnconfirmed, (await db.ReadAsync(next.PlanId))!.ReasonCode);
+    }
+
+    [Fact]
+    public async Task SpecificPreflightCauseSurvivesDatabaseRoundTripWithoutRawExceptionText()
+    {
+        var db = new LocalDatabase(Path.Combine(_root, "detail.db")); await db.InitializeAsync();
+        var plan = Plan();
+        var coordinator = new PersistentExecutionPlanCoordinator(db, (_, _, _) => throw new Exception("must not execute"),
+            validateBeforeExecution: (_, _) => throw new ExecutionPlanPreflightException("raw internal detail must not persist",
+                ExecutionPlanPreflightIssue.ResourcesChanged));
+        await coordinator.SubmitAsync(plan); await coordinator.WhenIdleAsync();
+        var receipt = (await db.ReadAsync(plan.PlanId))!;
+        Assert.Equal(ExecutionPlanPreflightIssue.ResourcesChanged, receipt.Items[0].Result!.PreflightIssue);
+        var message = VIvian.App.MainViewModel.PersistentPlanCompletionText(plan.PlanId, receipt);
+        Assert.Contains("资源使用规则", message); Assert.Contains("后续 2 项", message);
+        Assert.DoesNotContain("raw internal", System.Text.Json.JsonSerializer.Serialize(receipt));
+        Assert.Empty(await db.ReadUnresolvedAsync());
+        // Simulate an actual pre-upgrade stored receipt: the additive field was absent, not null.
+        var legacyJson = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(receipt))!;
+        foreach (var row in legacyJson["Items"]!.AsArray())
+            if (row?["Result"] is System.Text.Json.Nodes.JsonObject result) result.Remove("PreflightIssue");
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(_root, "detail.db")}"))
+        {
+            await connection.OpenAsync(); using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE execution_plans SET receipt_json=$json WHERE plan_id=$id";
+            command.Parameters.AddWithValue("$json", legacyJson.ToJsonString());
+            command.Parameters.AddWithValue("$id", plan.PlanId.ToString("D"));
+            Assert.Equal(1, await command.ExecuteNonQueryAsync());
+        }
+        var legacyReceipt = (await db.ReadAsync(plan.PlanId))!;
+        Assert.Equal(ExecutionPlanPreflightIssue.Unspecified, legacyReceipt.Items[0].Result!.PreflightIssue);
+        Assert.Contains("旧记录没有保存具体", VIvian.App.MainViewModel.PersistentPlanCompletionText(plan.PlanId, legacyReceipt));
+    }
+
+    [Fact]
+    public void ChangedFieldsAreClassifiedWithoutGuessingFromExceptionText()
+    {
+        var item = Plan().Items[0];
+        Assert.Equal(ExecutionPlanPreflightIssue.AccountChanged, VIvian.App.MainViewModel.ChangedPlanIssue(item, item with { AccountName = "renamed" }));
+        Assert.Equal(ExecutionPlanPreflightIssue.TasksChanged, VIvian.App.MainViewModel.ChangedPlanIssue(item, item with { TaskPlanRevision = 2 }));
+        Assert.Equal(ExecutionPlanPreflightIssue.ResourcesChanged, VIvian.App.MainViewModel.ChangedPlanIssue(item, item with { ResourceSummary = "changed" }));
+        Assert.Equal(ExecutionPlanPreflightIssue.ConfigurationVersionChanged, VIvian.App.MainViewModel.ChangedPlanIssue(item, item with { ConfigurationRevision = "new" }));
+        var legacy = System.Text.Json.JsonSerializer.Deserialize<ExecutionPlanItemResult>("{\"Outcome\":1,\"Cleanup\":0,\"ConfigurationRestored\":true,\"ReasonCode\":\"preflight_error\"}")!;
+        Assert.Equal(ExecutionPlanPreflightIssue.Unspecified, legacy.PreflightIssue);
     }
 
     public void Dispose() => TestDirectories.DeleteWithRetry(_root);

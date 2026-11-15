@@ -1,10 +1,20 @@
-namespace VIvian.Core.Execution;
+﻿namespace VIvian.Core.Execution;
 
 public sealed record ExecutionPlanRequestItem(GameId Game, Guid AccountId);
 
 /// <summary>A known condition/revision rejection. Only the coordinator's separate read-only preflight
 /// boundary may classify this as no cleanup required; the same exception during execution is unsafe.</summary>
-public sealed class ExecutionPlanPreflightException(string message) : InvalidOperationException(message);
+public enum ExecutionPlanPreflightIssue
+{
+    Unspecified, SessionBlocked, CleanupPending, ConfigurationRestorePending, UnsavedConfiguration,
+    EngineNotReady, AccountChanged, TasksChanged, ResourcesChanged, ConfigurationVersionChanged
+}
+
+public sealed class ExecutionPlanPreflightException(string message,
+    ExecutionPlanPreflightIssue issue = ExecutionPlanPreflightIssue.Unspecified) : InvalidOperationException(message)
+{
+    public ExecutionPlanPreflightIssue Issue { get; } = issue;
+}
 
 /// <summary>All labels and revisions are read by the host, never trusted from model output.</summary>
 public sealed record ExecutionPlanItem(int Ordinal, GameId Game, Guid AccountId, string AccountName,
@@ -24,6 +34,7 @@ public sealed record ExecutionPlanSubmission(ExecutionPlanDisposition Dispositio
 public sealed record ExecutionPlanItemResult(RunOutcome Outcome, CleanupState Cleanup,
     bool ConfigurationRestored, string ReasonCode)
 {
+    public ExecutionPlanPreflightIssue PreflightIssue { get; init; }
     public bool AllowsNext => Outcome == RunOutcome.Success &&
         (Cleanup is CleanupState.Confirmed or CleanupState.NotRequired) && ConfigurationRestored;
 }

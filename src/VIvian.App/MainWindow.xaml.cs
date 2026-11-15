@@ -248,6 +248,18 @@ public partial class MainWindow : Window
                     _ => vm.Accounts.ZenlessRows.Count > 0 ? ZenlessAccountList : ImportZenlessScreenshotButton,
                 };
                 break;
+            case HomeStatusAction.ReviewPlanConfiguration:
+                if (vm.StatusPlanItem is not { } item) return;
+                Navigation.SelectedIndex = 1;
+                GameTabs.SelectedIndex = item.Game switch { VIvian.Core.GameId.StarRail => 0, VIvian.Core.GameId.Genshin => 1, _ => 2 };
+                if (item.Game == VIvian.Core.GameId.StarRail)
+                    vm.Accounts.ConfigurationRow = vm.Accounts.Rows.SingleOrDefault(x => x.Id == item.AccountId);
+                else if (item.Game == VIvian.Core.GameId.Genshin)
+                    vm.GenshinConfiguration.SelectedAccount = vm.GenshinConfiguration.Accounts.SingleOrDefault(x => x.Id == item.AccountId);
+                else if (item.Game == VIvian.Core.GameId.ZenlessZoneZero)
+                    vm.Accounts.SelectedZenless = vm.Accounts.ZenlessRows.SingleOrDefault(x => x.Id == item.AccountId);
+                target = GameTabs;
+                break;
             case HomeStatusAction.ConfigureEngines:
                 Navigation.SelectedItem = EngineEnvironmentTab;
                 UpdateLayout();

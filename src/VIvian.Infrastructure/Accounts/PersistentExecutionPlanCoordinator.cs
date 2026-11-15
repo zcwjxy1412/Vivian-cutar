@@ -1,4 +1,4 @@
-using VIvian.Core;
+﻿using VIvian.Core;
 using VIvian.Core.Execution;
 
 namespace VIvian.Infrastructure.Accounts;
@@ -110,8 +110,8 @@ public sealed class PersistentExecutionPlanCoordinator(IExecutionPlanStore store
                         clean ? CleanupState.Confirmed : CleanupState.Unconfirmed, batch.ConfigurationRestored,
                         !clean ? ReasonCodes.CleanupUnconfirmed : success ? ReasonCodes.Completed : ReasonCodes.NoCompletionEvidence);
                 }
-                catch (ExecutionPlanPreflightException) when (inReadOnlyPreflight)
-                { result = new(RunOutcome.Failed, CleanupState.NotRequired, true, ReasonCodes.PreflightError); }
+                catch (ExecutionPlanPreflightException ex) when (inReadOnlyPreflight)
+                { result = new(RunOutcome.Failed, CleanupState.NotRequired, true, ReasonCodes.PreflightError) { PreflightIssue = ex.Issue }; }
                 catch (OperationCanceledException) when (stop.IsCancellationRequested)
                 { result = new(RunOutcome.Cancelled, CleanupState.Unconfirmed, false, ReasonCodes.UserStop); }
                 catch (Exception)

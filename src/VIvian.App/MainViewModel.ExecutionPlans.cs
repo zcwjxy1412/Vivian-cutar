@@ -118,21 +118,72 @@ public sealed partial class MainViewModel
     {
         ct.ThrowIfCancellationRequested();
         var card = Engines.Single(x => x.Id == item.Game);
-        if (!PersistentPlanReady || !card.CanRunForReal) throw new ExecutionPlanPreflightException("计划运行条件已变化。");
+        var issue = _persistentPlanFault ? ExecutionPlanPreflightIssue.SessionBlocked :
+            Queue.HasUnresolved ? ExecutionPlanPreflightIssue.CleanupPending :
+            _control.HasPendingConfigurationRestore ? ExecutionPlanPreflightIssue.ConfigurationRestorePending :
+            Configuration.PendingCount > 0 ? ExecutionPlanPreflightIssue.UnsavedConfiguration :
+            !PersistentPlanReady ? ExecutionPlanPreflightIssue.SessionBlocked :
+            !card.CanRunForReal ? ExecutionPlanPreflightIssue.EngineNotReady : ExecutionPlanPreflightIssue.Unspecified;
+        if (issue != ExecutionPlanPreflightIssue.Unspecified) throw new ExecutionPlanPreflightException("计划运行条件已变化。", issue);
         var current = await _planReader.ReadAsync(new(item.Game, item.AccountId), item.Ordinal, card.InstallPath, ct);
-        if (current != item) throw new ExecutionPlanPreflightException("账号、任务或资源配置版本已变化，请重新确认。");
+        if (current != item) throw new ExecutionPlanPreflightException("计划配置已变化。", ChangedPlanIssue(item, current));
     }
+
+    internal static ExecutionPlanPreflightIssue ChangedPlanIssue(ExecutionPlanItem before, ExecutionPlanItem current) =>
+        before.AccountId != current.AccountId || before.AccountName != current.AccountName ? ExecutionPlanPreflightIssue.AccountChanged :
+        before.TaskPlanRevision != current.TaskPlanRevision || before.TaskId != current.TaskId ? ExecutionPlanPreflightIssue.TasksChanged :
+        before.ResourcePolicy != current.ResourcePolicy || before.ResourceSummary != current.ResourceSummary ? ExecutionPlanPreflightIssue.ResourcesChanged :
+        ExecutionPlanPreflightIssue.ConfigurationVersionChanged;
+
+    internal static ExecutionPlanItemReceipt? SafePreflightFailure(ExecutionPlanReceipt? receipt) =>
+        receipt?.ReasonCode == ReasonCodes.PreflightError && !receipt.Items.Any(x => x.Result is { } r &&
+            (r.Cleanup == CleanupState.Unconfirmed || !r.ConfigurationRestored))
+        ? receipt.Items.FirstOrDefault(x => x.RunIds.Count == 0 && x.Result is
+            { Outcome: RunOutcome.Failed, Cleanup: CleanupState.NotRequired, ConfigurationRestored: true, ReasonCode: ReasonCodes.PreflightError }) : null;
+
+    internal ExecutionPlanItem? StatusPlanItem { get; private set; }
 
     internal static string PersistentPlanCompletionText(Guid id, ExecutionPlanReceipt? receipt)
     {
-        if (receipt?.ReasonCode == ReasonCodes.PreflightError &&
-            receipt.Items.Any(x => x.RunIds.Count == 0 && x.Result is
-                { Outcome: RunOutcome.Failed, Cleanup: CleanupState.NotRequired, ConfigurationRestored: true,
-                    ReasonCode: ReasonCodes.PreflightError }) &&
-            !receipt.Items.Any(x => x.Result is { } result &&
-                (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
-            return $"计划 {id:D} 已停止：条件或配置已变化，受影响项目尚未启动。请检查账号与任务配置，重新确认后再开始。";
+        if (SafePreflightFailure(receipt) is { } failed)
+        {
+            var reason = failed.Result!.PreflightIssue switch
+            {
+                ExecutionPlanPreflightIssue.SessionBlocked => "本次会话运行条件已失效；查看运行记录后重新打开 furina",
+                ExecutionPlanPreflightIssue.CleanupPending => "此前运行仍有清理记录待确认",
+                ExecutionPlanPreflightIssue.ConfigurationRestorePending => "上次临时配置尚未恢复",
+                ExecutionPlanPreflightIssue.UnsavedConfiguration => "星铁任务设置还有未保存的修改",
+                ExecutionPlanPreflightIssue.EngineNotReady => "该游戏的引擎安装核验未通过，请打开引擎与环境",
+                ExecutionPlanPreflightIssue.AccountChanged => "账号信息与确认时不一致，请打开账号管理核对",
+                ExecutionPlanPreflightIssue.TasksChanged => "任务开关或任务方案与确认时不一致，请打开该账号的游戏设置",
+                ExecutionPlanPreflightIssue.ResourcesChanged => "资源使用规则与确认时不一致，请打开该账号的游戏设置核对",
+                ExecutionPlanPreflightIssue.ConfigurationVersionChanged => "账号或上游配置的版本与确认时不一致；需要检查配置变化，不能直接认定是你修改了设置",
+                _ => "旧记录没有保存具体拦截原因，不能判断哪项配置变化；请生成诊断报告",
+            };
+            var game = failed.Item.Game switch { GameId.StarRail => "星铁", GameId.Genshin => "原神", _ => "绝区零" };
+            return $"{game} · {failed.Item.AccountName} 尚未启动：{reason}。已完成 {receipt!.Items.Count(x => x.State == ExecutionPlanItemState.Succeeded)} 项；后续 {receipt.Items.Count(x => x.State == ExecutionPlanItemState.Skipped)} 项未执行。处理后重新确认未完成任务，避免重复运行已完成账号。";
+        }
         return $"计划 {id:D}：{receipt?.State.ToString() ?? "回执不可用"}；可按编号查回。";
+    }
+
+    internal void SetPersistentPlanCompletion(Guid id, ExecutionPlanReceipt? receipt)
+    {
+        var failed = SafePreflightFailure(receipt);
+        StatusPlanItem = failed?.Item;
+        var action = failed?.Result?.PreflightIssue switch
+        {
+            ExecutionPlanPreflightIssue.CleanupPending => PendingRunAction,
+            ExecutionPlanPreflightIssue.ConfigurationRestorePending => HomeStatusAction.RestoreConfiguration,
+            ExecutionPlanPreflightIssue.UnsavedConfiguration => HomeStatusAction.ApplyConfiguration,
+            ExecutionPlanPreflightIssue.EngineNotReady => HomeStatusAction.ConfigureEngines,
+            ExecutionPlanPreflightIssue.AccountChanged => failed.Item.Game switch { GameId.StarRail => HomeStatusAction.SelectStarRailAccounts, GameId.Genshin => HomeStatusAction.SelectGenshinAccounts, _ => HomeStatusAction.SelectZenlessAccounts },
+            ExecutionPlanPreflightIssue.TasksChanged or ExecutionPlanPreflightIssue.ResourcesChanged or ExecutionPlanPreflightIssue.ConfigurationVersionChanged => HomeStatusAction.ReviewPlanConfiguration,
+            ExecutionPlanPreflightIssue.Unspecified => HomeStatusAction.ExportDiagnostics,
+            ExecutionPlanPreflightIssue.SessionBlocked => HomeStatusAction.ReviewRuns,
+            _ => HomeStatusAction.None,
+        };
+        SetBatchStatus(PersistentPlanCompletionText(id, receipt), action);
+        ShowStatus(BatchStatus, action);
     }
 
     // Called while the existing home operation gate is held. Local daily execution does not depend on AI opt-in.
@@ -164,7 +215,7 @@ public sealed partial class MainViewModel
             BatchStatus = $"计划 {plan.PlanId:D} 已保存，按已勾选账号顺序执行。";
             await _persistentPlans.WhenIdleAsync();
             var receipt = await Accounts.Database.ReadAsync(plan.PlanId);
-            BatchStatus = PersistentPlanCompletionText(plan.PlanId, receipt);
+            SetPersistentPlanCompletion(plan.PlanId, receipt);
             if (receipt is null || receipt.Items.Any(x => x.Result is { } result &&
                     (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
                 BlockPersistentPlans($"计划 {plan.PlanId:D} 的清理或配置恢复未确认。");
@@ -209,7 +260,7 @@ public sealed partial class MainViewModel
         {
             await _persistentPlans!.WhenIdleAsync();
             var receipt = await Accounts.Database.ReadAsync(id);
-            BatchStatus = PersistentPlanCompletionText(id, receipt);
+            SetPersistentPlanCompletion(id, receipt);
             if (receipt is null || receipt.Items.Any(x => x.Result is { } result &&
                     (result.Cleanup == CleanupState.Unconfirmed || !result.ConfigurationRestored)))
                 BlockPersistentPlans($"计划 {id:D} 的清理或配置恢复未确认。");

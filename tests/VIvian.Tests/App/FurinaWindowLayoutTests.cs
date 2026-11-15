@@ -163,6 +163,26 @@ public sealed class FurinaWindowLayoutTests
         typeof(MainViewModel).GetMethod("Busy", hidden)!.Invoke(vm, [true]); FlushBindings();
         Assert.False(recheck.IsEnabled);
         typeof(MainViewModel).GetMethod("Busy", hidden)!.Invoke(vm, [false]);
+        var planItem = new ExecutionPlanItem(0, GameId.StarRail, Guid.NewGuid(), "DEMO 受影响账号", "routine", "version", 1, "saved", "DEMO");
+        var plan = new PreparedExecutionPlan(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(5), [planItem]);
+        var failed = new ExecutionPlanItemReceipt(planItem, Guid.NewGuid(), ExecutionPlanItemState.Failed, [],
+            new(RunOutcome.Failed, CleanupState.NotRequired, true, ReasonCodes.PreflightError) { PreflightIssue = ExecutionPlanPreflightIssue.ResourcesChanged });
+        var receipt = new ExecutionPlanReceipt(plan, "synthetic", ExecutionPlanState.Stopped, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [failed], ReasonCodes.PreflightError);
+        vm.SetPersistentPlanCompletion(plan.PlanId, receipt); FlushBindings();
+        Assert.Equal(HomeStatusAction.ReviewPlanConfiguration, vm.StatusAction);
+        Assert.Contains("DEMO 受影响账号", vm.Status); Assert.Contains("资源使用规则", vm.Status);
+        main.RunStatusActionAsync().GetAwaiter().GetResult();
+        Assert.Equal(1, ((TabControl)main.FindName("Navigation")).SelectedIndex);
+        Assert.Equal(0, ((TabControl)main.FindName("GameTabs")).SelectedIndex);
+        foreach (var (game, index) in new[] { (GameId.Genshin, 1), (GameId.ZenlessZoneZero, 2) })
+        {
+            var gameItem = planItem with { Game = game };
+            var gameReceipt = receipt with { Items = [failed with { Item = gameItem }] };
+            vm.SetPersistentPlanCompletion(plan.PlanId, gameReceipt); FlushBindings();
+            main.RunStatusActionAsync().GetAwaiter().GetResult();
+            Assert.Equal(index, ((TabControl)main.FindName("GameTabs")).SelectedIndex);
+        }
+        ((TabControl)main.FindName("Navigation")).SelectedItem = main.FindName("HomeTab");
         vm.ShowStatus("就绪 · DEMO 状态入口检查完成"); FlushBindings();
         SynchronizationContext.SetSynchronizationContext(previousContext);
     }

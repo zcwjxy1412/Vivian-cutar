@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
@@ -101,7 +101,7 @@ public sealed partial class LocalDatabase : IExecutionPlanStore
         ChangePlanAsync(planId, receipt =>
         {
             ArgumentNullException.ThrowIfNull(result);
-            if (!Enum.IsDefined(result.Outcome) || !Enum.IsDefined(result.Cleanup) || string.IsNullOrWhiteSpace(result.ReasonCode))
+            if (!Enum.IsDefined(result.Outcome) || !Enum.IsDefined(result.Cleanup) || !Enum.IsDefined(result.PreflightIssue) || string.IsNullOrWhiteSpace(result.ReasonCode))
                 throw new ArgumentException("运行结果无效。", nameof(result));
             RequireRunning(receipt); var item = GetItem(receipt, ordinal);
             if (item.State != ExecutionPlanItemState.Running) throw new InvalidOperationException("项目不在运行中。");
@@ -192,7 +192,7 @@ public sealed partial class LocalDatabase : IExecutionPlanStore
                 var terminal = row.State is ExecutionPlanItemState.Succeeded or ExecutionPlanItemState.Failed or
                     ExecutionPlanItemState.Cancelled or ExecutionPlanItemState.Blocked or ExecutionPlanItemState.Interrupted;
                 if (terminal != (row.Result is not null) || row.Result is { } result &&
-                    (!Enum.IsDefined(result.Outcome) || !Enum.IsDefined(result.Cleanup) || string.IsNullOrWhiteSpace(result.ReasonCode)) ||
+                    (!Enum.IsDefined(result.Outcome) || !Enum.IsDefined(result.Cleanup) || !Enum.IsDefined(result.PreflightIssue) || string.IsNullOrWhiteSpace(result.ReasonCode)) ||
                     row.State == ExecutionPlanItemState.Succeeded && (row.Result?.AllowsNext != true || row.RunIds.Count == 0))
                     throw new InvalidDataException("计划结果结构损坏。");
             }

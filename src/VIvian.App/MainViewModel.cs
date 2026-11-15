@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
@@ -77,7 +77,12 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         HomeStatusAction.RestoreConfiguration => "恢复临时配置",
         HomeStatusAction.ReviewRuns => Queue.HasUnresolved ? "核对待清理记录" : "查看运行日志",
         HomeStatusAction.SelectAccounts or HomeStatusAction.SelectGenshinAccounts or HomeStatusAction.SelectStarRailAccounts or HomeStatusAction.SelectZenlessAccounts => "前往账号管理",
-        HomeStatusAction.ConfigureBetterGi => "前往设置 BetterGI 路径",
+        HomeStatusAction.ConfigureBetterGi or HomeStatusAction.RepairEnginePaths => "修复安装路径",
+        HomeStatusAction.ConfigureEngines => "选择安装目录",
+        HomeStatusAction.ReloadSettings => "重载最新配置",
+        HomeStatusAction.ApplyConfiguration => "保存待应用配置",
+        HomeStatusAction.ConfirmCleanup => "确认并解除清理阻塞",
+        HomeStatusAction.ExportDiagnostics => "生成诊断报告",
         _ => "",
     };
 
@@ -142,6 +147,12 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
     public AsyncCommand CheckCommand { get; }
     public AsyncCommand InspectMarch7thCommand { get; }
     public AsyncCommand CheckEnginesCommand { get; }
+    public AsyncCommand RepairEnginePathsCommand { get; }
+    public AsyncCommand RepairBetterGiPathCommand { get; }
+    public AsyncCommand ReloadSettingsCommand { get; }
+    public AsyncCommand ApplyConfigurationCommand { get; }
+    public AsyncCommand DiagnoseStatusCommand { get; }
+    public AsyncCommand ConfirmCleanupCommand { get; }
     public AsyncCommand VerifyReleaseCommand { get; }
     public AsyncCommand SavePreferencesCommand { get; }
     public AsyncCommand ExportDiagnosticsCommand { get; }
@@ -187,7 +198,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
     }
 
     private HomeStatusAction PendingRunAction => Queue.Unresolved.Any(run => run.Game == GameId.Genshin && !run.IsSimulation)
-        ? HomeStatusAction.RecoverDesktop : HomeStatusAction.ReviewRuns;
+        ? HomeStatusAction.RecoverDesktop : HomeStatusAction.ConfirmCleanup;
 
     private bool ShowPendingBatchRecovery()
     {
@@ -345,7 +356,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         }
         if (Queue.HasUnresolved)
         {
-            ShowStatus("请在运行日志中核对待清理的进程。", HomeStatusAction.ReviewRuns);
+            ShowStatus("上次运行仍有清理记录待确认；请先关闭对应游戏与引擎。", PendingRunAction);
             return;
         }
         using var desktop = DesktopOperationLease.Acquire(_paths.DataDirectory, recovery: true);
@@ -484,6 +495,17 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         CheckCommand = new(CheckFoundationAsync, HandleError);
         InspectMarch7thCommand = new(() => RunAsync(() => InspectAsync(Engines.Single(e => e.Id == GameId.StarRail))), HandleError);
         CheckEnginesCommand = new(() => RunAsync(CheckEnginesCoreAsync), HandleError);
+        RepairEnginePathsCommand = new(() => RunAsync(() => RepairEnginePathsAsync()), HandleError);
+        RepairBetterGiPathCommand = new(() => RunAsync(() => RepairEnginePathsAsync(GameId.Genshin)), HandleError);
+        ReloadSettingsCommand = new(() => RunAsync(ReloadEngineSettingsAsync), HandleError);
+        ApplyConfigurationCommand = new(() => RunAsync(async () => {
+            await Configuration.SaveCommand.ExecuteAsync();
+            ShowStatus(Configuration.Status, Configuration.PendingCount > 0 ? HomeStatusAction.ApplyConfiguration : HomeStatusAction.None);
+        }), HandleError);
+        DiagnoseStatusCommand = new(() => RunAsync(async () => {
+            await ExportDiagnosticsAsync(); ShowStatus(ExportStatus, HomeStatusAction.ExportDiagnostics);
+        }), HandleError);
+        ConfirmCleanupCommand = new(() => RunAsync(ConfirmHomeCleanupAsync), HandleError);
         VerifyReleaseCommand = new(() => RunAsync(VerifyReleaseAsync), HandleError);
         SavePreferencesCommand = new(() => RunAsync(SavePreferencesAsync), HandleError);
         ExportDiagnosticsCommand = new(() => RunAsync(ExportDiagnosticsAsync), HandleError);
@@ -601,7 +623,10 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
     private async Task CheckEnginesCoreAsync()
     {
         foreach (var card in Engines) await InspectAsync(card);
-        Status = "已只读检查三个引擎目录；没有运行任何程序，也没有修改任何文件。";
+        var failed = Engines.Where(c => c.Report?.Checks.Any(x => x.State == CheckState.Failed) == true).ToArray();
+        ShowStatus(failed.Length == 0 ? "引擎检查完成；未启动游戏。" :
+            "引擎检查未通过：" + string.Join("；", failed.Select(c => c.Name + "：" + c.Evidence)),
+            failed.Length == 0 ? HomeStatusAction.None : HomeStatusAction.RepairEnginePaths);
     }
 
     private async Task InspectAsync(EngineCard card)
@@ -821,11 +846,11 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
         var allowTemporary = AllowTemporaryConfigurationThisRun;
         // Edits made on the Star Rail page must be in the upstream file before the engine reads it.
         if (Configuration.PendingCount > 0 && !Configuration.TryApplyPending(interactive: true, desktop))
-        { Status = $"还有 {Configuration.PendingCount} 项配置修改没写入星铁助手（{Configuration.Status}）。任务未启动。"; return; }
+        { ShowStatus($"还有 {Configuration.PendingCount} 项配置修改没写入星铁助手（{Configuration.Status}）。任务未启动。", HomeStatusAction.ApplyConfiguration); return; }
         if (RealExecutionPolicy.IsM5DailyTest)
         {
             if (_control.HasPendingConfigurationRestore)
-            { Status = "上一次运行的临时配置尚未恢复；请先点击“恢复临时配置”。任务未启动。"; return; }
+            { ShowStatus("上一次运行的临时配置尚未恢复，任务未启动。", HomeStatusAction.RestoreConfiguration); return; }
             IReadOnlyList<TemporaryChange> changes;
             try { changes = _control.RequiredTemporaryChanges(card.InstallPath, March7thTask.Id); }
             catch (Exception ex) { Status = "上游配置检查失败，任务未启动：" + ex.Message; return; }
@@ -1201,7 +1226,7 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
     public void ReportReconciled(int count)
     {
         if (count > 0)
-            ShowStatus($"上次 VIvian 意外退出，{count} 条运行已标记为结果未知。", HomeStatusAction.ReviewRuns);
+            ShowStatus($"上次 furina 意外退出，{count} 条运行已标记为结果未知，请核对清理。", PendingRunAction);
     }
 
     internal void ReportGenshinRewardActivation(string message) => Status = BatchStatus = message;
@@ -1453,14 +1478,14 @@ public sealed partial class MainViewModel : ObservableObject, IExecutionPlanServ
     private void HandleError(Exception ex)
     {
         ShowStatus(ex is DesktopRecoveryRequiredException ? ex.Message : UserFacingError.Describe(ex),
-            ex is DesktopRecoveryRequiredException ? HomeStatusAction.RecoverDesktop : HomeStatusAction.None);
+            RecoveryActionFor(ex));
         Log.Warning("Operation failed: {ErrorType}", ex.GetType().Name);
     }
 }
 
 internal enum HomeStatusAction
 {
-    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, SelectZenlessAccounts, ConfigureBetterGi,
+    None, RecoverDesktop, RestoreConfiguration, ReviewRuns, SelectAccounts, SelectGenshinAccounts, SelectStarRailAccounts, SelectZenlessAccounts, ConfigureBetterGi, RepairEnginePaths, ConfigureEngines, ReloadSettings, ApplyConfiguration, ConfirmCleanup, ExportDiagnostics,
 }
 
 /// <summary>Turns exceptions into actionable Chinese messages. Never shows stack traces or file contents.</summary>

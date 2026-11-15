@@ -1,4 +1,4 @@
-using System.Runtime.ExceptionServices;
+﻿using System.Runtime.ExceptionServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Markup;
@@ -40,6 +40,12 @@ public sealed class FurinaWindowLayoutTests
         SynchronizationContext.SetSynchronizationContext(new System.Windows.Threading.DispatcherSynchronizationContext());
         const System.Reflection.BindingFlags hidden = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
         var message = (Button)main.FindName("StatusMessageButton");
+        Assert.Equal(ScrollBarVisibility.Hidden, ((ScrollViewer)main.FindName("HomeContentScroll")).VerticalScrollBarVisibility);
+        Assert.Equal(ScrollBarVisibility.Hidden, ((ScrollViewer)main.FindName("HomeControlsScroll")).VerticalScrollBarVisibility);
+        Assert.Equal(HomeStatusAction.ReloadSettings, MainViewModel.RecoveryActionFor(new SettingsConflictException()));
+        Assert.Equal(HomeStatusAction.ExportDiagnostics, MainViewModel.RecoveryActionFor(new IOException("disk")));
+        Assert.Equal(HomeStatusAction.ExportDiagnostics, MainViewModel.RecoveryActionFor(new Exception("unknown")));
+        Assert.Equal(HomeStatusAction.ExportDiagnostics, MainViewModel.RecoveryActionFor(new ArgumentOutOfRangeException("not a path")));
         var recheck = (Button)main.FindName("RecheckStatusButton");
         Assert.True(ToolTipService.GetShowOnDisabled(recheck));
         ((FrameworkElement)main.Content).Measure(new Size(1600, 900));
@@ -51,7 +57,13 @@ public sealed class FurinaWindowLayoutTests
         foreach (var (name, action, check) in new[] {
             ("RecoverDesktopCommand", HomeStatusAction.RecoverDesktop, false),
             ("RestoreConfigurationCommand", HomeStatusAction.RestoreConfiguration, false),
-            ("CheckEnginesCommand", HomeStatusAction.None, true) })
+            ("CheckEnginesCommand", HomeStatusAction.None, true),
+            ("RepairEnginePathsCommand", HomeStatusAction.RepairEnginePaths, false),
+            ("RepairBetterGiPathCommand", HomeStatusAction.ConfigureBetterGi, false),
+            ("ReloadSettingsCommand", HomeStatusAction.ReloadSettings, false),
+            ("ApplyConfigurationCommand", HomeStatusAction.ApplyConfiguration, false),
+            ("DiagnoseStatusCommand", HomeStatusAction.ExportDiagnostics, false),
+            ("ConfirmCleanupCommand", HomeStatusAction.ConfirmCleanup, false) })
         {
             var field = typeof(MainViewModel).GetField("<" + name + ">k__BackingField", hidden)!;
             var original = field.GetValue(vm);
@@ -111,6 +123,20 @@ public sealed class FurinaWindowLayoutTests
             }
         }
         finally { File.Delete(recovery); }
+        var engine = vm.Engines.Single(x => x.Id == GameId.Genshin);
+        var priorPath = engine.InstallPath;
+        var priorSavedPath = engine.SavedInstallPath;
+        var rejectedFolder = Path.Combine(fixture, "invalid-engine");
+        Directory.CreateDirectory(rejectedFolder);
+        File.WriteAllText(Path.Combine(rejectedFolder, "BetterGI.exe"), "invalid executable");
+        var repair = vm.RepairEnginePathAsync(engine, () => rejectedFolder);
+        var repairDeadline = DateTime.UtcNow.AddSeconds(10);
+        while (!repair.IsCompleted && DateTime.UtcNow < repairDeadline) { FlushBindings(); Thread.Sleep(1); }
+        Assert.True(repair.IsCompleted); repair.GetAwaiter().GetResult();
+        Assert.Equal(priorPath, engine.InstallPath);
+        Assert.Equal(priorSavedPath, engine.SavedInstallPath);
+        Assert.Equal(HomeStatusAction.ConfigureEngines, vm.StatusAction);
+        Assert.Contains("未通过", vm.Status);
         Render((FrameworkElement)main.Content, 1600, 900, Path.Combine(output, "status-recovery-blocked.png"));
         vm.ShowStatus("DEMO 待清理", HomeStatusAction.ReviewRuns);
         Assert.Equal("查看运行日志", vm.StatusActionText);

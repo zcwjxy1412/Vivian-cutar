@@ -1,4 +1,4 @@
-<Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+﻿<Window x:Class="VIvian.App.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 xmlns:local="clr-namespace:VIvian.App" xmlns:core="clr-namespace:VIvian.Core;assembly=VIvian.Core" xmlns:gif="https://github.com/XamlAnimatedGif/XamlAnimatedGif"
 Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width="1600" Height="900" MinWidth="960" MinHeight="500" Background="{StaticResource Furina.StageBrush}" Foreground="{StaticResource Text}" FontFamily="Microsoft YaHei UI" FontSize="14" WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" RenderOptions.BitmapScalingMode="HighQuality">
 <Window.Resources>
@@ -41,6 +41,13 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 </Style.Triggers>
 </Style>
 <Style x:Key="Notice" TargetType="Border"><Setter Property="Background" Value="{StaticResource WarnBack}"/><Setter Property="CornerRadius" Value="12"/><Setter Property="Padding" Value="16,12"/><Setter Property="Margin" Value="0,0,0,14"/></Style>
+<Style x:Key="HomeRecoveryAction" TargetType="Button">
+<Setter Property="Foreground" Value="{StaticResource Navy}"/><Setter Property="FontSize" Value="12"/><Setter Property="FontWeight" Value="SemiBold"/>
+<Setter Property="Padding" Value="12,5"/><Setter Property="Cursor" Value="Hand"/><Setter Property="MinHeight" Value="28"/>
+<Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+<Border x:Name="Shell" CornerRadius="12" BorderThickness="1" BorderBrush="#BBA777" Background="#EDF2FF" Padding="{TemplateBinding Padding}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+<ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Shell" Property="Background" Value="#DBE6FF"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Shell" Property="BorderBrush" Value="{StaticResource Navy}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55"/></Trigger></ControlTemplate.Triggers>
+</ControlTemplate></Setter.Value></Setter></Style>
 <Style x:Key="Page" TargetType="ScrollViewer"><Setter Property="Background" Value="Transparent"/><Setter Property="VerticalScrollBarVisibility" Value="Auto"/><Setter Property="Padding" Value="24,22,24,20"/></Style>
 <Style TargetType="Hyperlink"><Setter Property="Foreground" Value="{StaticResource Sakura}"/></Style>
 <!-- Navy ribbon heading with gold trim, as in the reference design. -->
@@ -136,7 +143,7 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 <Border DockPanel.Dock="Bottom" Margin="14,12,14,4" Padding="12,10" CornerRadius="12" Background="#2E4AA8" BorderBrush="{StaticResource Gold}" BorderThickness="1">
 <Border.Style><Style TargetType="Border"><Style.Triggers><DataTrigger Binding="{Binding IsCompactLayout, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="Visibility" Value="Collapsed"/></DataTrigger></Style.Triggers></Style></Border.Style>
 <TextBlock Text="{Binding ExecutionBanner}" Foreground="White" FontSize="12" LineHeight="18" TextWrapping="Wrap"/></Border>
-<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><TabPanel IsItemsHost="True" Background="Transparent" KeyboardNavigation.TabIndex="1"/></ScrollViewer></DockPanel></Border>
+<ScrollViewer VerticalScrollBarVisibility="Hidden" HorizontalScrollBarVisibility="Disabled"><TabPanel IsItemsHost="True" Background="Transparent" KeyboardNavigation.TabIndex="1"/></ScrollViewer></DockPanel></Border>
 <Border Grid.Column="1" CornerRadius="22" BorderThickness="1.5">
 <Border.Style><Style TargetType="Border"><Setter Property="Background" Value="#DCEAFF"/><Setter Property="BorderBrush" Value="#D7BC79"/><Setter Property="Margin" Value="14,4,14,10"/>
 <Style.Triggers><DataTrigger Binding="{Binding SelectedIndex, RelativeSource={RelativeSource TemplatedParent}}" Value="0"><Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Margin" Value="0"/><Setter Property="BorderThickness" Value="0"/></DataTrigger></Style.Triggers></Style></Border.Style>
@@ -154,7 +161,7 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 <Button.Template><ControlTemplate TargetType="Button"><Border Background="Transparent"><ContentPresenter/></Border></ControlTemplate></Button.Template>
 <ContentPresenter Content="{Binding CharacterArt}" ContentTemplate="{StaticResource Art}" Width="{DynamicResource Furina.CharacterArtWidth}" Height="{DynamicResource Furina.CharacterArtHeight}" Margin="-50,0,-50,0" IsHitTestVisible="False"/></Button>
 
-<ScrollViewer x:Name="HomeContentScroll" Grid.Column="1" VerticalScrollBarVisibility="Auto" Padding="4,6,10,4"><StackPanel>
+<ScrollViewer x:Name="HomeContentScroll" Grid.Column="1" VerticalScrollBarVisibility="Hidden" Padding="4,6,10,4"><StackPanel>
 <!-- Blocked by an unconfirmed cleanup: say so where the user is, with the way out. -->
 <Border Background="{StaticResource DangerBack}" BorderBrush="{StaticResource Danger}" BorderThickness="1.5" CornerRadius="16" Padding="14,10" Margin="0,0,0,14">
 <Border.Style><Style TargetType="Border"><Setter Property="Visibility" Value="Collapsed"/><Style.Triggers><DataTrigger Binding="{Binding Queue.HasUnresolved}" Value="True"><Setter Property="Visibility" Value="Visible"/></DataTrigger></Style.Triggers></Style></Border.Style>
@@ -219,7 +226,7 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 </StackPanel></ScrollViewer>
 
 <!-- Right column: automation control + system status -->
-<ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto" Padding="0,6,0,10"><StackPanel>
+<ScrollViewer x:Name="HomeControlsScroll" Grid.Column="2" VerticalScrollBarVisibility="Hidden" Padding="0,6,0,10"><StackPanel>
 <local:FurinaPanel CornerArt="{Binding Theme.WaterCorner}" Style="{StaticResource Panel}" Padding="14,10"><StackPanel>
 <local:FurinaPlaque Style="{StaticResource Ribbon}"><StackPanel Orientation="Horizontal"><TextBlock Text="&#xE945;" Style="{StaticResource Icon}" Foreground="{StaticResource GoldText}" FontSize="16" Margin="0,0,10,0"/><TextBlock Text="自动化控制" Style="{StaticResource RibbonText}"/></StackPanel></local:FurinaPlaque>
 <Button x:Name="DailyRunButton" Background="{StaticResource Dream}" Command="{Binding OneClickCommand}" IsEnabled="{Binding CanOperateWorkspace}" HorizontalAlignment="Center" Margin="0,0,0,6" Cursor="Hand" AutomationProperties.Name="一键日常">
@@ -269,16 +276,14 @@ Icon="{x:Static local:FurinaAppIcon.Image}" Title="{Binding Theme.Title}" Width=
 <DataTrigger Binding="{Binding CanOperateWorkspace}" Value="False"><Setter Property="IsEnabled" Value="False"/></DataTrigger>
 <DataTrigger Binding="{Binding IsStatusActionRunning, RelativeSource={RelativeSource AncestorType=Window}}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger>
 </Style.Triggers></Style></StackPanel.Style>
+<DockPanel LastChildFill="True">
+<Button x:Name="StatusActionButton" DockPanel.Dock="Right" Content="{Binding StatusActionText}" Click="OpenStatusAction" Style="{StaticResource HomeRecoveryAction}" Visibility="{Binding HasStatusAction, Converter={StaticResource Visible}}" VerticalAlignment="Center" Margin="12,0,0,0"/>
+<Button x:Name="RecheckStatusButton" DockPanel.Dock="Right" Content="检查状态" Click="RecheckStatus" ToolTip="只读检查引擎，不启动游戏。" ToolTipService.ShowOnDisabled="True" Margin="12,0,0,0" VerticalAlignment="Center"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource HomeRecoveryAction}"><Style.Triggers><DataTrigger Binding="{Binding HasStatusAction}" Value="True"><Setter Property="Visibility" Value="Collapsed"/><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
 <Button x:Name="StatusMessageButton" Click="OpenStatusAction" IsEnabled="{Binding HasStatusAction}" HorizontalContentAlignment="Left" ToolTip="{Binding StatusActionText}" AutomationProperties.Name="{Binding Status}">
 <Button.Style><Style TargetType="Button"><Setter Property="Cursor" Value="Hand"/><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="Outline" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" Padding="1"><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Outline" Property="BorderBrush" Value="{StaticResource Navy}"/></Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Cursor" Value="Arrow"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style></Button.Style>
 <TextBlock Text="{Binding Status}" FontSize="13" TextWrapping="Wrap" MaxHeight="60" TextTrimming="CharacterEllipsis" ToolTip="{Binding Status}" AutomationProperties.LiveSetting="Polite"/>
 </Button>
-<WrapPanel>
-<Button x:Name="StatusActionButton" Content="{Binding StatusActionText}" Click="OpenStatusAction"
-        Visibility="{Binding HasStatusAction, Converter={StaticResource Visible}}"
-        HorizontalAlignment="Left" Margin="0,5,8,0" Padding="10,4"/>
-<Button x:Name="RecheckStatusButton" Content="重新检查（只读）" Click="RecheckStatus" ToolTip="重新核验已填写的引擎目录；不会启动游戏、确认清理或自动重试日常。先处理当前提示，再重新检查。" ToolTipService.ShowOnDisabled="True" Margin="0,5,0,0" Padding="10,4"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding HasStatusAction}" Value="True"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
-</WrapPanel>
+</DockPanel>
 </StackPanel></DockPanel></Border>
 </Grid></TabItem>
 

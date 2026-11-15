@@ -1,4 +1,4 @@
-using System.Windows.Threading;
+﻿using System.Windows.Threading;
 using VIvian.Core;
 using VIvian.Core.Accounts;
 using VIvian.Core.Engines;
@@ -138,13 +138,20 @@ public sealed partial class MainViewModel
     // Called while the existing home operation gate is held. Local daily execution does not depend on AI opt-in.
     private async Task<int?> RunPersistentHomePlanAsync(IReadOnlyList<GameAccount> selected)
     {
-        if (!PersistentPlanReady) { BatchStatus = "请先保存配置并完成待处理的清理。"; return null; }
+        if (!PersistentPlanReady)
+        {
+            if (ShowPendingBatchRecovery()) return null;
+            if (Configuration.PendingCount > 0)
+            { SetBatchStatus("星铁还有未保存的任务配置，请先应用修改。", HomeStatusAction.ApplyConfiguration); return null; }
+            SetBatchStatus("当前运行条件未就绪，请检查引擎与配置；如本次会话发生过执行异常，请核对运行记录后重新打开程序。", HomeStatusAction.ReviewRuns);
+            return null;
+        }
         await Accounts.SaveSelectionsAsync(CancellationToken.None);
         var items = new List<ExecutionPlanItem>();
         foreach (var account in selected)
         {
             var card = Engines.Single(x => x.Id == account.Game);
-            if (!card.CanRunForReal) { BatchStatus = $"{card.Name}尚未通过运行检查。"; return null; }
+            if (!card.CanRunForReal) { SetBatchStatus($"{card.Name}尚未通过运行检查：{card.Evidence}", HomeStatusAction.RepairEnginePaths); return null; }
             items.Add(await _planReader.ReadAsync(new(account.Game, account.Id), items.Count, card.InstallPath, CancellationToken.None));
         }
         var plan = new PreparedExecutionPlan(Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(5), items.ToArray());

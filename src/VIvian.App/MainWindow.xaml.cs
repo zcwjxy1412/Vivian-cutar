@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 namespace VIvian.App;
 public partial class MainWindow : Window
 {
@@ -194,6 +194,12 @@ public partial class MainWindow : Window
         {
             HomeStatusAction.RecoverDesktop => vm.RecoverDesktopCommand,
             HomeStatusAction.RestoreConfiguration => vm.RestoreConfigurationCommand,
+            HomeStatusAction.ConfigureBetterGi => vm.RepairBetterGiPathCommand,
+            HomeStatusAction.RepairEnginePaths => vm.RepairEnginePathsCommand,
+            HomeStatusAction.ReloadSettings => vm.ReloadSettingsCommand,
+            HomeStatusAction.ApplyConfiguration => vm.ApplyConfigurationCommand,
+            HomeStatusAction.ConfirmCleanup => vm.ConfirmCleanupCommand,
+            HomeStatusAction.ExportDiagnostics => vm.DiagnoseStatusCommand,
             _ => null,
         };
         if (command is not null)
@@ -242,12 +248,10 @@ public partial class MainWindow : Window
                     _ => vm.Accounts.ZenlessRows.Count > 0 ? ZenlessAccountList : ImportZenlessScreenshotButton,
                 };
                 break;
-            case HomeStatusAction.ConfigureBetterGi:
+            case HomeStatusAction.ConfigureEngines:
                 Navigation.SelectedItem = EngineEnvironmentTab;
                 UpdateLayout();
-                var engine = vm.Engines.Single(card => card.Id == VIvian.Core.GameId.Genshin);
-                var card = EngineSettingsList.ItemContainerGenerator.ContainerFromItem(engine) as System.Windows.Controls.ContentPresenter;
-                target = card?.ContentTemplate?.FindName("BrowseEngineFolderButton", card) as FrameworkElement ?? EngineSettingsList;
+                target = EngineSettingsList;
                 break;
             default:
                 return;

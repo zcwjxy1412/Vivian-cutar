@@ -222,6 +222,11 @@ public sealed class MultiAccountOrchestratorTests
         Assert.False(outcome.Completed);
         Assert.False(ran);
         Assert.Empty(driver.Switches);
+        Assert.Equal(RunOutcome.Failed, outcome.Outcome);
+        Assert.True(outcome.EngineCleanupConfirmed);
+        Assert.True(outcome.ConfigurationRestored);
+        Assert.False(outcome.GameCleanupConfirmed); // The outer owner must still stop and verify its client.
+        Assert.Equal(0, driver.Stops);
         var batch = Assert.Single(await fixture.Database.LoadRecentBatchesAsync());
         Assert.Equal("failed", batch.State);
         Assert.Contains("登录界面", batch.Detail, StringComparison.Ordinal);

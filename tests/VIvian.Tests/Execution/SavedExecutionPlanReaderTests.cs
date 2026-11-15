@@ -20,7 +20,19 @@ public sealed class SavedExecutionPlanReaderTests : IDisposable
     [InlineData("invalid_timestamp")]
     [InlineData("quoted_timestamp")]
     [InlineData("missing_timestamp")]
-    public async Task StarRailSecondChildIgnoresCompletionTimestampButRejectsResourceChanges(string change)
+    [InlineData("empty_map")]
+    [InlineData("empty_list")]
+    [InlineData("nonempty_tasks")]
+    [InlineData("nonempty_tasks_cleared")]
+    [InlineData("duplicate_tasks")]
+    [InlineData("quoted_duplicate_tasks")]
+    [InlineData("quoted_tasks_scalar")]
+    [InlineData("unknown_empty_format")]
+    [InlineData("empty_map_and_fuel")]
+    [InlineData("empty_map_crlf")]
+    [InlineData("nonempty_list")]
+    [InlineData("empty_map_changed_comment")]
+    public async Task StarRailSecondChildAcceptsEquivalentProgressButRejectsOtherConfigurationChanges(string change)
     {
         Directory.CreateDirectory(Path.Combine(_root, "assets", "config"));
         await File.WriteAllTextAsync(Path.Combine(_root, "assets", "config", "version.txt"), "v2026.10.31\n");
@@ -28,6 +40,12 @@ public sealed class SavedExecutionPlanReaderTests : IDisposable
         var initial = "use_fuel: false\nuse_reserved_trailblaze_power: false\nbreak_down_level_four_relicset: false\nlast_run_timestamp: 0 # upstream completion\n";
         if (change == "quoted_timestamp") initial = initial.Replace("timestamp: 0", "timestamp: \"0\"");
         if (change == "missing_timestamp") initial = initial[..initial.IndexOf("last_run_timestamp", StringComparison.Ordinal)];
+        initial += "daily_tasks: [] # runtime progress\n";
+        if (change == "empty_list") initial = initial.Replace("daily_tasks: []", "daily_tasks: {}");
+        if (change == "nonempty_tasks_cleared") initial = initial.Replace("daily_tasks: []", "daily_tasks: {quest: true}");
+        if (change == "duplicate_tasks") initial += "daily_tasks: []\n";
+        if (change == "quoted_duplicate_tasks") initial += "\"daily_tasks\": []\n";
+        if (change == "empty_map_crlf") initial = initial.Replace("\n", "\r\n");
         await File.WriteAllTextAsync(config, initial);
         var db = new LocalDatabase(Path.Combine(_root, "daily.db")); await db.InitializeAsync();
         var reader = new SavedExecutionPlanReader(db, new VersionedConfigurationControl());
@@ -64,6 +82,15 @@ public sealed class SavedExecutionPlanReaderTests : IDisposable
                     "invalid_timestamp" => next.Replace("1794666702.4456193", "not-a-timestamp"),
                     "quoted_timestamp" => next.Replace("timestamp: \"0\"", "timestamp: \"1794666702.4456193\""),
                     "missing_timestamp" => next + "last_run_timestamp: 1794666702.4456193\n",
+                    "empty_map" or "empty_map_crlf" or "duplicate_tasks" or "quoted_duplicate_tasks" => next.Replace("daily_tasks: []", "daily_tasks: {}"),
+                    "empty_list" => next.Replace("daily_tasks: {}", "daily_tasks: []"),
+                    "nonempty_tasks" => next.Replace("daily_tasks: []", "daily_tasks: {quest: true}"),
+                    "nonempty_tasks_cleared" => next.Replace("daily_tasks: {quest: true}", "daily_tasks: {}"),
+                    "quoted_tasks_scalar" => next.Replace("daily_tasks: []", "daily_tasks: '{}'"),
+                    "unknown_empty_format" => next.Replace("daily_tasks: []", "daily_tasks: { }"),
+                    "empty_map_and_fuel" => next.Replace("daily_tasks: []", "daily_tasks: {}").Replace("use_fuel: false", "use_fuel: true"),
+                    "nonempty_list" => next.Replace("daily_tasks: []", "daily_tasks: [quest]"),
+                    "empty_map_changed_comment" => next.Replace("daily_tasks: []", "daily_tasks: {}").Replace("# runtime progress", "# modified"),
                     _ => next,
                 };
                 await File.WriteAllTextAsync(config, next, ct);
@@ -74,9 +101,9 @@ public sealed class SavedExecutionPlanReaderTests : IDisposable
         await coordinator.SubmitAsync(plan);
         await coordinator.WhenIdleAsync();
         var receipt = await db.ReadAsync(plan.PlanId);
-        var timestampOnly = change is "timestamp" or "quoted_timestamp";
-        Assert.Equal(timestampOnly ? 2 : 1, calls);
-        Assert.Equal(timestampOnly ? ExecutionPlanState.Succeeded : ExecutionPlanState.Stopped, receipt!.State);
+        var equivalentProgress = change is "timestamp" or "quoted_timestamp" or "empty_map" or "empty_list" or "empty_map_crlf";
+        Assert.Equal(equivalentProgress ? 2 : 1, calls);
+        Assert.Equal(equivalentProgress ? ExecutionPlanState.Succeeded : ExecutionPlanState.Stopped, receipt!.State);
         Assert.NotEqual(editRevision, (await edits.ReadAsync(target, default)).Revision);
     }
 

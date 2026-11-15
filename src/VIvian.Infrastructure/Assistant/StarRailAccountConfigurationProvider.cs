@@ -103,6 +103,18 @@ public sealed class StarRailAccountConfigurationProvider(LocalDatabase database,
         // unregistered resource settings; configuration-edit proposals still use the original whole-file revision.
         if (location is not null && System.Text.RegularExpressions.Regex.IsMatch(location.Value, @"\A[0-9]+(?:\.[0-9]+)?\z"))
             text = YamlScalarEditor.Replace(text, location, "0");
+        // v2026.10.31 Daily.run writes [], while Daily.lookup can write an empty Tasks dictionary ({}).
+        // Only these exact empty forms under a bare key are equivalent; quoted keys count only to reject duplicates.
+        // Keep nonempty/unknown values and duplicate keys strict.
+        var declarations = System.Text.RegularExpressions.Regex.Matches(text,
+            "(?m)^(?:daily_tasks|'daily_tasks'|\"daily_tasks\")[ \\t]*:");
+        var emptyTasks = System.Text.RegularExpressions.Regex.Match(text,
+            @"(?m)^daily_tasks:[ \t]+(?<empty>\[\]|\{\})(?:[ \t]*|[ \t]+#[^\r\n]*)\r?$");
+        if (declarations.Count == 1 && emptyTasks.Success)
+        {
+            var value = emptyTasks.Groups["empty"];
+            text = text[..value.Index] + "[]" + text[(value.Index + value.Length)..];
+        }
         return snapshot with { Revision = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))) };
     }
 
